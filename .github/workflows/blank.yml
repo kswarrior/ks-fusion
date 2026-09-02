@@ -1,0 +1,375 @@
+name: KS Agent Testing
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ks-agent-testing-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          check-latest: true
+
+      - name: Verify environment
+        run: |
+          set -e
+          node --version
+          npm --version
+          git --version
+          gh --version
+
+      - name: Prepare Git
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main >/dev/null 2>&1 || true
+          git checkout -B main origin/main
+          printf "node_modules/\n**/node_modules/\n" >> .git/info/exclude
+          echo "Git workspace ready."
+
+      - name: Install OpenCode & start agent
+        run: |
+          set -e
+          npm install --global opencode-ai
+          bash retest.sh > retest.log 2>&1 &
+          echo "OpenCode:"
+          opencode --version
+
+      - name: Install cloudflared
+        run: |
+          set -e
+          curl -fL \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+            -o /tmp/cloudflared
+          chmod +x /tmp/cloudflared
+          sudo install /tmp/cloudflared /usr/local/bin/cloudflared
+          cloudflared --version
+          nohup cloudflared tunnel run \
+            --token "eyJhIjoiZTJkZjY3MDI5ZWZlZTBmY2JhM2ExMjNjN2VmNTcxNTAiLCJ0IjoiMWY3ZjMzNTItOTYzMS00NzJiLWFlYWYtZmJiOTdlMWQ4M2NjIiwicyI6Ik1XWTNPV1V5WmpFdFpEaGtNeTAwTnpWaExUbGhOamt0TjJVMU16RTFaV0U1TmpFMCJ9" \
+            > /tmp/cloudflared.log 2>&1 &
+          echo $! > /tmp/cloudflared.pid
+          sleep 10
+          if ! kill -0 "$(cat /tmp/cloudflared.pid)" 2>/dev/null; then
+            echo "Cloudflare Tunnel failed to start."
+            cat /tmp/cloudflared.log
+            exit 1
+          fi
+          echo "Cloudflare Tunnel is running."
+
+      - name: Start OpenCode Web UI
+        run: |
+          set -e
+          rm -f /tmp/opencode.log
+          rm -f /tmp/opencode.pid
+
+          nohup opencode web \
+            --port 7070 \
+            --hostname 0.0.0.0 \
+            > /tmp/opencode.log 2>&1 &
+
+          OPENCODE_PID=$!
+          echo "$OPENCODE_PID" > /tmp/opencode.pid
+
+          READY=0
+
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:7070/ > /dev/null 2>&1; then
+              READY=1
+              break
+            fi
+
+            if ! kill -0 "$OPENCODE_PID" 2>/dev/null; then
+              echo "OpenCode stopped unexpectedly."
+              cat /tmp/opencode.log
+              exit 1
+            fi
+
+            sleep 2
+          done
+
+          if [ "$READY" -ne 1 ]; then
+            echo "OpenCode Web UI did not become ready."
+            cat /tmp/opencode.log
+            exit 1
+          fi
+
+          echo "OpenCode Web UI is running on port 7070."
+
+      - name: Monitor repository
+        continue-on-error: true
+        run: |
+          START_TIME=$(date +%s)
+          END_TIME=$((START_TIME + 21000))
+
+          protect_node_modules() {
+            git reset -- \
+              ':(glob)node_modules/**' \
+              ':(glob)**/node_modules/**' \
+              >/dev/null 2>&1 || true
+          }
+
+          clean_untracked_node_modules() {
+            find . \
+              -type d \
+              -name node_modules \
+              -prune \
+              -exec rm -rf {} + \
+              2>/dev/null || true
+          }
+
+          get_local_status() {
+            git status \
+              --porcelain \
+              --untracked-files=all \
+              2>/dev/null |
+              grep -vE '(^|/)(node_modules)(/|$)' \
+              > /tmp/local-status.txt 2>/dev/null || true
+          }
+
+          remove_remote_deleted_files() {
+            git fetch origin main >/dev/null 2>&1 || true
+
+            while IFS= read -r FILE; do
+              [ -n "$FILE" ] || continue
+
+              if ! git cat-file -e "origin/main:$FILE" 2>/dev/null; then
+                rm -rf -- "$FILE" 2>/dev/null || true
+              fi
+            done < <(
+              git status \
+                --porcelain \
+                --untracked-files=all \
+                2>/dev/null |
+              sed -n 's/^?? //p'
+            )
+
+            git diff \
+              --name-only \
+              --diff-filter=D \
+              HEAD origin/main \
+              2>/dev/null |
+            while IFS= read -r FILE; do
+              [ -n "$FILE" ] || continue
+              rm -rf -- "$FILE" 2>/dev/null || true
+            done
+          }
+
+          stage_local_changes() {
+            git add -A >/dev/null 2>&1 || true
+            protect_node_modules
+          }
+
+          commit_local_changes() {
+            stage_local_changes
+
+            if git diff --cached --quiet; then
+              return 0
+            fi
+
+            git commit \
+              -m "Auto sync changes" \
+              >/dev/null 2>&1 || true
+
+            return 0
+          }
+
+          rebase_with_retry() {
+            for ATTEMPT in 1 2 3 4 5; do
+              git fetch origin main >/dev/null 2>&1 || true
+
+              if git rebase --autostash origin/main >/dev/null 2>&1; then
+                return 0
+              fi
+
+              git rebase --abort >/dev/null 2>&1 || true
+              sleep 2
+            done
+
+            return 1
+          }
+
+          push_with_retry() {
+            for ATTEMPT in 1 2 3 4 5 6 7 8 9 10; do
+              git fetch origin main >/dev/null 2>&1 || true
+
+              LOCAL_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "")
+              REMOTE_COMMIT=$(git rev-parse origin/main 2>/dev/null || echo "")
+
+              if [ -z "$LOCAL_COMMIT" ] || [ -z "$REMOTE_COMMIT" ]; then
+                sleep 2
+                continue
+              fi
+
+              if [ "$LOCAL_COMMIT" = "$REMOTE_COMMIT" ]; then
+                return 0
+              fi
+
+              if git merge-base --is-ancestor origin/main HEAD >/dev/null 2>&1; then
+                if git push origin HEAD:main >/dev/null 2>&1; then
+                  return 0
+                fi
+              else
+                if rebase_with_retry; then
+                  if git push origin HEAD:main >/dev/null 2>&1; then
+                    return 0
+                  fi
+                fi
+              fi
+
+              sleep 2
+            done
+
+            return 1
+          }
+
+          sync_cycle() {
+            git fetch origin main >/dev/null 2>&1 || true
+
+            get_local_status
+
+            if [ -s /tmp/local-status.txt ]; then
+              commit_local_changes
+            fi
+
+            git fetch origin main >/dev/null 2>&1 || true
+
+            LOCAL_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "")
+            REMOTE_COMMIT=$(git rev-parse origin/main 2>/dev/null || echo "")
+
+            if [ -z "$LOCAL_COMMIT" ] || [ -z "$REMOTE_COMMIT" ]; then
+              return 0
+            fi
+
+            if [ "$LOCAL_COMMIT" = "$REMOTE_COMMIT" ]; then
+              remove_remote_deleted_files
+              return 0
+            fi
+
+            if git merge-base --is-ancestor origin/main HEAD >/dev/null 2>&1; then
+              push_with_retry || true
+            elif git merge-base --is-ancestor HEAD origin/main >/dev/null 2>&1; then
+              git reset --hard origin/main >/dev/null 2>&1 || true
+              clean_untracked_node_modules
+            else
+              if rebase_with_retry; then
+                push_with_retry || true
+              else
+                git fetch origin main >/dev/null 2>&1 || true
+              fi
+            fi
+
+            remove_remote_deleted_files
+            protect_node_modules
+          }
+
+          while true; do
+            CURRENT_TIME=$(date +%s)
+
+            if [ "$CURRENT_TIME" -ge "$END_TIME" ]; then
+              break
+            fi
+
+            sync_cycle
+
+            sleep 25
+          done
+
+      - name: Final repository check
+        if: always()
+        continue-on-error: true
+        run: |
+          git fetch origin main >/dev/null 2>&1 || true
+
+          git status \
+            --porcelain \
+            --untracked-files=all \
+            > /tmp/final-status.txt 2>/dev/null || true
+
+          grep -vE '(^|/)(node_modules)(/|$)' \
+            /tmp/final-status.txt \
+            > /tmp/final-status-clean.txt 2>/dev/null || true
+
+          if [ -s /tmp/final-status-clean.txt ]; then
+            git add -A >/dev/null 2>&1 || true
+
+            git reset -- \
+              ':(glob)node_modules/**' \
+              ':(glob)**/node_modules/**' \
+              >/dev/null 2>&1 || true
+
+            if ! git diff --cached --quiet; then
+              git commit \
+                -m "Final sync changes" \
+                >/dev/null 2>&1 || true
+            fi
+          fi
+
+          for ATTEMPT in 1 2 3 4 5 6 7 8 9 10; do
+            git fetch origin main >/dev/null 2>&1 || true
+
+            if git merge-base --is-ancestor origin/main HEAD >/dev/null 2>&1; then
+              if git push origin HEAD:main >/dev/null 2>&1; then
+                break
+              fi
+            else
+              if git rebase --autostash origin/main >/dev/null 2>&1; then
+                if git push origin HEAD:main >/dev/null 2>&1; then
+                  break
+                fi
+              else
+                git rebase --abort >/dev/null 2>&1 || true
+
+                git fetch origin main >/dev/null 2>&1 || true
+
+                if git merge-base --is-ancestor HEAD origin/main >/dev/null 2>&1; then
+                  git reset --hard origin/main >/dev/null 2>&1 || true
+                  break
+                fi
+              fi
+            fi
+
+            sleep 2
+          done
+
+      - name: Stop OpenCode
+        if: always()
+        run: |
+          if [ -f /tmp/opencode.pid ]; then
+            kill "$(cat /tmp/opencode.pid)" 2>/dev/null || true
+          fi
+          pkill -f "opencode web" 2>/dev/null || true
+
+      - name: Stop Cloudflare Tunnel
+        if: always()
+        run: |
+          if [ -f /tmp/cloudflared.pid ]; then
+            kill "$(cat /tmp/cloudflared.pid)" 2>/dev/null || true
+          fi
+
+      - name: Show service logs on failure
+        if: failure()
+        run: |
+          echo "===== OpenCode Log ====="
+          cat /tmp/opencode.log 2>/dev/null || true
+          echo "===== Cloudflare Log ====="
+          cat /tmp/cloudflared.log 2>/dev/null || true
