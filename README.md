@@ -38,7 +38,7 @@ go print "runs together"
 cmd/fusion/          fusion CLI
 internal/frontend/   lexer + parser
 internal/backend/    interpreter (goroutines for `go`)
-examples/hello-app/  sample app
+tests/hello-app/     test app (backend/ frontend/ fusion.toml)
 ```
 
 ## Use
@@ -46,6 +46,7 @@ examples/hello-app/  sample app
 ```bash
 go build -o fusion ./cmd/fusion
 ./fusion new myapp
-./fusion build ./examples/hello-app
-./fusion run ./examples/hello-app
+./fusion build ./tests/hello-app
+./fusion run ./tests/hello-app
+go test ./...
 ```
