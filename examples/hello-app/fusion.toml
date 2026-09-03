@@ -1,0 +1,6 @@
+# App made in ks-fusion
+[package]
+name = "hello-app"
+version = "0.1.0"
+entry_backend = "backend/main.ks"
+entry_frontend = "frontend/main.ks"
