@@ -159,11 +159,8 @@ func ParseExpr(s string) (*Expr, error) {
 	if s == "" {
 		return nil, fmt.Errorf("empty expression")
 	}
-	// string literal
-	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		return &Expr{Kind: ExprString, StrVal: s[1 : len(s)-1]}, nil
-	}
-	// addition outside quotes
+	// addition outside quotes FIRST: otherwise `"a" + "b"` would
+	// look like a single string literal (starts and ends with `"`).
 	if idx := indexPlusOutsideQuotes(s); idx >= 0 {
 		left, err := ParseExpr(strings.TrimSpace(s[:idx]))
 		if err != nil {
@@ -174,6 +171,10 @@ func ParseExpr(s string) (*Expr, error) {
 			return nil, err
 		}
 		return &Expr{Kind: ExprAdd, Left: left, Right: right}, nil
+	}
+	// string literal
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return &Expr{Kind: ExprString, StrVal: s[1 : len(s)-1]}, nil
 	}
 	// int literal
 	if n, err := strconv.Atoi(s); err == nil {
@@ -226,4 +227,19 @@ func indexPlusOutsideQuotes(s string) int {
 		}
 	}
 	return -1
+}
+
+// stripInlineComment cuts a trailing `# comment` outside string literals.
+// `#` inside `"..."` is preserved, e.g. `print "# hi"` keeps the `#`.
+func stripInlineComment(s string) string {
+	inStr := false
+	for i := 0; i < len(s); i++ {
+		if s[i] == '"' {
+			inStr = !inStr
+		}
+		if !inStr && s[i] == '#' {
+			return s[:i]
+		}
+	}
+	return s
 }

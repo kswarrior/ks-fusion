@@ -82,9 +82,9 @@ func (in *Interpreter) exec(st *frontend.Stmt) {
 			in.setErr(fmt.Errorf("line %d: %w", st.Line, err))
 			return
 		}
-		in.mu.Lock()
+		// Print outside the vars lock: fmt is goroutine-safe and we
+		// must not block variable access during I/O.
 		fmt.Println(v.String())
-		in.mu.Unlock()
 	case frontend.StmtSleep:
 		time.Sleep(time.Duration(st.SleepMs) * time.Millisecond)
 	case frontend.StmtGo:
@@ -94,6 +94,8 @@ func (in *Interpreter) exec(st *frontend.Stmt) {
 			defer in.wg.Done()
 			in.exec(inner)
 		}()
+	default:
+		in.setErr(fmt.Errorf("line %d: unknown statement", st.Line))
 	}
 }
 
