@@ -71,7 +71,7 @@ func ParseSource(src, path string) (*Program, error) {
 	lines := strings.Split(src, "\n")
 	for i, raw := range lines {
 		lineNo := i + 1
-		line := strings.TrimSpace(raw)
+		line := strings.TrimSpace(stripInlineComment(raw))
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -132,6 +132,9 @@ func parseLine(line string, lineNo int) (*Stmt, error) {
 			return nil, fmt.Errorf("bad sleep: want `sleep 500` (ms)")
 		}
 		return &Stmt{Kind: StmtSleep, SleepMs: ms, Line: lineNo}, nil
+	}
+	if line == "sleep" {
+		return nil, fmt.Errorf("bad sleep: want `sleep 500` (ms)")
 	}
 	if strings.Contains(line, "=") {
 		name, exprStr, err := splitAssign(line)
