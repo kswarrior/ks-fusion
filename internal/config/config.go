@@ -32,7 +32,7 @@ func Load(appDir string) (*Config, error) {
 		return nil, fmt.Errorf("missing fusion.toml in %s: %w", appDir, err)
 	}
 	for _, raw := range strings.Split(string(data), "\n") {
-		line := strings.TrimSpace(raw)
+		line := strings.TrimSpace(stripInlineComment(raw))
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "[") {
 			continue
 		}
@@ -52,6 +52,12 @@ func Load(appDir string) (*Config, error) {
 		case "entry_frontend", "frontend":
 			c.FrontendEntry = val
 		}
+	}
+	if strings.TrimSpace(c.BackendEntry) == "" {
+		return nil, fmt.Errorf("invalid fusion.toml in %s: entry_backend is empty", appDir)
+	}
+	if strings.TrimSpace(c.FrontendEntry) == "" {
+		return nil, fmt.Errorf("invalid fusion.toml in %s: entry_frontend is empty", appDir)
 	}
 	return c, nil
 }
