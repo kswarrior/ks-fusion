@@ -528,6 +528,31 @@ func (p *parser) expect(k tokKind, what string) (token, error) {
 	return p.next(), nil
 }
 
+// parenWrapsStmt reports whether the `(` at peek opens a group whose
+// matching `)` ends the statement (newline/semi/}/EOF). Used to tell
+// `print(a, b)` apart from `print (a)+b`.
+func (p *parser) parenWrapsStmt() bool {
+	depth := 0
+	for i := 0; ; i++ {
+		t := p.peekAt(i)
+		switch t.K {
+		case tLParen:
+			depth++
+		case tRParen:
+			depth--
+			if depth == 0 {
+				after := p.peekAt(i + 1).K
+				return after == tNewline || after == tSemi || after == tEOF || after == tRBrace
+			}
+		case tEOF:
+			return false
+		}
+		if i > 10000 {
+			return false
+		}
+	}
+}
+
 // parseProgram := { stmt } EOF
 func (p *parser) parseProgram() ([]*Stmt, error) {
 	var out []*Stmt
@@ -980,29 +1005,11 @@ func (p *parser) parseSleep() (*Stmt, error) {
 	if k == tNewline || k == tSemi || k == tEOF || k == tRBrace {
 		return nil, p.errf(p.peek(), "bad sleep: want `sleep 500` (ms)")
 	}
-	var e *Expr
-	if p.peek().K == tLParen {
-		p.next()
-		for p.peek().K == tNewline {
-			p.next()
-		}
-		inner, err := p.parseExpr()
-		if err != nil {
-			return nil, err
-		}
-		for p.peek().K == tNewline {
-			p.next()
-		}
-		if _, err := p.expect(tRParen, "`)`"); err != nil {
-			return nil, err
-		}
-		e = inner
-	} else {
-		inner, err := p.parseExpr()
-		if err != nil {
-			return nil, err
-		}
-		e = inner
+	// Single expression (parens handled by expression parser,
+	// so both `sleep 100` and `sleep(100)` work).
+	e, err := p.parseExpr()
+	if err != nil {
+		return nil, err
 	}
 	out := &Stmt{Kind: StmtSleep, Expr: e, Line: st.Line}
 	if e.Kind == ExprInt {
