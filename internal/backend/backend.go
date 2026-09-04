@@ -1216,8 +1216,21 @@ func addValues(l, r Value) (Value, error) {
 	if isNum(l) && isNum(r) {
 		return FloatV(toFloat(l) + toFloat(r)), nil
 	}
-	// string concat (ints auto-converted) - v0.1 compat
-	return StrV(l.Display() + r.Display()), nil
+	if l.Kind == VString || r.Kind == VString {
+		// string concat (ints auto-converted) - v0.1 compat: "hi " + x
+		return StrV(l.Display() + r.Display()), nil
+	}
+	if l.Kind == VArray && r.Kind == VArray {
+		l.Arr.Mu.RLock()
+		r.Arr.Mu.RLock()
+		out := make([]Value, 0, len(l.Arr.Items)+len(r.Arr.Items))
+		out = append(out, l.Arr.Items...)
+		out = append(out, r.Arr.Items...)
+		l.Arr.Mu.RUnlock()
+		r.Arr.Mu.RUnlock()
+		return ArrV(out), nil
+	}
+	return Nil(), fmt.Errorf("cannot add %s and %s", TypeName(l), TypeName(r))
 }
 
 func subValues(l, r Value) (Value, error) {
