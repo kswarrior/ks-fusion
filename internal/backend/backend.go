@@ -335,6 +335,35 @@ func RunWithDir(p *frontend.Program, dir string) error {
 	return in.fail()
 }
 
+// RunFile executes a single .ks source file or .kslib bundle directly.
+// This is what makes shebang executables work:
+//
+//	#!/usr/bin/env fusion        (.ks files: `#` is already a comment)
+//	chmod +x app.kslib && ./app.kslib
+func RunFile(path string) error {
+	if strings.HasSuffix(path, lib.Ext) {
+		in := New()
+		if abs, err := filepath.Abs(path); err == nil {
+			in.baseDir = filepath.Dir(abs)
+		}
+		if err := in.execBundleFile(in.globals, path); err != nil {
+			return err
+		}
+		in.wg.Wait()
+		return in.fail()
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	p, err := frontend.ParseSource(string(data), path)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(path)
+	return RunWithDir(p, dir)
+}
+
 // ExecProgram runs program statements in globals (exported for imports/embedding).
 func (in *Interpreter) ExecProgram(p *frontend.Program) error {
 	for _, st := range p.Statements {

@@ -13,6 +13,7 @@
 package lib
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -102,8 +103,14 @@ func Check(cfg *config.Config) ([]File, error) {
 	return files, nil
 }
 
+// Shebang makes bundles directly executable on Linux:
+// `chmod +x hello-lib-0.1.0.kslib && ./hello-lib-0.1.0.kslib`
+// runs it via `fusion` found on PATH (see backend.RunFile).
+const Shebang = "#!/usr/bin/env fusion"
+
 // Build parse-checks the lib package and writes the versioned bundle
-// into outDir, returning the bundle file path.
+// into outDir, returning the bundle file path. The bundle starts with
+// a shebang line so it is directly executable (chmod +x); Load skips it.
 func Build(cfg *config.Config, outDir string) (string, error) {
 	if !cfg.IsLib() {
 		return "", fmt.Errorf("%s is not a library (set type = \"lib\" in fusion.toml)", cfg.Dir)
@@ -121,10 +128,23 @@ func Build(cfg *config.Config, outDir string) (string, error) {
 		return "", err
 	}
 	out := filepath.Join(outDir, ArtifactName(b.Name, b.Version))
-	if err := os.WriteFile(out, append(data, '\n'), 0o644); err != nil {
+	blob := append([]byte(Shebang+"\n"), append(data, '\n')...)
+	if err := os.WriteFile(out, blob, 0o755); err != nil {
 		return "", err
 	}
 	return out, nil
+}
+
+// stripShebang drops a leading `#!...` line so shebang-prefixed
+// (executable) bundles still parse as JSON.
+func stripShebang(data []byte) []byte {
+	if len(data) > 2 && data[0] == '#' && data[1] == '!' {
+		if i := bytes.IndexByte(data, '\n'); i >= 0 {
+			return data[i+1:]
+		}
+		return nil
+	}
+	return data
 }
 
 // Load reads and validates a .kslib bundle file.
@@ -134,7 +154,7 @@ func Load(path string) (*Bundle, error) {
 		return nil, err
 	}
 	var b Bundle
-	if err := json.Unmarshal(data, &b); err != nil {
+	if err := json.Unmarshal(stripShebang(data), &b); err != nil {
 		return nil, fmt.Errorf("bad library bundle %s: %w", path, err)
 	}
 	if b.Format != Format {

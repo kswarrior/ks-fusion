@@ -29,6 +29,16 @@ func main() {
 		help()
 		return
 	}
+	// Direct file mode: `fusion prog.ks` or `fusion lib.kslib`
+	// (also what the `#!/usr/bin/env fusion` shebang invokes).
+	if a := os.Args[1]; !strings.HasPrefix(a, "-") &&
+		(strings.HasSuffix(a, ".ks") || strings.HasSuffix(a, lib.Ext)) {
+		if err := backend.RunFile(a); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	switch os.Args[1] {
 	case "new":
 		isLib := false
