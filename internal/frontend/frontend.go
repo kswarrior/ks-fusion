@@ -1034,6 +1034,7 @@ func (p *parser) parseImport() (*Stmt, error) {
 
 // parseExprOrAssignStmt: assignment (incl. indexed, op=) or expression statement.
 func (p *parser) parseExprOrAssignStmt() (*Stmt, error) {
+	startTok := p.peek()
 	e, err := p.parseExpr()
 	if err != nil {
 		return nil, err
@@ -1052,14 +1053,8 @@ func (p *parser) parseExprOrAssignStmt() (*Stmt, error) {
 		}
 		return nil, p.errf(opTok, "bad assignment target")
 	}
-	// bare identifier alone is an error like v0.1 ("unknown statement")?
-	// Keep friendly: lone var/calls are expression statements (no-op except calls).
-	// But a lone unknown word previously errored via "unknown statement".
-	// Preserve error for lone identifier that is not a call? No - allow it.
-	return &Stmt{Kind: StmtExpr, Expr: e, Line: opLine(e)}, nil
+	return &Stmt{Kind: StmtExpr, Expr: e, Line: startTok.Line}, nil
 }
-
-func opLine(e *Expr) int { return 0 }
 
 // ---------------------------------------------------------------------------
 // Expressions (precedence climbing)
