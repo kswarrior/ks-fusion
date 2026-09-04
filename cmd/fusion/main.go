@@ -289,7 +289,11 @@ func checkDependencies(cfg *config.Config) error {
 	for _, name := range names {
 		spec := cfg.Dependencies[name]
 		if strings.HasPrefix(spec, "path:") {
-			p := filepath.Join(cfg.Dir, filepath.FromSlash(strings.TrimPrefix(spec, "path:")))
+			rel := strings.TrimPrefix(spec, "path:")
+			p := rel
+			if !filepath.IsAbs(rel) {
+				p = filepath.Join(cfg.Dir, filepath.FromSlash(rel))
+			}
 			fi, err := os.Stat(filepath.Join(p, "fusion.toml"))
 			if err != nil || fi.IsDir() {
 				return fmt.Errorf("build failed: dependency %q path %q has no fusion.toml: %v", name, p, err)

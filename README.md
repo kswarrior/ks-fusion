@@ -120,13 +120,59 @@ assert(cond, msg?) error(msg)
 variable up the scope chain. Functions capture their defining scope
 (closures). `for-in` loop variables are per-iteration (Go 1.22 semantics).
 
+## Libraries (like Rust)
+
+```bash
+fusion new --lib mylib              # scaffold: fusion.toml (type="lib") + src/lib.ks
+fusion build --release ./tests/hello-lib   # -> test-releases/hello-lib-0.1.0.kslib
+fusion build ./tests/hello-lib      # debug instead -> target/hello-lib-0.1.0.kslib
+```
+
+Output dirs are relative to where you run `fusion` (`--out DIR`
+overrides). `test-releases/` here holds this repo's built libs,
+like Rust's `target/release/`.
+
+`fusion.toml` for a lib:
+
+```toml
+[package]
+name = "hello-lib"
+version = "0.1.0"
+type = "lib"
+
+[lib]
+name = "hello-lib"
+path = "src/lib.ks"
+```
+
+Apps declare and use libs:
+
+```toml
+[dependencies]
+hello-lib = "0.1.0"
+```
+
+```python
+import "hello-lib"          # newest test-releases/hello-lib-*.kslib wins
+print greet("world")
+```
+
+`fusion build` fails if a declared dependency has no built bundle.
+Notes: lib imports share one flat global namespace (prefix your
+functions), and a `.kslib` bundle is JSON (`kslib-1`) with the lib's
+parse-checked sources — see `test-releases/` here for a real one.
+
 ## Toolchain (this repo, in Go)
 
 ```
 cmd/fusion/          fusion CLI
 internal/frontend/   lexer + parser
 internal/backend/    tree-walk interpreter (goroutines for `go`)
+internal/config/     fusion.toml (apps, libs, dependencies)
+internal/lib/        .kslib bundles: build/load/find
 tests/hello-app/     test app (backend/ frontend/ fusion.toml)
+tests/hello-lib/     test library (src/*.ks)
+test-releases/       built lib bundles (like Rust's target/release)
 ```
 
 ## Use
@@ -134,7 +180,9 @@ tests/hello-app/     test app (backend/ frontend/ fusion.toml)
 ```bash
 go build -o fusion ./cmd/fusion
 ./fusion new myapp
+./fusion new --lib mylib
 ./fusion build ./tests/hello-app
+./fusion build --release ./tests/hello-lib
 ./fusion run ./tests/hello-app
 go test ./...
 ```
