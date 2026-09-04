@@ -315,8 +315,16 @@ func New() *Interpreter {
 
 // Run executes a parsed program and waits for `go` statements.
 func Run(p *frontend.Program) error {
+	return RunWithDir(p, "")
+}
+
+// RunWithDir executes a program with imports resolved relative to dir
+// (typically the app dir). If dir is "", it defaults to the program's dir.
+func RunWithDir(p *frontend.Program, dir string) error {
 	in := New()
-	if p.Path != "" && p.Path != "<expr>" && p.Path != "test.ks" {
+	if dir != "" {
+		in.baseDir = dir
+	} else if p.Path != "" && p.Path != "<expr>" && p.Path != "test.ks" {
 		in.baseDir = filepath.Dir(p.Path)
 	}
 	if err := in.ExecProgram(p); err != nil {
@@ -729,8 +737,10 @@ func (in *Interpreter) execForIn(env *Env, st *frontend.Stmt) error {
 		return err
 	}
 	loopEnv := newEnv(env)
-	runBody := func() error {
-		err := in.execStmt(newEnv(loopEnv), st.Body)
+	// Per-iteration env for loop vars (Go 1.22 semantics), so `go`
+	// closures capture the current iteration's values.
+	runBody := func(iterEnv *Env) error {
+		err := in.execStmt(newEnv(iterEnv), st.Body)
 		if err != nil {
 			if ce, ok := err.(*ctrlError); ok {
 				switch ce.kind {
@@ -754,13 +764,14 @@ func (in *Interpreter) execForIn(env *Env, st *frontend.Stmt) error {
 		copy(items, iter.Arr.Items)
 		iter.Arr.Mu.RUnlock()
 		for i, item := range items {
+			iterEnv := newEnv(loopEnv)
 			if two {
-				in.define(loopEnv, st.Names[0], IntV(i))
-				in.define(loopEnv, st.Names[1], item)
+				in.define(iterEnv, st.Names[0], IntV(i))
+				in.define(iterEnv, st.Names[1], item)
 			} else {
-				in.define(loopEnv, st.Names[0], item)
+				in.define(iterEnv, st.Names[0], item)
 			}
-			if err := runBody(); err != nil {
+			if err := runBody(iterEnv); err != nil {
 				if err == errBreak {
 					return nil
 				}
@@ -784,13 +795,14 @@ func (in *Interpreter) execForIn(env *Env, st *frontend.Stmt) error {
 		iter.Map.Mu.RUnlock()
 		sort.Strings(keys)
 		for _, k := range keys {
+			iterEnv := newEnv(loopEnv)
 			if two {
-				in.define(loopEnv, st.Names[0], StrV(k))
-				in.define(loopEnv, st.Names[1], vals[k])
+				in.define(iterEnv, st.Names[0], StrV(k))
+				in.define(iterEnv, st.Names[1], vals[k])
 			} else {
-				in.define(loopEnv, st.Names[0], StrV(k))
+				in.define(iterEnv, st.Names[0], StrV(k))
 			}
-			if err := runBody(); err != nil {
+			if err := runBody(iterEnv); err != nil {
 				if err == errBreak {
 					return nil
 				}
@@ -804,13 +816,14 @@ func (in *Interpreter) execForIn(env *Env, st *frontend.Stmt) error {
 	case VString:
 		chars := []rune(iter.Str)
 		for i, r := range chars {
+			iterEnv := newEnv(loopEnv)
 			if two {
-				in.define(loopEnv, st.Names[0], IntV(i))
-				in.define(loopEnv, st.Names[1], StrV(string(r)))
+				in.define(iterEnv, st.Names[0], IntV(i))
+				in.define(iterEnv, st.Names[1], StrV(string(r)))
 			} else {
-				in.define(loopEnv, st.Names[0], StrV(string(r)))
+				in.define(iterEnv, st.Names[0], StrV(string(r)))
 			}
-			if err := runBody(); err != nil {
+			if err := runBody(iterEnv); err != nil {
 				if err == errBreak {
 					return nil
 				}
@@ -903,10 +916,16 @@ func (in *Interpreter) execImport(env *Env, path string) error {
 	if path == "" {
 		return fmt.Errorf("bad import: empty path")
 	}
-	// resolve relative to baseDir
+	// Resolve relative to baseDir (app dir), its parent (for legacy
+	// backend/-relative layouts), and CWD. Imports are app-root
+	// relative, e.g. `import "shared/util.ks"`.
 	candidates := []string{path}
 	if in.baseDir != "" && !filepath.IsAbs(path) {
 		candidates = append([]string{filepath.Join(in.baseDir, path)}, candidates...)
+		parent := filepath.Dir(in.baseDir)
+		if parent != "" && parent != in.baseDir {
+			candidates = append(candidates, filepath.Join(parent, path))
+		}
 	}
 	var data []byte
 	var full string

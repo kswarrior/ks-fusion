@@ -140,18 +140,19 @@ func cmdRun(dir string) error {
 	}
 	fmt.Printf("== %s v%s ==\n", cfg.Name, cfg.Version)
 	// Fusion: backend + frontend run together (concurrently).
+	// Imports resolve relative to the app dir.
 	var wg sync.WaitGroup
 	var bErr, fErr error
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		fmt.Println("[backend]")
-		bErr = backend.Run(bp)
+		bErr = backend.RunWithDir(bp, dir)
 	}()
 	go func() {
 		defer wg.Done()
 		fmt.Println("[frontend]")
-		fErr = backend.Run(fp)
+		fErr = backend.RunWithDir(fp, dir)
 	}()
 	wg.Wait()
 	if bErr != nil {
