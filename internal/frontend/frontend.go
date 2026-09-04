@@ -907,8 +907,10 @@ func assignTargetName(e *Expr) (string, bool) {
 func (p *parser) parsePrint() (*Stmt, error) {
 	pt := p.next() // print
 	// optional parens: print("hi"), print(a, b)
-	if p.peek().K == tLParen {
-		// Lookahead: is this `print (expr, ...)`? Consume and parse list.
+	// Only treat `(` as wrapping the whole arg list when the matching `)`
+	// ends the statement; otherwise `print (1+2)*3` is an expression
+	// starting with a parenthesized group.
+	if p.peek().K == tLParen && p.parenWrapsStmt() {
 		p.next()
 		var args []*Expr
 		// allow empty print()
