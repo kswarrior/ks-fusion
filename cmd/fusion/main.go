@@ -1,8 +1,11 @@
 // Command fusion is the ks-fusion tool (v1.0, in Go).
 // Usage:
-// fusion new <appdir>   scaffold backend/ frontend/ fusion.toml
-// fusion run [appdir]   run the app (.ks files)
-// fusion build [appdir] check the app (parse only)
+// fusion new [--lib] <dir>         scaffold app (default) or library (--lib)
+// fusion run [appdir]              run the app (.ks files)
+// fusion build [dir] [--release] [--out DIR]
+//   app: parse-check entries + verify dependencies
+//   lib: parse-check sources and pack test-releases/<name>-<ver>.kslib
+//        (--release) or target/<name>-<ver>.kslib (debug, like cargo)
 // fusion help
 package main
 
@@ -10,11 +13,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/kswarrior/ks-fusion/internal/backend"
 	"github.com/kswarrior/ks-fusion/internal/config"
 	"github.com/kswarrior/ks-fusion/internal/frontend"
+	"github.com/kswarrior/ks-fusion/internal/lib"
 )
 
 func main() {
@@ -24,11 +29,26 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "new":
-		if len(os.Args) < 3 {
-			fmt.Println("usage: fusion new <appdir>")
+		isLib := false
+		var dirs []string
+		for _, a := range os.Args[2:] {
+			if a == "--lib" {
+				isLib = true
+			} else {
+				dirs = append(dirs, a)
+			}
+		}
+		if len(dirs) < 1 {
+			fmt.Println("usage: fusion new [--lib] <dir>")
 			os.Exit(1)
 		}
-		if err := cmdNew(os.Args[2]); err != nil {
+		var err error
+		if isLib {
+			err = cmdNewLib(dirs[0])
+		} else {
+			err = cmdNew(dirs[0])
+		}
+		if err != nil {
 			fmt.Println("error:", err)
 			os.Exit(1)
 		}
@@ -43,10 +63,32 @@ func main() {
 		}
 	case "build":
 		dir := "."
-		if len(os.Args) >= 3 {
-			dir = os.Args[2]
+		release := false
+		out := ""
+		args := os.Args[2:]
+		for i := 0; i < len(args); i++ {
+			a := args[i]
+			switch {
+			case a == "--release":
+				release = true
+			case a == "--out" || a == "-o":
+				if i+1 >= len(args) {
+					fmt.Println("usage: fusion build [dir] [--release] [--out DIR]")
+					os.Exit(1)
+				}
+				i++
+				out = args[i]
+			case strings.HasPrefix(a, "--out="):
+				out = strings.TrimPrefix(a, "--out=")
+			case strings.HasPrefix(a, "-"):
+				fmt.Printf("unknown flag %q\n", a)
+				help()
+				os.Exit(1)
+			default:
+				dir = a
+			}
 		}
-		if err := cmdBuild(dir); err != nil {
+		if err := cmdBuild(dir, release, out); err != nil {
 			fmt.Println("error:", err)
 			os.Exit(1)
 		}
@@ -62,9 +104,13 @@ func main() {
 func help() {
 	fmt.Println(`ks-fusion v1.0 (Go)
 Commands:
-  fusion new <appdir>   create backend/ frontend/ fusion.toml
-  fusion run [appdir]   run backend + frontend together
-  fusion build [appdir] parse-check only
+  fusion new [--lib] <dir>   create app (backend/ frontend/ fusion.toml)
+                             or library with --lib (src/lib.ks, type="lib")
+  fusion run [appdir]        run backend + frontend together
+  fusion build [dir] [--release] [--out DIR]
+                             app: parse-check entries + verify [dependencies]
+                             lib: pack .kslib bundle into test-releases/
+                                  (--release) or target/ (debug), like cargo
   fusion help`)
 }
 
@@ -74,6 +120,29 @@ name = "%s"
 version = "1.0.0"
 entry_backend = "backend/main.ks"
 entry_frontend = "frontend/main.ks"
+`
+
+const fusionLibTomlTmpl = `# Library made in ks-fusion (like ` + "`cargo new --lib`" + `)
+[package]
+name = "%s"
+version = "0.1.0"
+type = "lib"
+
+[lib]
+name = "%s"
+path = "src/lib.ks"
+`
+
+const libTmpl = `# src/lib.ks - %s library entry
+# Import me with: import "%s" (after ` + "`fusion build --release`" + `)
+
+func greet(name) {
+  return "hello " + name + " from %s"
+}
+
+func add(a, b) {
+  return a + b
+}
 `
 
 const backendTmpl = `# backend/main.ks - logic with Go-like concurrency

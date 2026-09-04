@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kswarrior/ks-fusion/internal/config"
 	"github.com/kswarrior/ks-fusion/internal/frontend"
+	kslib "github.com/kswarrior/ks-fusion/internal/lib"
 )
 
 func mustParse(t *testing.T, src string) *frontend.Program {
@@ -111,5 +113,45 @@ func TestRunImport(t *testing.T) {
 	}
 	if err := RunWithDir(p, dir); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRunLibImport(t *testing.T) {
+	// Build a real .kslib bundle into <appdir>/test-releases, then
+	// import it by bare library name like `import "mylib"`.
+	appDir := t.TempDir()
+	libDir := filepath.Join(appDir, "mylib")
+	src := "func double(x) {\n return x * 2\n}\nlet magic = 7\n"
+	if err := os.MkdirAll(filepath.Join(libDir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	toml := "[package]\nname = \"mylib\"\nversion = \"0.2.0\"\ntype = \"lib\"\n"
+	if err := os.WriteFile(filepath.Join(libDir, "fusion.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(libDir, "src", "lib.ks"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(libDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kslib.Build(cfg, filepath.Join(appDir, "test-releases")); err != nil {
+		t.Fatal(err)
+	}
+	p, err := frontend.ParseSource("import \"mylib\"\nassert(double(21) == 42)\nassert(magic == 7)\n", filepath.Join(appDir, "main.ks"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunWithDir(p, appDir); err != nil {
+		t.Fatal(err)
+	}
+	// Unknown lib must fail with a helpful error.
+	q, err := frontend.ParseSource("import \"nope\"\n", filepath.Join(appDir, "main.ks"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunWithDir(q, appDir); err == nil {
+		t.Fatal("want error for unknown library")
 	}
 }
