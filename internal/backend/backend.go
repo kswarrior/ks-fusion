@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kswarrior/ks-fusion/internal/frontend"
+	"github.com/kswarrior/ks-fusion/internal/lib"
 )
 
 // ---------------------------------------------------------------------------
@@ -916,6 +917,15 @@ func (in *Interpreter) execImport(env *Env, path string) error {
 	if path == "" {
 		return fmt.Errorf("bad import: empty path")
 	}
+	// Library import: `import "name"` (no .ks suffix) resolves a built
+	// .kslib bundle, e.g. test-releases/hello-lib-0.1.0.kslib.
+	// Make with `fusion new --lib` + `fusion build --release`.
+	if !strings.HasSuffix(path, ".ks") && !strings.HasSuffix(path, lib.Ext) {
+		return in.execLibImport(env, path)
+	}
+	if strings.HasSuffix(path, lib.Ext) {
+		return in.execBundleFile(env, path)
+	}
 	// Resolve relative to baseDir (app dir), its parent (for legacy
 	// backend/-relative layouts), and CWD. Imports are app-root
 	// relative, e.g. `import "shared/util.ks"`.
@@ -957,6 +967,108 @@ func (in *Interpreter) execImport(env *Env, path string) error {
 	in.imported[abs] = true
 	in.impMu.Unlock()
 	return in.execSource(env, string(data), full)
+}
+
+// libSearchDirs lists where `import "name"` looks for .kslib bundles:
+// beside the app (test-releases/ like `cargo build --release`,
+// target/ for debug builds, release/ legacy) and beside the CWD.
+func (in *Interpreter) libSearchDirs() []string {
+	var dirs []string
+	seen := map[string]bool{}
+	add := func(d string) {
+		if d == "" || seen[d] {
+			return
+		}
+		seen[d] = true
+		dirs = append(dirs, d)
+	}
+	for _, base := range []string{in.baseDir, "."} {
+		if base == "" {
+			continue
+		}
+		add(filepath.Join(base, "test-releases"))
+		add(filepath.Join(base, "target"))
+		add(filepath.Join(base, "release"))
+	}
+	return dirs
+}
+
+func (in *Interpreter) execLibImport(env *Env, name string) error {
+	if strings.ContainsAny(name, "/\\") || strings.Contains(name, ".") {
+		return fmt.Errorf("import %q failed: library names are bare words like \"hello-lib\" (built with `fusion build --release`)", name)
+	}
+	found, err := lib.Find(name, in.libSearchDirs())
+	if err != nil {
+		return fmt.Errorf("import %q failed: %v (build the lib with `fusion build --release <libdir>`)", name, err)
+	}
+	return in.execBundleFile(env, found)
+}
+
+// execBundleFile loads a .kslib bundle file (by path) and executes its
+// sources once, in bundle order, in the importing scope.
+func (in *Interpreter) execBundleFile(env *Env, path string) error {
+	candidates := []string{path}
+	if in.baseDir != "" && !filepath.IsAbs(path) {
+		candidates = append([]string{filepath.Join(in.baseDir, path)}, candidates...)
+		parent := filepath.Dir(in.baseDir)
+		if parent != "" && parent != in.baseDir {
+			candidates = append(candidates, filepath.Join(parent, path))
+		}
+	}
+	var full string
+	var lastErr error
+	for _, c := range candidates {
+		st, statErr := os.Stat(c)
+		if statErr == nil && !st.IsDir() {
+			full = c
+			lastErr = nil
+			break
+		}
+		if statErr != nil {
+			lastErr = statErr
+		} else {
+			lastErr = fmt.Errorf("not a file")
+		}
+	}
+	if full == "" {
+		// Maybe a bare "name.kslib" resolvable via search dirs.
+		if found, err := lib.Find(strings.TrimSuffix(filepath.Base(path), lib.Ext), in.libSearchDirs()); err == nil {
+			full = found
+		} else if lastErr != nil {
+			return fmt.Errorf("import %q failed: %v", path, lastErr)
+		} else {
+			return fmt.Errorf("import %q failed", path)
+		}
+	}
+	abs := full
+	if !filepath.IsAbs(abs) {
+		if a, e := filepath.Abs(abs); e == nil {
+			abs = a
+		}
+	}
+	in.impMu.Lock()
+	if in.imported[abs] {
+		in.impMu.Unlock()
+		return nil
+	}
+	in.imported[abs] = true
+	in.impMu.Unlock()
+	b, err := lib.Load(full)
+	if err != nil {
+		return err
+	}
+	for _, f := range b.Files {
+		prog, err := frontend.ParseSource(f.Source, full+"!/"+f.Path)
+		if err != nil {
+			return err
+		}
+		for _, st := range prog.Statements {
+			if err := in.execStmt(env, st); err != nil {
+				return withLine(st.Line, err)
+			}
+		}
+	}
+	return nil
 }
 
 func (in *Interpreter) execSource(env *Env, src, path string) error {
