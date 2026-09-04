@@ -1,3 +1,4 @@
+#!/usr/bin/env fusion
 {
   "format": "kslib-1",
   "name": "hello-lib",

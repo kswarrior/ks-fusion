@@ -57,6 +57,40 @@ func TestBuildLoadRoundtrip(t *testing.T) {
 	}
 }
 
+func TestBuildIsExecutableShebang(t *testing.T) {
+	dir := t.TempDir()
+	writeLib(t, dir, "hello-lib", "0.1.0", map[string]string{
+		"src/lib.ks": "func greet(n) {\n return \"hi \" + n\n}\n",
+	})
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Build(cfg, filepath.Join(dir, "test-releases"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw[:len(Shebang)]) != Shebang {
+		t.Fatalf("bundle must start with shebang %q", Shebang)
+	}
+	// Old plain-JSON bundles (no shebang) must still load.
+	plain := filepath.Join(dir, "plain.kslib")
+	inner := raw[len(Shebang)+1:]
+	if err := os.WriteFile(plain, inner, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(plain); err != nil {
+		t.Fatalf("plain JSON bundle must load: %v", err)
+	}
+	if _, err := Load(out); err != nil {
+		t.Fatalf("shebang bundle must load: %v", err)
+	}
+}
+
 func TestBuildRejectsApp(t *testing.T) {
 	dir := t.TempDir()
 	toml := "[package]\nname = \"x\"\nversion = \"0.1.0\"\n"

@@ -162,6 +162,16 @@ Notes: lib imports share one flat global namespace (prefix your
 functions), and a `.kslib` bundle is JSON (`kslib-1`) with the lib's
 parse-checked sources — see `test-releases/` here for a real one.
 
+Bundles (and `.ks` scripts, where `#` is already a comment) start with
+`#!/usr/bin/env fusion`, so on Linux they run directly:
+
+```bash
+export PATH="$PWD/release:$PATH"   # fusion must be on PATH
+chmod +x test-releases/hello-lib-0.1.0.kslib
+./test-releases/hello-lib-0.1.0.kslib   # loads the lib, exits 0
+chmod +x prog.ks && ./prog.ks           # same for scripts
+```
+
 ## Toolchain (this repo, in Go)
 
 ```

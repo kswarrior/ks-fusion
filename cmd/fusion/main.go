@@ -123,6 +123,10 @@ Commands:
                              app: parse-check entries + verify [dependencies]
                              lib: pack .kslib bundle into test-releases/
                                   (--release) or target/ (debug), like cargo
+  fusion prog.ks|lib.kslib   run a single file directly.
+                             .kslib bundles start with #!/usr/bin/env fusion,
+                             so: chmod +x lib.kslib && ./lib.kslib
+                             (needs fusion on PATH)
   fusion help`)
 }
 
