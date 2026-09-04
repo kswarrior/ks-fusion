@@ -3,9 +3,11 @@
 // fusion new [--lib] <dir>         scaffold app (default) or library (--lib)
 // fusion run [appdir]              run the app (.ks files)
 // fusion build [dir] [--release] [--out DIR]
-//   app: parse-check entries + verify dependencies
-//   lib: parse-check sources and pack test-releases/<name>-<ver>.kslib
-//        (--release) or target/<name>-<ver>.kslib (debug, like cargo)
+//
+//	app: parse-check entries + verify dependencies
+//	lib: parse-check sources and pack test-releases/<name>-<ver>.kslib
+//	     (--release) or target/<name>-<ver>.kslib (debug, like cargo)
+//
 // fusion help
 package main
 
@@ -203,10 +205,53 @@ func cmdNew(dir string) error {
 	return nil
 }
 
-func cmdBuild(dir string) error {
+// cmdNewLib scaffolds a library package, like `cargo new --lib`.
+func cmdNewLib(dir string) error {
+	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+		return err
+	}
+	name := filepath.Base(dir)
+	if err := os.WriteFile(filepath.Join(dir, "fusion.toml"), []byte(fmt.Sprintf(fusionLibTomlTmpl, name, name)), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "lib.ks"), []byte(fmt.Sprintf(libTmpl, name, name, name)), 0o644); err != nil {
+		return err
+	}
+	fmt.Println("created library", dir, "with src/lib.ks fusion.toml (type = \"lib\")")
+	return nil
+}
+
+// defaultOutDir mirrors cargo: debug bundles go to target/,
+// --release bundles go to test-releases/.
+func defaultOutDir(release bool) string {
+	if release {
+		return "test-releases"
+	}
+	return "target"
+}
+
+func cmdBuild(dir string, release bool, out string) error {
 	cfg, err := config.Load(dir)
 	if err != nil {
 		return err
+	}
+	if cfg.IsLib() {
+		if out == "" {
+			out = defaultOutDir(release)
+		}
+		// lib.Build parse-checks every .ks source, so a successful
+		// build also means the whole lib is valid.
+		artifact, err := lib.Build(cfg, out)
+		if err != nil {
+			return err
+		}
+		profile := "debug"
+		if release {
+			profile = "release"
+		}
+		fmt.Printf("built %s v%s (%s): %s\n", cfg.LibName, cfg.Version, profile, artifact)
+		fmt.Printf("use it with: import %q\n", cfg.LibName)
+		return nil
 	}
 	for _, f := range []string{cfg.BackendPath(), cfg.FrontendPath()} {
 		if _, err := frontend.ParseFile(f); err != nil {
@@ -214,8 +259,59 @@ func cmdBuild(dir string) error {
 		}
 		fmt.Println("ok:", f)
 	}
+	if err := checkDependencies(cfg); err != nil {
+		return err
+	}
 	fmt.Printf("build ok: %s v%s\n", cfg.Name, cfg.Version)
 	return nil
+}
+
+// checkDependencies verifies every [dependencies] entry (cargo-style):
+// `name = "1.0.0"` must match a built .kslib bundle, and
+// `name = { path = "..." }` must point at a package with fusion.toml.
+func checkDependencies(cfg *config.Config) error {
+	if len(cfg.Dependencies) == 0 {
+		return nil
+	}
+	dirs := []string{
+		filepath.Join(cfg.Dir, "test-releases"),
+		filepath.Join(cfg.Dir, "target"),
+		filepath.Join(cfg.Dir, "release"),
+		"test-releases",
+		"target",
+		"release",
+	}
+	names := make([]string, 0, len(cfg.Dependencies))
+	for name := range cfg.Dependencies {
+		names = append(names, name)
+	}
+	sortStrings(names)
+	for _, name := range names {
+		spec := cfg.Dependencies[name]
+		if strings.HasPrefix(spec, "path:") {
+			p := filepath.Join(cfg.Dir, filepath.FromSlash(strings.TrimPrefix(spec, "path:")))
+			fi, err := os.Stat(filepath.Join(p, "fusion.toml"))
+			if err != nil || fi.IsDir() {
+				return fmt.Errorf("build failed: dependency %q path %q has no fusion.toml: %v", name, p, err)
+			}
+			fmt.Printf("dep ok: %s (path %s)\n", name, p)
+			continue
+		}
+		found, err := lib.Find(name, dirs)
+		if err != nil {
+			return fmt.Errorf("build failed: dependency %q (%s) not built: %v", name, spec, err)
+		}
+		fmt.Printf("dep ok: %s (%s)\n", name, found)
+	}
+	return nil
+}
+
+func sortStrings(s []string) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j] < s[j-1]; j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
+	}
 }
 
 func cmdRun(dir string) error {
