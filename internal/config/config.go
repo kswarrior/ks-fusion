@@ -85,7 +85,7 @@ func Load(appDir string) (*Config, error) {
 				c.FrontendEntry = val
 			}
 		case "lib":
-		 switch key {
+			switch key {
 			case "name":
 				c.LibName = val
 			case "path":
@@ -107,6 +107,31 @@ func Load(appDir string) (*Config, error) {
 		return nil, fmt.Errorf("invalid fusion.toml in %s: entry_frontend is empty", appDir)
 	}
 	return c, nil
+}
+
+// parseDepValue parses a [dependencies] value:
+// `"1.0.0"` stays a version string, `{ path = "../x" }` becomes `"path:../x"`.
+func parseDepValue(v string) string {
+	v = strings.TrimSpace(v)
+	if strings.HasPrefix(v, "{") {
+		inner := strings.Trim(strings.TrimSuffix(strings.TrimPrefix(v, "{"), "}"), " ")
+		for _, part := range strings.Split(inner, ",") {
+			kv := strings.SplitN(part, "=", 2)
+			if len(kv) != 2 {
+				continue
+			}
+			if strings.TrimSpace(kv[0]) == "path" {
+				return "path:" + strings.Trim(strings.TrimSpace(kv[1]), "\"'")
+			}
+		}
+		return v
+	}
+	return strings.Trim(v, "\"'")
+}
+
+// LibPath returns absolute lib entry file.
+func (c *Config) LibPath() string {
+	return filepath.Join(c.Dir, filepath.FromSlash(c.LibEntry))
 }
 
 // BackendPath returns absolute backend entry file.
