@@ -1,4 +1,4 @@
-// Command fusion is the ks-fusion tool (v0.1, in Go).
+// Command fusion is the ks-fusion tool (v1.0, in Go).
 // Usage:
 // fusion new <appdir>   scaffold backend/ frontend/ fusion.toml
 // fusion run [appdir]   run the app (.ks files)
@@ -60,7 +60,7 @@ func main() {
 }
 
 func help() {
-	fmt.Println(`ks-fusion v0.1 (Go)
+	fmt.Println(`ks-fusion v1.0 (Go)
 Commands:
   fusion new <appdir>   create backend/ frontend/ fusion.toml
   fusion run [appdir]   run backend + frontend together
@@ -71,22 +71,46 @@ Commands:
 const fusionTomlTmpl = `# App made in ks-fusion
 [package]
 name = "%s"
-version = "0.1.0"
+version = "1.0.0"
 entry_backend = "backend/main.ks"
 entry_frontend = "frontend/main.ks"
 `
 
-const backendTmpl = `# backend/main.ks - runs first (logic, concurrency like Go)
+const backendTmpl = `# backend/main.ks - logic with Go-like concurrency
 let app = "hello-app"
 print "backend: starting " + app
-go print "backend: job 1 done"
-go print "backend: job 2 done"
+
+func fib(n) {
+  if n < 2 {
+    return n
+  }
+  return fib(n - 1) + fib(n - 2)
+}
+print "fib(10) =", fib(10)
+
+let ch = chan(2)
+go func() {
+  for i in range(3) {
+    send(ch, i * 10)
+  }
+  close(ch)
+}()
+for v in range(3) {
+  print "backend: job", recv(ch)
+}
 print "backend: ok"
 `
 
-const frontendTmpl = `# frontend/main.ks - runs second (UI text for now)
+const frontendTmpl = `# frontend/main.ks - UI text
 let title = "Hello from ks-fusion"
 print title
+
+let user = {name: "ada", tags: ["ks", "fusion"]}
+print "user:", user.name, user.tags
+
+for i, t in user.tags {
+  print "tag", i, "=", t
+}
 print "frontend: ok"
 `
 
