@@ -384,6 +384,11 @@ func (e *ctrlError) Error() string {
 	}
 }
 
+var (
+	errBreak    = &ctrlError{kind: ctrlBreak}
+	errContinue = &ctrlError{kind: ctrlContinue}
+)
+
 func isControl(err error) bool {
 	_, ok := err.(*ctrlError)
 	return ok
@@ -724,25 +729,6 @@ func (in *Interpreter) execForIn(env *Env, st *frontend.Stmt) error {
 		return err
 	}
 	loopEnv := newEnv(env)
-	// helper defines loop vars:
-	//  1 var: array->value, string->char, map->key
-	//  2 vars: array/string->(index, value), map->(key, value)
-	define1 := func(a, m, s Value) {
-		if len(st.Names) == 1 {
-			switch iter.Kind {
-			case VArray:
-				in.define(loopEnv, st.Names[0], a)
-			case VMap:
-				in.define(loopEnv, st.Names[0], m)
-			default:
-				in.define(loopEnv, st.Names[0], s)
-			}
-			return
-		}
-		in.define(loopEnv, st.Names[0], a)
-		in.define(loopEnv, st.Names[1], m)
-		_ = s
-	}
 	runBody := func() error {
 		err := in.execStmt(newEnv(loopEnv), st.Body)
 		if err != nil {
@@ -760,6 +746,7 @@ func (in *Interpreter) execForIn(env *Env, st *frontend.Stmt) error {
 		}
 		return nil
 	}
+	two := len(st.Names) == 2
 	switch iter.Kind {
 	case VArray:
 		iter.Arr.Mu.RLock()
@@ -767,12 +754,11 @@ func (in *Interpreter) execForIn(env *Env, st *frontend.Stmt) error {
 		copy(items, iter.Arr.Items)
 		iter.Arr.Mu.RUnlock()
 		for i, item := range items {
-			if len(st.Names) == 1 {
-				define1(Nil(), Nil(), item)
-				// single var = value for arrays
-				in.define(loopEnv, st.Names[0], item)
+			if two {
+				in.define(loopEnv, st.Names[0], IntV(i))
+				in.define(loopEnv, st.Names[1], item)
 			} else {
-				define1(IntV(i), item, item)
+				in.define(loopEnv, st.Names[0], item)
 			}
 			if err := runBody(); err != nil {
 				if err == errBreak {
@@ -798,10 +784,11 @@ func (in *Interpreter) execForIn(env *Env, st *frontend.Stmt) error {
 		iter.Map.Mu.RUnlock()
 		sort.Strings(keys)
 		for _, k := range keys {
-			if len(st.Names) == 1 {
+			if two {
 				in.define(loopEnv, st.Names[0], StrV(k))
+				in.define(loopEnv, st.Names[1], vals[k])
 			} else {
-				define1(StrV(k), vals[k], vals[k])
+				in.define(loopEnv, st.Names[0], StrV(k))
 			}
 			if err := runBody(); err != nil {
 				if err == errBreak {
@@ -817,10 +804,11 @@ func (in *Interpreter) execForIn(env *Env, st *frontend.Stmt) error {
 	case VString:
 		chars := []rune(iter.Str)
 		for i, r := range chars {
-			if len(st.Names) == 1 {
-				in.define(loopEnv, st.Names[0], StrV(string(r)))
+			if two {
+				in.define(loopEnv, st.Names[0], IntV(i))
+				in.define(loopEnv, st.Names[1], StrV(string(r)))
 			} else {
-				define1(IntV(i), StrV(string(r)), StrV(string(r)))
+				in.define(loopEnv, st.Names[0], StrV(string(r)))
 			}
 			if err := runBody(); err != nil {
 				if err == errBreak {
@@ -890,7 +878,7 @@ func (in *Interpreter) execForC(env *Env, st *frontend.Stmt) error {
 			if st.Post.Kind == frontend.StmtAssign && st.Post.Name != "" {
 				if _, ok := in.lookup(loopEnv, st.Post.Name); !ok {
 					// define (defensive)
-					v, err := in.eval(loopEnv, st.Post.ExprsValue())
+					v, err := in.eval(loopEnv, assignRHS(st.Post))
 					if err != nil {
 						return err
 					}
@@ -925,7 +913,7 @@ func (in *Interpreter) execImport(env *Env, path string) error {
 	var err error
 	for _, c := range candidates {
 		var e error
-		data, e = readFile(c)
+		data, e = os.ReadFile(c)
 		if e == nil {
 			full = c
 			err = nil

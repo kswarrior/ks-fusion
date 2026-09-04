@@ -876,7 +876,7 @@ func (p *parser) parseMiniStmt() (*Stmt, error) {
 		return p.parseLet()
 	}
 	// try assignment vs expr: parse expr then check assign op
-	start := p.pos
+	startTok := p.peek()
 	e, err := p.parseExpr()
 	if err != nil {
 		return nil, err
@@ -891,15 +891,10 @@ func (p *parser) parseMiniStmt() (*Stmt, error) {
 		if ok {
 			return &Stmt{Kind: StmtAssign, Name: name, Expr: rhs, Op: op, Line: opTok.Line}, nil
 		}
-		// indexed/field assignment: keep target expr in Exprs? Use Expr=target, Exprs=[rhs]?
-		// Encode as StmtAssign with Name="" and Expr=rhs, Inner holds target? Instead
-		// store target in Then.Body? Simplest: store target expr in Expr, value in Exprs[0].
-		// But StmtAssign.Name is used for plain vars. For complex targets we stash
-		// target in a dedicated way: use Names=nil, Expr=target, Exprs=[value].
-		_ = start
+		// indexed/field assignment: store target in Expr, value in Exprs[0].
 		return &Stmt{Kind: StmtAssign, Expr: e, Exprs: []*Expr{rhs}, Op: op, Line: opTok.Line}, nil
 	}
-	return &Stmt{Kind: StmtExpr, Expr: e, Line: eLine(e)}, nil
+	return &Stmt{Kind: StmtExpr, Expr: e, Line: startTok.Line}, nil
 }
 
 func assignTargetName(e *Expr) (string, bool) {
@@ -908,8 +903,6 @@ func assignTargetName(e *Expr) (string, bool) {
 	}
 	return "", false
 }
-
-func eLine(e *Expr) int { return 0 }
 
 func (p *parser) parsePrint() (*Stmt, error) {
 	pt := p.next() // print
