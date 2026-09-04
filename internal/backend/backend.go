@@ -65,9 +65,9 @@ type MapObj struct {
 
 // FuncObj is a user function with closure.
 type FuncObj struct {
-	Name   string
-	Params []string
-	Body   *frontend.Stmt
+	Name    string
+	Params  []string
+	Body    *frontend.Stmt
 	Closure *Env
 }
 
@@ -84,13 +84,13 @@ type ChanObj struct {
 	Closed bool
 }
 
-func Nil() Value                          { return Value{Kind: VNil} }
-func BoolV(b bool) Value                  { return Value{Kind: VBool, Bool: b} }
-func IntV(n int) Value                    { return Value{Kind: VInt, Int: n} }
-func FloatV(f float64) Value              { return Value{Kind: VFloat, Float: f} }
-func StrV(s string) Value                 { return Value{Kind: VString, Str: s} }
-func ArrV(items []Value) Value            { return Value{Kind: VArray, Arr: &ArrayObj{Items: items}} }
-func MapV(m map[string]Value) Value       {
+func Nil() Value               { return Value{Kind: VNil} }
+func BoolV(b bool) Value       { return Value{Kind: VBool, Bool: b} }
+func IntV(n int) Value         { return Value{Kind: VInt, Int: n} }
+func FloatV(f float64) Value   { return Value{Kind: VFloat, Float: f} }
+func StrV(s string) Value      { return Value{Kind: VString, Str: s} }
+func ArrV(items []Value) Value { return Value{Kind: VArray, Arr: &ArrayObj{Items: items}} }
+func MapV(m map[string]Value) Value {
 	if m == nil {
 		m = map[string]Value{}
 	}

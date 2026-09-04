@@ -2,15 +2,16 @@
 // full lexer + recursive-descent parser for .ks files.
 //
 // Language summary (v1.0):
-//   types: nil, bool, int, float, string, array, map, func, chan
-//   stmts: let, assign (+= -= *= /= %=), print, sleep, go,
-//          if/else, while, for-in, for-c-style, func, return,
-//          break, continue, import, block { }, expr-statement
-//   exprs: literals, vars, a+b - * / %, == != < <= > >=,
-//          and/or/not (also && || !), unary - !,
-//          calls f(...), index a[i], field m.key,
-//          arrays [..], maps {k: v, ..}, func literals
-//   comments: # ... and // ...
+//
+//	types: nil, bool, int, float, string, array, map, func, chan
+//	stmts: let, assign (+= -= *= /= %=), print, sleep, go,
+//	       if/else, while, for-in, for-c-style, func, return,
+//	       break, continue, import, block { }, expr-statement
+//	exprs: literals, vars, a+b - * / %, == != < <= > >=,
+//	       and/or/not (also && || !), unary - !,
+//	       calls f(...), index a[i], field m.key,
+//	       arrays [..], maps {k: v, ..}, func literals
+//	comments: # ... and // ...
 package frontend
 
 import (
@@ -99,22 +100,22 @@ const (
 
 // Stmt is one statement node.
 type Stmt struct {
-	Kind     StmtKind
-	Name     string   // let/assign var, func name
-	Names    []string // for-in vars, func params (def)
-	Expr     *Expr    // let value, assign value, return, while cond, if cond, for iter/cond, sleep value, expr-stmt
-	Exprs    []*Expr  // print args
-	Inner    *Stmt    // go inner
-	Body     *Stmt    // func/while/for body (block)
-	Then     *Stmt    // if then (block)
-	Else     *Stmt    // if else (block or if)
-	Init     *Stmt    // for-c init (may be nil)
-	Post     *Stmt    // for-c post (may be nil)
-	List     []*Stmt  // block statements
-	StrVal   string   // import path
-	Op       string   // assign op: = += -= *= /= %=
-	Line     int
-	SleepMs  int // kept for compat: set when sleep arg is int literal
+	Kind    StmtKind
+	Name    string   // let/assign var, func name
+	Names   []string // for-in vars, func params (def)
+	Expr    *Expr    // let value, assign value, return, while cond, if cond, for iter/cond, sleep value, expr-stmt
+	Exprs   []*Expr  // print args
+	Inner   *Stmt    // go inner
+	Body    *Stmt    // func/while/for body (block)
+	Then    *Stmt    // if then (block)
+	Else    *Stmt    // if else (block or if)
+	Init    *Stmt    // for-c init (may be nil)
+	Post    *Stmt    // for-c post (may be nil)
+	List    []*Stmt  // block statements
+	StrVal  string   // import path
+	Op      string   // assign op: = += -= *= /= %=
+	Line    int
+	SleepMs int // kept for compat: set when sleep arg is int literal
 }
 
 // Program is a parsed .ks file.
@@ -659,7 +660,7 @@ func (p *parser) parseLet() (*Stmt, error) {
 }
 
 func (p *parser) parseFuncStmt() (*Stmt, error) {
-	ft := p.next() // func
+	ft := p.next()   // func
 	name := p.next() // ident (checked by caller)
 	params, err := p.parseParams()
 	if err != nil {

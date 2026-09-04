@@ -72,7 +72,7 @@ func TestRunControlFlow(t *testing.T) {
 func TestRunArraysMaps(t *testing.T) {
 	mustRun(t, "let a = [1, 2, 3]\nassert(len(a) == 3)\nassert(a[0] == 1)\na[0] = 9\nassert(a[0] == 9)\n push(a, 4)\nassert(len(a) == 4)\n assert(pop(a) == 4)\nassert([1] + [2] == [1, 2])\n")
 	mustRun(t, "let m = {name: \"a\"}\nassert(m.name == \"a\")\nm.age = 3\nassert(m[\"age\"] == 3)\nassert(has(m, \"age\"))\n")
-	mustRun(t, "x = 1\n".Replace("x = 1", "let x = 1\nx += 4\nassert(x == 5)"))
+	mustRun(t, "let x = 1\nx += 4\nassert(x == 5)\n")
 }
 
 func TestRunBuiltins(t *testing.T) {
