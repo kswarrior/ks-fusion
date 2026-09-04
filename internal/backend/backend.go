@@ -5,6 +5,7 @@ package backend
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -595,10 +596,20 @@ func (in *Interpreter) execStmt(env *Env, st *frontend.Stmt) error {
 	}
 }
 
+func assignRHS(st *frontend.Stmt) *frontend.Expr {
+	if st.Name != "" {
+		return st.Expr
+	}
+	if len(st.Exprs) > 0 {
+		return st.Exprs[0]
+	}
+	return nil
+}
+
 func (in *Interpreter) execAssign(env *Env, st *frontend.Stmt) error {
 	// plain variable?
 	if st.Name != "" {
-		v, err := in.eval(env, st.ExprsValue())
+		v, err := in.eval(env, assignRHS(st))
 		if err != nil {
 			return err
 		}
@@ -612,15 +623,8 @@ func (in *Interpreter) execAssign(env *Env, st *frontend.Stmt) error {
 				return err
 			}
 		}
-		// for-C init defines implicitly; normal assign requires existing
 		if st.Op == "" || st.Op == "=" {
 			if !in.assign(env, st.Name, v) {
-				// Allow implicit define only when marked? Caller (for-C) handles.
-				// Normal path: error like v0.1.
-				if st.ImplicitDef {
-					in.define(env, st.Name, v)
-					return nil
-				}
 				return fmt.Errorf("unknown variable %q (try `let %s = ...` first)", st.Name, st.Name)
 			}
 			return nil
@@ -720,6 +724,42 @@ func (in *Interpreter) execForIn(env *Env, st *frontend.Stmt) error {
 		return err
 	}
 	loopEnv := newEnv(env)
+	// helper defines loop vars:
+	//  1 var: array->value, string->char, map->key
+	//  2 vars: array/string->(index, value), map->(key, value)
+	define1 := func(a, m, s Value) {
+		if len(st.Names) == 1 {
+			switch iter.Kind {
+			case VArray:
+				in.define(loopEnv, st.Names[0], a)
+			case VMap:
+				in.define(loopEnv, st.Names[0], m)
+			default:
+				in.define(loopEnv, st.Names[0], s)
+			}
+			return
+		}
+		in.define(loopEnv, st.Names[0], a)
+		in.define(loopEnv, st.Names[1], m)
+		_ = s
+	}
+	runBody := func() error {
+		err := in.execStmt(newEnv(loopEnv), st.Body)
+		if err != nil {
+			if ce, ok := err.(*ctrlError); ok {
+				switch ce.kind {
+				case ctrlBreak:
+					return errBreak
+				case ctrlContinue:
+					return errContinue
+				default:
+					return err
+				}
+			}
+			return err
+		}
+		return nil
+	}
 	switch iter.Kind {
 	case VArray:
 		iter.Arr.Mu.RLock()
@@ -727,17 +767,19 @@ func (in *Interpreter) execForIn(env *Env, st *frontend.Stmt) error {
 		copy(items, iter.Arr.Items)
 		iter.Arr.Mu.RUnlock()
 		for i, item := range items {
-			defineLoopVars(in, loopEnv, st.Names, IntV(i), item, true)
-			if err := in.execStmt(newEnv(loopEnv), st.Body); err != nil {
-				if ce, ok := err.(*ctrlError); ok {
-					switch ce.kind {
-					case ctrlBreak:
-						return nil
-					case ctrlContinue:
-						continue
-					default:
-						return err
-					}
+			if len(st.Names) == 1 {
+				define1(Nil(), Nil(), item)
+				// single var = value for arrays
+				in.define(loopEnv, st.Names[0], item)
+			} else {
+				define1(IntV(i), item, item)
+			}
+			if err := runBody(); err != nil {
+				if err == errBreak {
+					return nil
+				}
+				if err == errContinue {
+					continue
 				}
 				return err
 			}
@@ -756,17 +798,17 @@ func (in *Interpreter) execForIn(env *Env, st *frontend.Stmt) error {
 		iter.Map.Mu.RUnlock()
 		sort.Strings(keys)
 		for _, k := range keys {
-			defineLoopVars(in, loopEnv, st.Names, StrV(k), vals[k], false)
-			if err := in.execStmt(newEnv(loopEnv), st.Body); err != nil {
-				if ce, ok := err.(*ctrlError); ok {
-					switch ce.kind {
-					case ctrlBreak:
-						return nil
-					case ctrlContinue:
-						continue
-					default:
-						return err
-					}
+			if len(st.Names) == 1 {
+				in.define(loopEnv, st.Names[0], StrV(k))
+			} else {
+				define1(StrV(k), vals[k], vals[k])
+			}
+			if err := runBody(); err != nil {
+				if err == errBreak {
+					return nil
+				}
+				if err == errContinue {
+					continue
 				}
 				return err
 			}
@@ -775,17 +817,17 @@ func (in *Interpreter) execForIn(env *Env, st *frontend.Stmt) error {
 	case VString:
 		chars := []rune(iter.Str)
 		for i, r := range chars {
-			defineLoopVars(in, loopEnv, st.Names, IntV(i), StrV(string(r)), true)
-			if err := in.execStmt(newEnv(loopEnv), st.Body); err != nil {
-				if ce, ok := err.(*ctrlError); ok {
-					switch ce.kind {
-					case ctrlBreak:
-						return nil
-					case ctrlContinue:
-						continue
-					default:
-						return err
-					}
+			if len(st.Names) == 1 {
+				in.define(loopEnv, st.Names[0], StrV(string(r)))
+			} else {
+				define1(IntV(i), StrV(string(r)), StrV(string(r)))
+			}
+			if err := runBody(); err != nil {
+				if err == errBreak {
+					return nil
+				}
+				if err == errContinue {
+					continue
 				}
 				return err
 			}
@@ -796,44 +838,12 @@ func (in *Interpreter) execForIn(env *Env, st *frontend.Stmt) error {
 	}
 }
 
-func defineLoopVars(in *Interpreter, env *Env, names []string, first, second Value, isArray bool) {
-	if len(names) == 1 {
-		if isArray || iterSingleIsValue(names) {
-			// single var: array->value, map->key, string->char
-			if len(names) == 1 {
-				// caller passes (index/key, value); pick value for arrays/strings, key for maps
-				in.define(env, names[0], second)
-				// for maps caller passes first=key second=value but single var wants key:
-				// handled by passing isArray=false for maps and using first? Fix below.
-			}
-		}
-	}
-	// Simpler explicit: decided by caller via isArray flag AND kind?
-	// Redo clearly:
-	if len(names) == 1 {
-		if isArray {
-			in.define(env, names[0], second) // value
-		} else {
-			// map single -> key (first), string single -> char (second)
-			// distinguish: for maps first is key Str, second is value; for strings first is idx
-			// We pass isArray=false for both; need another signal. Use: if first is Str key and
-			// second came from map... ambiguous. Instead handle in execForIn directly.
-			in.define(env, names[0], second)
-		}
-		return
-	}
-	in.define(env, names[0], first)
-	in.define(env, names[1], second)
-}
-
-func iterSingleIsValue(names []string) bool { return len(names) == 1 }
-
 func (in *Interpreter) execForC(env *Env, st *frontend.Stmt) error {
 	loopEnv := newEnv(env)
 	if st.Init != nil {
 		// implicit define for `for i = 0; ...`
 		if st.Init.Kind == frontend.StmtAssign && st.Init.Name != "" {
-			v, err := in.eval(loopEnv, st.Init.ExprsValue())
+			v, err := in.eval(loopEnv, assignRHS(st.Init))
 			if err != nil {
 				return err
 			}
