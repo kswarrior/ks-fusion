@@ -1,0 +1,9 @@
+# Library made in ks-fusion (like `cargo new --lib`)
+[package]
+name = "hello-lib"
+version = "0.1.0"
+type = "lib"
+
+[lib]
+name = "hello-lib"
+path = "src/lib.ks"

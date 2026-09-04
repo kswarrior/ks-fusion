@@ -4,3 +4,6 @@ name = "hello-app"
 version = "1.0.0"
 entry_backend = "backend/main.ks"
 entry_frontend = "frontend/main.ks"
+
+[dependencies]
+hello-lib = "0.1.0"

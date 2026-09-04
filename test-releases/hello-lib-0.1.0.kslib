@@ -1,0 +1,15 @@
+{
+  "format": "kslib-1",
+  "name": "hello-lib",
+  "version": "0.1.0",
+  "files": [
+    {
+      "path": "src/lib.ks",
+      "source": "# hello-lib entry: shared helpers for ks-fusion apps.\n# Build me with:  fusion build --release ./tests/hello-lib\n# Use me with:    import \"hello-lib\"\n\nfunc greet(name) {\n  return \"hello \" + name + \" from hello-lib\"\n}\n\nfunc clamp(x, lo, hi) {\n  if x \u003c lo {\n    return lo\n  }\n  if x \u003e hi {\n    return hi\n  }\n  return x\n}\n\nfunc sum(arr) {\n  let total = 0\n  for v in arr {\n    total = total + v\n  }\n  return total\n}\n"
+    },
+    {
+      "path": "src/strings.ks",
+      "source": "# hello-lib extra module: string helpers (bundled second, sorted by path).\n\nfunc shout(s) {\n  return s + \"!\"\n}\n\nfunc repeat(s, n) {\n  let out = \"\"\n  for i in range(n) {\n    out = out + s\n  }\n  return out\n}\n"
+    }
+  ]
+}
