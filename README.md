@@ -124,13 +124,21 @@ func work() {
   print "doing work"
 }
 
-# concurrency like Go: go + channels
+# concurrency like Go: go + channels + select
 let c = chan(1)
 go func() {
   send(c, 42)
   close(c)
 }()
 print recv(c)
+
+select {
+  case v = recv(c) { print v }  # receive + bind (bind optional)
+  case send(c, 1) { print "sent" }
+  case timeout(100) { print "timed out" }
+  default { print "none ready" }  # no block when present
+}
+for v in c { print v }  # drains until close (ch = nil disables a select case)
 
 # imports (app-root relative)
 import "shared/util.ks"
@@ -219,11 +227,15 @@ input(prompt?)         read a line from stdin
 argv()                 process args; env(name, default?)
 exit(code?)
 
-# concurrency
+# concurrency (goroutines underneath)
 chan(n?) send(ch, v) recv(ch) close(ch)
+select { case v = recv(c) {...} case send(c, v) {...} case timeout(ms) {...} default {...} }
+for v in ch { ... }    drain until close (ch = nil disables a select case)
 try_send(ch, v)        non-blocking send, returns bool
 try_recv(ch)           non-blocking recv, nil when empty
-chan_len(ch) chan_cap(ch)
+recv_timeout(ch, ms)   value, or nil on timeout (also nil on drained close)
+send_timeout(ch, v, ms)  true if sent, false on timeout
+chan_len(ch) chan_cap(ch) chan_closed(ch)
 sleep(ms)              also a statement
 ```
 

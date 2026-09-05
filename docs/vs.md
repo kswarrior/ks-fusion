@@ -8,7 +8,7 @@
 
 | If you need… | Pick… | Why not `.ks` yet |
 |---|---|---|
-| Single static binary, max RPS, strict types | Go / Rust | `.ks` is tree-walk interpreted, gradual-typed, ~5x slower on `fib(25)` |
+| Single static binary, max RPS, strict types | Go / Rust | `.ks` is tree-walk interpreted, gradual-typed, ~100x slower on `fib(25)` (sort/pow optimized, scopes lock-free) |
 | Kernel, drivers, games, hard realtime | C / C++ / Rust | No manual memory, no pointers, no SIMD |
 | Browser UI / React / SSR | Next.js (TS) | `frontend/main.ks` is console logic today, not DOM |
 | CRUD + auth + admin panel tomorrow | PHP Laravel / Python Django | No ORM, migrations, HTTP server stdlib yet |
@@ -21,7 +21,7 @@
 |---|---|---|---|---|---|---|---|---|---|
 | Model | interpreted tree-walk (Go) | compiled, GC | compiled, no GC (borrowck) | compiled, manual | compiled, RAII | V8 JIT | interpreted (+C ext) | React framework on Node | interpreted + framework |
 | Typing | gradual: dynamic + `: type` annotations, `is`, `?.`/`??`, `ok`/`err` results | static, interfaces, generics | static, traits, enums, `Result/Option` | weak static, pointers | static, templates, classes | dynamic + optional TS | dynamic + hints | TS-typed components | dynamic |
-| Perf | low-medium (scripts, bots, CLIs) | high (servers) | highest (systems) | highest | highest | medium-high (I/O) | medium (glue/AI) | medium (SSR) | medium (CRUD) |
+| Perf | medium (scripts, bots, CLIs; O(n log n) sort, O(log n) pow, lock-free scopes) | high (servers) | highest (systems) | highest | highest | medium-high (I/O) | medium (glue/AI) | medium (SSR) | medium (CRUD) |
 | Concurrency | `go` + `chan`/`select` (`recv`/`send`/`timeout`/`default`, `for v in chan`, goroutines underneath) | goroutines + `select` | `async/tokio`, threads | threads, manual | threads/`async` | event loop + workers | threads/GIL + `asyncio` | server/client components | processes + queues |
 | Packaging | `fusion.toml` + `.kslib` JSON (`kslib-1`), local `test-releases/`/`target/` | `go.mod` + proxy | `cargo` + crates.io | make/cmake | cmake/vcpkg/conan | npm/pnpm | pip/poetry | npm + Vercel | composer + artisan |
 | Binary | needs `fusion` on PATH (shebang), no `--bin` yet | single static binary | single binary | binary | binary | needs node/runtime | needs python | needs node | needs php+server |
@@ -42,7 +42,7 @@ Simplicity + Build/Deploy + Frontend + Maturity = 100`.
 
 | Dim (max 10) | .ks | Go | Rust | C | C++ | Node | Python | Next.js | Laravel |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Perf | 4 | 8 | 10 | 10 | 10 | 7 | 5 | 7 | 5 |
+| Perf | 5 | 8 | 10 | 10 | 10 | 7 | 5 | 7 | 5 |
 | Types | 6 | 8 | 10 | 5 | 8 | 6 | 6 | 8 | 5 |
 | Concurrency | 8 | 9 | 8 | 5 | 7 | 7 | 5 | 6 | 4 |
 | Stdlib | 4 | 9 | 8 | 6 | 8 | 8 | 10 | 8 | 8 |
@@ -52,7 +52,7 @@ Simplicity + Build/Deploy + Frontend + Maturity = 100`.
 | Build/Deploy | 4 | 10 | 9 | 8 | 8 | 6 | 5 | 7 | 6 |
 | Frontend | 3 | 5 | 6 | 2 | 4 | 8 | 5 | 10 | 7 |
 | Maturity | 3 | 9 | 8 | 9 | 9 | 9 | 10 | 8 | 8 |
-| **Total /100** | **48** | **82** | **81** | **62** | **73** | **77** | **74** | **79** | **67** |
+| **Total /100** | **49** | **82** | **81** | **62** | **73** | **77** | **74** | **79** | **67** |
 
 Extra stacks (same rubric): `TypeScript 79`, `Java/Kotlin/Spring 78`,
 `Vite 77`, `Deno/Bun 77`, `React 76`, `Lua 58`, `Ruby/Rails 68`, `Bash 45`.
@@ -60,7 +60,7 @@ Details in `More` below. Frontend breakdown:
 
 | Dim (max 10) | .ks | TypeScript | React | Vite | Next.js |
 |---|---:|---:|---:|---:|---:|
-| Perf | 4 | 6 | 7 | 8 | 7 |
+| Perf | 5 | 6 | 7 | 8 | 7 |
 | Types | 6 | 9 | 8 | 6 | 8 |
 | Concurrency | 8 | 6 | 5 | 4 | 6 |
 | Stdlib | 4 | 7 | 5 | 4 | 8 |
@@ -70,7 +70,7 @@ Details in `More` below. Frontend breakdown:
 | Build/Deploy | 4 | 7 | 7 | 10 | 7 |
 | Frontend | 3 | 10 | 10 | 10 | 10 |
 | Maturity | 3 | 9 | 9 | 8 | 8 |
-| **Total /100** | **48** | **79** | **76** | **77** | **79** |
+| **Total /100** | **49** | **79** | **76** | **77** | **79** |
 
 ## Language-by-language
 
@@ -408,7 +408,7 @@ still behind everywhere else until `futures.md` P0/P1 land.
 | 14 | FFI | `cgo` | `unsafe`/FFI | none | opt-in `ffi_*` + Go plugin API | `futures.md` P2 interop |
 | 15 | Stability | compat promise | editions | v2.0 | RFC process + semver + LTS | `futures.md` §5 |
 
-Close rows 1–2 + 5 + 10–11 and the rest of rows 3–4 and `.ks` moves `46 → ~75/100` (Go/Rust-class for scripts/services).
+Close rows 1–2 + 5 + 10–11 and the rest of rows 3–4 and `.ks` moves `48 → ~75–80/100` (Go/Rust-class for scripts/services).
 Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
 
 ## Decision guide
@@ -416,7 +416,7 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
 1. Browser UI? → React + Vite + TS, or Next.js for SSR.
 2. CRUD + login + billing next week? → Laravel / Django / Rails / Next.js.
 3. 100k RPS / embedded / game loop? → Go / Rust / C++ / C.
-4. Script, bot, rule engine, teaching `go/chan`, prototype? → `.ks`.
+4. Script, bot, rule engine, teaching `go/chan/select`, prototype? → `.ks`.
 5. Need `http/DB` in `.ks` today? → shell out or wait — see `docs/futures.md` P1 stdlib.
 
 ## Honest limits of `.ks` v2.1 (do not hide)
@@ -424,5 +424,5 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
 * Interpreted, no JIT/native binary, no cross-compile matrix.
 * Gradual types only (no structs/enums/generics yet), `==` uses deep equality.
 * Flat lib namespace (prefix functions), newest local bundle wins, no lockfile.
-* No `select`, no `for v in chan`, no HTTP/WS/DB/regex/crypto stdlib.
+* No `fusion run --race`, no cancel/`with_timeout` yet, no HTTP/WS/DB/regex/crypto stdlib.
 * `frontend/` is not web — no DOM, no CSS, no SSR.

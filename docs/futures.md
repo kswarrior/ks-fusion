@@ -16,8 +16,10 @@
   dynamic by default, optional `: type` (nullable), `is`/`is not` tests,
   `is_type`/`assert_type`, `ok(v)/err(e)` + `is_ok/is_err/unwrap/unwrap_or`.
 * Concurrency: `go` + `chan(n) send/recv/close/try_send/try_recv/chan_len/chan_cap/sleep`
+  + `select { case v = recv(c) / recv(c) / send(c, v) / timeout(ms) / default }`
+  + `for v in ch` drain-until-close + `recv_timeout/send_timeout/chan_closed`,
   backed by Go goroutines.
-* Stdlib (~90 builtins): `len str int float bool type is_type assert_type range`,
+* Stdlib (97 builtins): `len str int float bool type is_type assert_type range`,
   array/map/string helpers, `math/time/rand/bit_*`,
   `map/filter/each/reduce/apply`, `json_stringify/json_parse`,
   `ok/err/is_ok/is_err/unwrap/unwrap_or`,
@@ -41,8 +43,11 @@
 
 ### P0 — correctness + tooling gaps
 
-* [ ] `select` for channels (with `timeout` / `default`), currently only
-  blocking `recv` + `try_recv`.
+* [x] `select` for channels (with `timeout` / `default`). Done v2.1:
+  `select { case v = recv(c) / recv(c) / send(c, v) / timeout(ms) / default }`
+  (blocks until one case is ready, ready cases win uniformly at random,
+  `break` ends the `select`, `ch = nil` disables a case).
+  Left: `fusion run --race`, structured `with_timeout`/cancel.
 * [ ] `fusion fmt` (canonical formatter) + `fusion vet` (unused var, bad arity lint).
 * [ ] `fusion test` runner: `*_test.ks` with `assert`, exit-code + TAP output.
 * [ ] `fusion doc` from `#` comments.
