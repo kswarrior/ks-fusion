@@ -1625,7 +1625,26 @@ func (p *parser) parseExprOrAssignStmt() (*Stmt, error) {
 // Expressions (precedence climbing)
 // ---------------------------------------------------------------------------
 
-func (p *parser) parseExpr() (*Expr, error) { return p.parseOr() }
+func (p *parser) parseExpr() (*Expr, error) { return p.parseCoalesce() }
+
+func (p *parser) parseCoalesce() (*Expr, error) {
+	left, err := p.parseOr()
+	if err != nil {
+		return nil, err
+	}
+	for p.peek().K == tCoalesce {
+		p.next()
+		right, err := p.parseOr()
+		if err != nil {
+			return nil, err
+		}
+		left = &Expr{Kind: ExprCoalesce, Left: left, Right: right}
+	}
+	if p.peek().K == tQuestion {
+		return nil, p.errf(p.peek(), "unexpected `?` (want `?.` nil-safe access or `??` default)")
+	}
+	return left, nil
+}
 
 func (p *parser) parseOr() (*Expr, error) {
 	left, err := p.parseAnd()
@@ -1698,6 +1717,23 @@ func (p *parser) parseCmp() (*Expr, error) {
 	}
 	for {
 		k := p.peek().K
+		if k == tIdent && p.peek().Lit == "is" {
+			p.next()
+			negated := false
+			if (p.peek().K == tIdent && p.peek().Lit == "not") || p.peek().K == tNot || p.peek().K == tBang {
+				p.next()
+				negated = true
+			}
+			right, err := p.parseAdd()
+			if err != nil {
+				return nil, err
+			}
+			left = &Expr{Kind: ExprIs, Left: left, Right: right}
+			if negated {
+				left = &Expr{Kind: ExprNot, Right: left}
+			}
+			continue
+		}
 		var kind ExprKind
 		switch k {
 		case tLt:

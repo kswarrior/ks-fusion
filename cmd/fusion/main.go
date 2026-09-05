@@ -86,7 +86,8 @@ func main() {
 			os.Exit(1)
 		}
 	case "build":
-		dir := "."		release := false
+		dir := "."
+		release := false
 		out := ""
 		args := os.Args[2:]
 		for i := 0; i < len(args); i++ {
@@ -386,4 +387,65 @@ func cmdRun(dir string) error {
 		return bErr
 	}
 	return fErr
+}
+
+func cmdCompile(args []string) error {
+	src := ""
+	out := ""
+	dis := false
+	run := false
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--dis":
+			dis = true
+		case a == "--run":
+			run = true
+		case a == "--out" || a == "-o":
+			if i+1 >= len(args) {
+				return fmt.Errorf("usage: fusion compile <file.ks> [--out file.ksb] [--dis] [--run]")
+			}
+			i++
+			out = args[i]
+		case strings.HasPrefix(a, "--out="):
+			out = strings.TrimPrefix(a, "--out=")
+		case strings.HasPrefix(a, "-"):
+			return fmt.Errorf("unknown flag %q (usage: fusion compile <file.ks> [--out file.ksb] [--dis] [--run])", a)
+		default:
+			if src != "" {
+				return fmt.Errorf("usage: fusion compile <file.ks> [--out file.ksb] [--dis] [--run]")
+			}
+			src = a
+		}
+	}
+	if src == "" {
+		return fmt.Errorf("usage: fusion compile <file.ks> [--out file.ksb] [--dis] [--run]")
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	b, err := compiler.CompileSource(string(data), src)
+	if err != nil {
+		return err
+	}
+	if dis {
+		fmt.Print(compiler.Disassemble(b))
+	}
+	if out == "" && !dis && !run {
+		out = strings.TrimSuffix(src, ".ks") + compiler.Ext
+	}
+	if out != "" {
+		if err := compiler.Save(b, out); err != nil {
+			return err
+		}
+		fmt.Println("compiled", src, "->", out)
+	}
+	if run {
+		return compiler.Run(b)
+	}
+	if out == "" && !dis {
+		fmt.Print(compiler.Disassemble(b))
+	}
+	return nil
 }
