@@ -191,7 +191,7 @@ Pick `.ks` for learning concurrency early or embedding a tiny Go-based runtime.
 
 ### vs Next.js (framework, not language)
 
-**Score: ks-fusion 48/100 vs Next.js 79/100 — Next.js wins by 33 (different category).**
+**Score: ks-fusion 48/100 vs Next.js 79/100 — Next.js wins by 31 (different category).**
 
 Category error if compared 1:1. Next.js = React + routing + SSR/ISR + Node runtime.
 ks-fusion app = `backend/main.ks + frontend/main.ks` run concurrently in console.
@@ -205,7 +205,7 @@ Pick `.ks` for the logic worker behind it.
 
 ### vs TypeScript (language, not runtime)
 
-**Score: ks-fusion 48/100 vs TypeScript 79/100 — TS wins by 33.**
+**Score: ks-fusion 48/100 vs TypeScript 79/100 — TS wins by 31.**
 
 TypeScript = JS + static types (`tsc`, `strict`, generics, unions).
 `.ks` = gradual types (dynamic by default, optional `: type` runtime checks,
@@ -233,7 +233,7 @@ Interop future: `fusion build --js` subset → import `.ks` logic into TS.
 
 ### vs React (UI library)
 
-**Score: ks-fusion 48/100 vs React 76/100 — React wins by 30 (different category).**
+**Score: ks-fusion 48/100 vs React 76/100 — React wins by 28 (different category).**
 
 React = components, hooks, virtual DOM, concurrent renderer.
 `.ks` `frontend/main.ks` = console `print`, no DOM/state/effects.
@@ -255,7 +255,7 @@ Do not reimplement React in `.ks` — explicit non-goal in `futures.md`.
 
 ### vs Vite (frontend build tool)
 
-**Score: ks-fusion 48/100 vs Vite 77/100 — Vite wins by 31 (different category).**
+**Score: ks-fusion 48/100 vs Vite 77/100 — Vite wins by 29 (different category).**
 
 Vite = instant HMR dev server + `esbuild`/Rollup bundler + plugin ecosystem.
 `fusion` = `new/run/build` for `.ks` only, no HMR, no bundling, no CSS/DOM.
@@ -273,7 +273,7 @@ Pick `.ks` for logic; future `fusion run --web` will copy the HMR idea, and
 
 ### vs PHP Laravel
 
-**Score: ks-fusion 48/100 vs Laravel 67/100 — Laravel wins by 21.**
+**Score: ks-fusion 48/100 vs Laravel 67/100 — Laravel wins by 19.**
 
 Laravel gives routing, ORM/Eloquent, migrations, Blade, queues, auth scaffolding.
 `.ks` gives none of that yet — no HTTP server, no DB driver, no templates.
@@ -283,43 +283,44 @@ Pick `.ks` for sidecar scripts (data munging, checks, bots) next to Laravel.
 
 ### More (short, all scored out of 100)
 
-* **Deno/Bun 77/100 vs .ks 46/100 (-31):** see TypeScript above; pick for secure TS sandbox / fast runtime; `.ks` is simpler but smaller.
-* **Java/Kotlin/Spring 78/100 vs .ks 46/100 (-32):** pick for enterprise monoliths, JPA, strict OOP; `.ks` for glue.
-* **Lua 58/100 vs .ks 46/100 (-12):** closest embed rival — Lua is smaller/faster to embed; `.ks` has Go chans + `fusion` CLI out of box.
-* **Ruby/Rails 68/100 vs .ks 46/100 (-22):** pick for convention CRUD; `.ks` syntax will feel familiar.
-* **Bash 45/100 vs .ks 46/100 (+1):** `.ks` now leads — pick Bash for 5-line pipes; `.ks` wins past 50 lines (`try/catch`, maps, JSON, `is`/`?.`/`??`, Windows portability).
+* **Deno/Bun 77/100 vs .ks 48/100 (-29):** see TypeScript above; pick for secure TS sandbox / fast runtime; `.ks` is simpler but smaller.
+* **Java/Kotlin/Spring 78/100 vs .ks 48/100 (-30):** pick for enterprise monoliths, JPA, strict OOP; `.ks` for glue.
+* **Lua 58/100 vs .ks 48/100 (-10):** closest embed rival — Lua is smaller/faster to embed; `.ks` has Go-style `select` + `fusion` CLI out of box.
+* **Ruby/Rails 68/100 vs .ks 48/100 (-20):** pick for convention CRUD; `.ks` syntax will feel familiar.
+* **Bash 45/100 vs .ks 48/100 (+3):** `.ks` leads — pick Bash for 5-line pipes; `.ks` wins past 50 lines (`try/catch`, maps, JSON, `is`/`?.`/`??`, `select`, Windows portability).
 
 ## Totals & ranking (out of 100)
 
-| Rank | Stack | Total /100 | Verdict vs .ks (46) |
+| Rank | Stack | Total /100 | Verdict vs .ks (48) |
 |---:|---|---:|---|
-| 1 | Go | 82 | +36, prod servers / single binary |
-| 2 | Rust | 81 | +35, systems / safety |
-| 3 | Next.js | 79 | +33, browser UI (different category) |
-| 3 | TypeScript | 79 | +33, typed UI/logic |
-| 5 | Java/Kotlin/Spring | 78 | +32, enterprise |
-| 6 | Node.js | 77 | +31, APIs / npm |
-| 6 | Vite | 77 | +31, frontend build/HMR (different category) |
-| 6 | Deno/Bun | 77 | +31, typed runtime |
-| 9 | React | 76 | +30, UI components (different category) |
-| 10 | Python | 74 | +28, data/AI/ecosystem |
-| 11 | C++ | 73 | +27, engines/trading |
-| 12 | Ruby/Rails | 68 | +22, convention CRUD |
-| 13 | PHP Laravel | 67 | +21, monolith CRUD |
-| 14 | C | 62 | +16, kernels/embedded |
-| 15 | Lua | 58 | +12, embedding |
-| 16 | **ks-fusion v2.1** | **46** | **baseline — wins on simplicity (9/10), now leads Bash on types** |
-| 17 | Bash | 45 | -1, tiny pipes |
+| 1 | Go | 82 | +34, prod servers / single binary |
+| 2 | Rust | 81 | +33, systems / safety |
+| 3 | Next.js | 79 | +31, browser UI (different category) |
+| 3 | TypeScript | 79 | +31, typed UI/logic |
+| 5 | Java/Kotlin/Spring | 78 | +30, enterprise |
+| 6 | Node.js | 77 | +29, APIs / npm |
+| 6 | Vite | 77 | +29, frontend build/HMR (different category) |
+| 6 | Deno/Bun | 77 | +29, typed runtime |
+| 9 | React | 76 | +28, UI components (different category) |
+| 10 | Python | 74 | +26, data/AI/ecosystem |
+| 11 | C++ | 73 | +25, engines/trading |
+| 12 | Ruby/Rails | 68 | +20, convention CRUD |
+| 13 | PHP Laravel | 67 | +19, monolith CRUD |
+| 14 | C | 62 | +14, kernels/embedded |
+| 15 | Lua | 58 | +10, embedding |
+| 16 | **ks-fusion v2.1** | **48** | **baseline — wins on simplicity (9/10), leads Bash by 3** |
+| 17 | Bash | 45 | -3, tiny pipes |
 
-Grand total (sum of all 17 totals) = `1199 / 1700`, average `70.5/100`.
-`.ks` total `46/100` reflects v2.1 reality: best at learning/scripts,
-now at Python/Node parity on Types (6/10); still behind everywhere else
-until `futures.md` P0/P1 land.
+Grand total (sum of all 17 totals) = `1201 / 1700`, average `70.6/100`.
+`.ks` total `48/100` reflects v2.1 reality: best at learning/scripts,
+at Python/Node parity on Types (6/10) and Rust parity on Concurrency (8/10);
+still behind everywhere else until `futures.md` P0/P1 land.
 
 ## Why not Go/Rust-class (v2.1 gaps + what parity needs)
 
-> Score context: `.ks 46/100` vs `Go 82/100` vs `Rust 81/100`.
-> The 35–36 pt gap is the 5 blocks below (Types gap half-closed in v2.1).
+> Score context: `.ks 48/100` vs `Go 82/100` vs `Rust 81/100`.
+> The 33–34 pt gap is the 5 blocks below
+> (Types half-closed and Concurrency at Rust parity in v2.1).
 > Fix the rest → ~75–80/100.
 
 ### 1. No compiler — interpreted AST, no native/static binary, no LLVM, no JIT
@@ -349,16 +350,21 @@ until `futures.md` P0/P1 land.
 * Planned: `futures.md` P1 language core (structs/enums) closes the rest.
 * Score impact: `Types 4→6 done (+2, Python/Node parity)`; `Types 6→8 (+2)` left.
 
-### 3. Concurrency subset — goroutines underneath, but no `select`, no race detector
+### 3. Concurrency (v2.1: Rust parity) — `select` + `for v in chan` landed; no `--race`/cancel yet
 
-* Today: `go + chan(n)/send/recv/close/try_send/try_recv/chan_len/chan_cap/sleep`,
-  flat global lib namespace (name collisions across `go` closures).
-* Go level needs: `select` + `timeout/default`, `for v in chan`, buffered-chan spec,
-  `fusion run --race` (reuse Go race detector), structured workers/timeouts.
-* Rust level needs: `send/sync`-like docs, cancel/context (`with_timeout`),
+* Today (v2.1): `go` + `chan(n)/send/recv/close` +
+  `select { case v = recv(c) / recv(c) / send(c, v) / timeout(ms) / default }`
+  (blocks until one case is ready, ready cases win uniformly at random like Go,
+  `break` ends the `select`, `ch = nil` disables a case for fan-in drains) +
+  `for v in ch` (drains until close, like Go's `range ch`) +
+  `recv_timeout/send_timeout/chan_closed` + `try_send/try_recv/chan_len/chan_cap/sleep`.
+* Go level still needs: `fusion run --race` (reuse Go race detector),
+  structured workers/timeouts (`with_timeout`), buffered-chan spec docs.
+* Rust level still needs: `send/sync`-like docs, cancel/context,
   deterministic test scheduler for `go` blocks.
-* Planned: `futures.md` P0 `select`, P1 `chan` iteration + namespaced imports.
-* Score impact: `Concurrency 6→9 (+3)`.
+* Planned: `futures.md` P1 (timeouts/context, scheduler) + namespaced imports.
+* Score impact: `Concurrency 6→8 done (+2, Rust parity)`; `Concurrency 8→9 (+1)` left
+  for `--race` + structured cancellation.
 
 ### 4. Small stdlib — no `http/net/socket`, no threads/process control
 
@@ -390,7 +396,7 @@ until `futures.md` P0/P1 land.
 | 2 | Targets | `GOOS/GOARCH` | tiers + WASM | none | `--target` matrix + WASM | `futures.md` P1 runtime |
 | 3 | Types | structs/interfaces/generics | traits/enums/`Result` | gradual `: type` + `is`/`?.`/`??` | structs/enums/generics | `futures.md` P1 core |
 | 4 | Errors | multi-return | `Result/Option/?` | `ok/err` values + `error()`+`try/catch` | exhaustive `Result` checks | `futures.md` P0 done, P1 polish |
-| 5 | Concurrency | `select`/race | `tokio`/rayon | `go/chan` only | `select`, `--race`, timeouts | `futures.md` P0+P1 |
+| 5 | Concurrency | `select`/race | `tokio`/rayon | `go/chan/select/timeout/for-in-chan` | `--race`, `with_timeout`, scheduler | `futures.md` P0 done, P1 rest |
 | 6 | Memory | GC + `sync` | borrowck | Go GC (ok) | document sharing rules, no borrowck | non-goal, docs only |
 | 7 | Stdlib net | `net/http` | `std::net`+crates | none | `http_*`, `net/ws`+TLS | `futures.md` P1 stdlib |
 | 8 | Stdlib OS | `os/exec` | `std::process` | `sleep/exit` only | `exec`/pipes/signals, full `fs` | `futures.md` P1 stdlib |
