@@ -662,12 +662,9 @@ func (c *compiler) compileForIn(st *frontend.Stmt) error {
 	c.beginScope()
 	iterTmp := c.hiddenName("iter")
 	idxTmp := c.hiddenName("idx")
+	needKeys := len(st.Names) == 2
 	keysTmp := ""
-	needKeys := false
-	// detect map two-var early? decided at runtime; keep keys slot always for maps
-	if len(st.Names) == 2 {
-		// arrays/strings use idx directly; maps need sorted keys array
-		needKeys = true
+	if needKeys {
 		keysTmp = c.hiddenName("keys")
 	}
 	if err := c.compileExpr(st.Expr); err != nil {
@@ -679,91 +676,51 @@ func (c *compiler) compileForIn(st *frontend.Stmt) error {
 	c.emit(OpConst, c.addConst(Const{Kind: CKInt, Int: 0}), st.Line)
 	idxSlot := c.defineLocal(idxTmp)
 	_ = idxSlot
-	var keysSlot int
+	keysSlot := -1
 	if needKeys {
 		// keys = __map_keys_or_nil(iter)
-		c.emitNamed(OpGetLocal, iterSlot, iterTmp, st.Line)
-		c.emit(OpConst, c.addConst(Const{Kind: CKString, Str: "__map_keys_or_nil"}), st.Line)
-		// callee must be below args: reorder -> push callee first
-		// (we pushed iter first by mistake; fix by recompiling order)
-		// Simplify: pop both and re-emit in right order below.
-		// Remove the two pushes and redo:
-		code := &c.cur().fn.Chunk.Code
-		*code = (*code)[:len(*code)-2]
-		c.emit(OpConst, c.addConst(Const{Kind: CKString, Str: "__map_keys_or_nil"}), st.Line)
-		// resolve builtin as callee var
-		(*code)[len(*code)-1].Op = OpGetGlobal
-		(*code)[len(*code)-1].Arg = c.globalIndex("__map_keys_or_nil")
-		(*code)[len(*code)-1].Name = "__map_keys_or_nil"
-		c.emitNamed(OpGetLocal, iterSlot, iterTmp, st.Line)
+		c.emitGetGlobal("__map_keys_or_nil", st.Line)
+		c.emitGetLocal(iterSlot, iterTmp, st.Line)
 		c.emit(OpCall, 1, st.Line)
 		keysSlot = c.defineLocal(keysTmp)
-		_ = keysSlot
 	}
-	// define loop vars
+	// loop vars need real stack slots: push nil placeholders first
 	for _, n := range st.Names {
+		c.emit(OpConst, c.addConst(Const{Kind: CKNil}), st.Line)
 		c.defineLocal(n)
 	}
 	loopStart := len(c.cur().fn.Chunk.Code)
-	c.loops = append(c.loops, loopCtx{continueAt: 0, savedDepth: c.cur().depth, savedNLocals: len(c.cur().locals) - len(st.Names)})
+	c.loops = append(c.loops, loopCtx{continueAt: -1, savedDepth: c.cur().depth, savedNLocals: len(c.cur().locals)})
 	// cond: idx < __iter_len(iter)
-	c.emit(OpConst, c.addConst(Const{Kind: CKString, Str: "__iter_len"}), st.Line)
-	code := &c.cur().fn.Chunk.Code
-	(*code)[len(*code)-1].Op = OpGetGlobal
-	(*code)[len(*code)-1].Arg = c.globalIndex("__iter_len")
-	(*code)[len(*code)-1].Name = "__iter_len"
-	c.emitNamed(OpGetLocal, iterSlot, iterTmp, st.Line)
-	c.emit(OpCall, 1, st.Line)
-	c.emitNamed(OpGetLocal, idxSlot, idxTmp, st.Line)
-	c.emit(OpLt, 0, st.Line)
-	// NOTE: OpLt pops (len, idx)? stack is [len, idx] with idx on top.
-	// We need idx < len, so swap order: recompile as idx < len.
-	// Fix: remove last 4 and re-emit correctly.
-	*code = (*code)[:len(*code)-4]
-	c.emitNamed(OpGetLocal, idxSlot, idxTmp, st.Line)
-	c.emit(OpConst, c.addConst(Const{Kind: CKString, Str: "__iter_len"}), st.Line)
-	(*code)[len(*code)-1].Op = OpGetGlobal
-	(*code)[len(*code)-1].Arg = c.globalIndex("__iter_len")
-	(*code)[len(*code)-1].Name = "__iter_len"
-	c.emitNamed(OpGetLocal, iterSlot, iterTmp, st.Line)
+	c.emitGetLocal(idxSlot, idxTmp, st.Line)
+	c.emitGetGlobal("__iter_len", st.Line)
+	c.emitGetLocal(iterSlot, iterTmp, st.Line)
 	c.emit(OpCall, 1, st.Line)
 	c.emit(OpLt, 0, st.Line)
 	jFalse := c.emit(OpJumpIfFalse, -1, st.Line)
 	c.emit(OpPop, 0, st.Line)
-	// continue target = post (idx increment); set after body patch
-	contPatch := len(c.cur().fn.Chunk.Code)
-	c.loops[len(c.loops)-1].continueAt = contPatch
-	// bind loop vars
+	// bind loop vars (continue jumps to post below, not here)
 	if len(st.Names) == 1 {
-		c.emit(OpConst, c.addConst(Const{Kind: CKString, Str: "__iter_get"}), st.Line)
-		(*code)[len(*code)-1].Op = OpGetGlobal
-		(*code)[len(*code)-1].Arg = c.globalIndex("__iter_get")
-		(*code)[len(*code)-1].Name = "__iter_get"
-		c.emitNamed(OpGetLocal, iterSlot, iterTmp, st.Line)
-		c.emitNamed(OpGetLocal, idxSlot, idxTmp, st.Line)
+		c.emitGetGlobal("__iter_get", st.Line)
+		c.emitGetLocal(iterSlot, iterTmp, st.Line)
+		c.emitGetLocal(idxSlot, idxTmp, st.Line)
 		c.emit(OpCall, 2, st.Line)
 		if err := c.storeVar(st.Names[0], st.Line); err != nil {
 			return err
 		}
 	} else {
 		// k = __iter_key(iter, keys, idx); v = __iter_val(iter, idx)
-		c.emit(OpConst, c.addConst(Const{Kind: CKString, Str: "__iter_key"}), st.Line)
-		(*code)[len(*code)-1].Op = OpGetGlobal
-		(*code)[len(*code)-1].Arg = c.globalIndex("__iter_key")
-		(*code)[len(*code)-1].Name = "__iter_key"
-		c.emitNamed(OpGetLocal, iterSlot, iterTmp, st.Line)
-		c.emitNamed(OpGetLocal, keysSlot, keysTmp, st.Line)
-		c.emitNamed(OpGetLocal, idxSlot, idxTmp, st.Line)
+		c.emitGetGlobal("__iter_key", st.Line)
+		c.emitGetLocal(iterSlot, iterTmp, st.Line)
+		c.emitGetLocal(keysSlot, keysTmp, st.Line)
+		c.emitGetLocal(idxSlot, idxTmp, st.Line)
 		c.emit(OpCall, 3, st.Line)
 		if err := c.storeVar(st.Names[0], st.Line); err != nil {
 			return err
 		}
-		c.emit(OpConst, c.addConst(Const{Kind: CKString, Str: "__iter_val"}), st.Line)
-		(*code)[len(*code)-1].Op = OpGetGlobal
-		(*code)[len(*code)-1].Arg = c.globalIndex("__iter_val")
-		(*code)[len(*code)-1].Name = "__iter_val"
-		c.emitNamed(OpGetLocal, iterSlot, iterTmp, st.Line)
-		c.emitNamed(OpGetLocal, idxSlot, idxTmp, st.Line)
+		c.emitGetGlobal("__iter_val", st.Line)
+		c.emitGetLocal(iterSlot, iterTmp, st.Line)
+		c.emitGetLocal(idxSlot, idxTmp, st.Line)
 		c.emit(OpCall, 2, st.Line)
 		if err := c.storeVar(st.Names[1], st.Line); err != nil {
 			return err
@@ -773,8 +730,12 @@ func (c *compiler) compileForIn(st *frontend.Stmt) error {
 		return err
 	}
 	// post: idx = idx + 1  (continue jumps here)
-	c.patch(c.loops[len(c.loops)-1].continueAt, len(c.cur().fn.Chunk.Code))
-	c.emitNamed(OpGetLocal, idxSlot, idxTmp, st.Line)
+	postPos := len(c.cur().fn.Chunk.Code)
+	for _, cp := range c.loops[len(c.loops)-1].continues {
+		c.patch(cp, postPos)
+	}
+	c.loops[len(c.loops)-1].continueAt = postPos
+	c.emitGetLocal(idxSlot, idxTmp, st.Line)
 	c.emit(OpConst, c.addConst(Const{Kind: CKInt, Int: 1}), st.Line)
 	c.emit(OpAdd, 0, st.Line)
 	c.emitNamed(OpSetLocal, idxSlot, idxTmp, st.Line)
@@ -803,15 +764,6 @@ func (c *compiler) compileForC(st *frontend.Stmt) error {
 		if err := c.compileStmt(st.Init); err != nil {
 			return err
 		}
-		// init `let` leaves value on stack; assigns don't. Normalize:
-		if st.Init.Kind == frontend.StmtLet {
-			c.emit(OpPop, 0, st.Line)
-			// convert stack slot handling: let already defined local; pop the value
-			// but keep the slot? Our locals live on the VM stack, so popping here
-			// would desync. Instead: lets in for-init keep their slot; undo the pop.
-			code := &c.cur().fn.Chunk.Code
-			*code = (*code)[:len(*code)-1]
-		}
 	}
 	loopStart := len(c.cur().fn.Chunk.Code)
 	// cond (empty = true)
@@ -824,19 +776,19 @@ func (c *compiler) compileForC(st *frontend.Stmt) error {
 	}
 	jFalse := c.emit(OpJumpIfFalse, -1, st.Line)
 	c.emit(OpPop, 0, st.Line)
-	c.loops = append(c.loops, loopCtx{continueAt: 0, savedDepth: c.cur().depth, savedNLocals: len(c.cur().locals)})
+	// continue target (post) unknown until after body: use placeholder list
+	c.loops = append(c.loops, loopCtx{continueAt: -1, savedDepth: c.cur().depth, savedNLocals: len(c.cur().locals)})
 	if err := c.compileStmt(st.Body); err != nil {
 		return err
 	}
-	c.patch(c.loops[len(c.loops)-1].continueAt, len(c.cur().fn.Chunk.Code))
-	// fix continue target to post
-	c.loops[len(c.loops)-1].continueAt = len(c.cur().fn.Chunk.Code)
+	postPos := len(c.cur().fn.Chunk.Code)
+	for _, cp := range c.loops[len(c.loops)-1].continues {
+		c.patch(cp, postPos)
+	}
+	c.loops[len(c.loops)-1].continueAt = postPos
 	if st.Post != nil {
 		if err := c.compileStmt(st.Post); err != nil {
 			return err
-		}
-		if st.Post.Kind == frontend.StmtExpr {
-			// expr-stmt already popped itself; nothing to do
 		}
 	}
 	c.emit(OpJump, loopStart, st.Line)
@@ -845,12 +797,6 @@ func (c *compiler) compileForC(st *frontend.Stmt) error {
 	l := c.loops[len(c.loops)-1]
 	for _, b := range l.breaks {
 		c.patch(b, len(c.cur().fn.Chunk.Code))
-	}
-	// patch continues that were emitted before post existed
-	for i, ins := range c.cur().fn.Chunk.Code {
-		if ins.Op == OpJump && ins.Arg == 0 && i < loopStart {
-			_ = i
-		}
 	}
 	c.loops = c.loops[:len(c.loops)-1]
 	c.endScope(st.Line)
@@ -882,7 +828,7 @@ func (c *compiler) compileFuncDef(name string, params []string, body *frontend.S
 	c.frames = c.frames[:len(c.frames)-1]
 	// push func value in enclosing frame
 	c.emit(OpConst, c.addConst(Const{Kind: CKFunc, Func: idx}), line)
-	if len(c.frames) == 1 {
+	if len(c.frames) == 1 && c.frames[0].depth == 0 {
 		gi := c.globalIndex(name)
 		c.emitNamed(OpDefineGlobal, gi, name, line)
 	} else {

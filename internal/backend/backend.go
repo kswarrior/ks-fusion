@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -307,11 +308,25 @@ type deferredCall struct {
 
 func newEnv(parent *Env) *Env { return &Env{Parent: parent, Vars: map[string]Value{}} }
 
+func newEnvSized(parent *Env, size int) *Env {
+	if size < 0 {
+		size = 0
+	}
+	return &Env{Parent: parent, Vars: make(map[string]Value, size)}
+}
+
 // ---------------------------------------------------------------------------
 // Interpreter
 // ---------------------------------------------------------------------------
 
 // Interpreter holds global state. Safe for concurrent `go` use.
+//
+// Perf: variable scopes are goroutine-private until the first `go`
+// statement runs. While conc is false the interpreter uses lock-free
+// map access (single goroutine, no races). The first `go` flips conc
+// to true permanently and all later scope access takes the global
+// RWMutex. This keeps the single-threaded fast path (fib, loops)
+// free of atomic/mutex overhead per lookup.
 type Interpreter struct {
 	mu       sync.RWMutex
 	globals  *Env
@@ -322,6 +337,7 @@ type Interpreter struct {
 	baseDir  string
 	impMu    sync.Mutex
 	imported map[string]bool
+	conc     atomic.Bool
 }
 
 func New() *Interpreter {
@@ -402,6 +418,10 @@ func (in *Interpreter) ExecProgram(p *frontend.Program) error {
 }
 
 func (in *Interpreter) fail() error {
+	// Fast path: no `go` ran yet, no concurrent writer exists.
+	if !in.conc.Load() {
+		return in.err
+	}
 	in.merr.Lock()
 	defer in.merr.Unlock()
 	return in.err
@@ -484,8 +504,16 @@ func withLine(line int, err error) error {
 	return err
 }
 
-// env helpers (locked)
+// env helpers: lock-free while single-threaded (!conc), locked after `go`.
 func (in *Interpreter) lookup(env *Env, name string) (Value, bool) {
+	if !in.conc.Load() {
+		for e := env; e != nil; e = e.Parent {
+			if v, ok := e.Vars[name]; ok {
+				return v, true
+			}
+		}
+		return Nil(), false
+	}
 	in.mu.RLock()
 	defer in.mu.RUnlock()
 	for e := env; e != nil; e = e.Parent {
@@ -497,12 +525,25 @@ func (in *Interpreter) lookup(env *Env, name string) (Value, bool) {
 }
 
 func (in *Interpreter) define(env *Env, name string, v Value) {
+	if !in.conc.Load() {
+		env.Vars[name] = v
+		return
+	}
 	in.mu.Lock()
 	defer in.mu.Unlock()
 	env.Vars[name] = v
 }
 
 func (in *Interpreter) assign(env *Env, name string, v Value) bool {
+	if !in.conc.Load() {
+		for e := env; e != nil; e = e.Parent {
+			if _, ok := e.Vars[name]; ok {
+				e.Vars[name] = v
+				return true
+			}
+		}
+		return false
+	}
 	in.mu.Lock()
 	defer in.mu.Unlock()
 	for e := env; e != nil; e = e.Parent {
@@ -519,8 +560,8 @@ func (in *Interpreter) assign(env *Env, name string, v Value) bool {
 // ---------------------------------------------------------------------------
 
 func (in *Interpreter) execStmt(env *Env, st *frontend.Stmt) error {
-	if in.fail() != nil {
-		return in.fail()
+	if f := in.fail(); f != nil {
+		return f
 	}
 	switch st.Kind {
 	case frontend.StmtLet:
@@ -573,6 +614,8 @@ func (in *Interpreter) execStmt(env *Env, st *frontend.Stmt) error {
 		if inner.Kind == frontend.StmtDefer {
 			return fmt.Errorf("go defer is not allowed (defer runs when the enclosing function returns)")
 		}
+		// Entering concurrent mode: all later scope access is locked.
+		in.conc.Store(true)
 		child := newEnv(env)
 		in.wg.Add(1)
 		go func() {
@@ -600,14 +643,13 @@ func (in *Interpreter) execStmt(env *Env, st *frontend.Stmt) error {
 			return err
 		}
 		if IsTruthy(c) {
-			return in.execStmt(newEnv(env), st.Then)
+			// Then is always a Block which creates its own scope;
+			// no extra env needed (saves 1 map alloc per if).
+			return in.execStmt(env, st.Then)
 		}
 		if st.Else != nil {
-			// else-if is a StmtIf: exec in same env; else-block: new scope
-			if st.Else.Kind == frontend.StmtIf {
-				return in.execStmt(env, st.Else)
-			}
-			return in.execStmt(newEnv(env), st.Else)
+			// else-if is a StmtIf: exec in same env; else-block: Block scopes itself.
+			return in.execStmt(env, st.Else)
 		}
 		return nil
 	case frontend.StmtWhile:
@@ -620,7 +662,8 @@ func (in *Interpreter) execStmt(env *Env, st *frontend.Stmt) error {
 			if !IsTruthy(c) {
 				return nil
 			}
-			err = in.execStmt(newEnv(child), st.Body)
+			// Body is a Block with its own per-iteration scope.
+			err = in.execStmt(child, st.Body)
 			if err != nil {
 				if ce, ok := err.(*ctrlError); ok {
 					switch ce.kind {

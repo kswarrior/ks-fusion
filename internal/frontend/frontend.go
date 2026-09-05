@@ -44,6 +44,8 @@ const (
 	ExprMod
 	ExprPow
 	ExprIn
+	ExprIs
+	ExprCoalesce
 	ExprEq
 	ExprNe
 	ExprLt
@@ -72,6 +74,7 @@ type Expr struct {
 	Name       string
 	Left       *Expr
 	Right      *Expr
+	Safe       bool  // true for `?.` nil-safe index/field access
 	SliceStart *Expr // nil = omitted start
 	SliceEnd   *Expr // nil = omitted end
 	Args       []*Expr
@@ -80,6 +83,8 @@ type Expr struct {
 	MapKeys    []string
 	MapVals    []*Expr
 	FuncParams []string
+	FuncParamTypes []string // parallel to FuncParams, "" = any
+	FuncReturnType string   // "" = any
 	FuncBody   *Stmt
 }
 
