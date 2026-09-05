@@ -15,7 +15,7 @@
 //	stmts: print, if/else, while, for-in (array/map/string), for-c,
 //	       func/return, break/continue, blocks
 //
-// Not yet: go/chan, import, try/catch, switch, defer, sleep, slices,
+// Not yet: go/chan/select, import, try/catch, switch, defer, sleep, slices,
 // closures capturing outer locals, methods mutating shared state.
 package compiler
 
