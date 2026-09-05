@@ -206,6 +206,90 @@ Grand total (sum of all 14 totals) = `965 / 1400`, average `68.9/100`.
 `.ks` total `44/100` reflects v2.0 reality: best at learning/scripts,
 behind everywhere else until `futures.md` P0/P1 land.
 
+## Why not Go/Rust-class (v2.0 gaps + what parity needs)
+
+> Score context: `.ks 44/100` vs `Go 82/100` vs `Rust 81/100`.
+> The 37–38 pt gap is exactly the 5 blocks below. Fix them → ~75–80/100.
+
+### 1. No compiler — interpreted AST, no native/static binary, no LLVM, no JIT
+
+* Today: tree-walk interpreter (`internal/backend`), `.kslib` = source JSON (`kslib-1`),
+  needs `fusion` on PATH. `fib(25)` ~5x slower than Go.
+* Go level needs: `fusion build --bin` single static executable, cross-compile
+  `--target linux/amd64,arm64,darwin,windows,wasm`, build cache, `go vet`-style IR check.
+* Rust level needs: LLVM/opt backend or bytecode VM + AOT, LTO, strip/symbol options,
+  reproducible builds. Minimum viable: bytecode VM (5–20x speedup) first, then AOT.
+* Planned: `docs/futures.md` P1 runtime (`VM → --bin → --target → --cpuprofile`).
+* Score impact: `Perf 4→8 (+4)`, `Build 4→9 (+5)`.
+
+### 2. No static types — only dynamic `nil/bool/int/float/string/array/map/func/chan`
+
+* Today: dynamic only, no structs/enums/generics/traits/borrow-checker,
+  `==` is deep equality, arity checked only at call time.
+* Go level needs: optional static check — structs, interfaces, generics,
+  `nil`-safety (`?.`/`??`), exhaustive `switch`, `vet` for unused/arity.
+* Rust level needs: `Result/Option` instead of abort-only `error(msg)`,
+  enums + pattern matching, ownership-safe FFI boundaries (no full borrowck —
+  explicit non-goal, Go GC stays).
+* Planned: `futures.md` P0 error-values + P1 language core.
+* Score impact: `Types 4→8 (+4)`.
+
+### 3. Concurrency subset — goroutines underneath, but no `select`, no race detector
+
+* Today: `go + chan(n)/send/recv/close/try_send/try_recv/chan_len/chan_cap/sleep`,
+  flat global lib namespace (name collisions across `go` closures).
+* Go level needs: `select` + `timeout/default`, `for v in chan`, buffered-chan spec,
+  `fusion run --race` (reuse Go race detector), structured workers/timeouts.
+* Rust level needs: `send/sync`-like docs, cancel/context (`with_timeout`),
+  deterministic test scheduler for `go` blocks.
+* Planned: `futures.md` P0 `select`, P1 `chan` iteration + namespaced imports.
+* Score impact: `Concurrency 6→9 (+3)`.
+
+### 4. Small stdlib — no `http/net/socket`, no threads/process control
+
+* Today: ~80 builtins (strings/arrays/maps/JSON/files/math/time/rand) — no
+  `http_serve/get/post`, TCP/WS, `exec/pipes/signals`, `regex/crypto/db`.
+* Go level needs: `net/http` (server + client), `fs` full (`stat/cp/mv/glob/watch`),
+  `process.exec`, `time` formatting, `log/flags`, `testing` helpers.
+* Rust level needs: `tokio`-like async IO story (or documented blocking + workers),
+  `serde`-like JSON schema validation, `sqlite_*` → `postgres_*`, TLS.
+* Planned: `futures.md` P1 stdlib list in that exact order.
+* Score impact: `Stdlib 4→9 (+5)`.
+
+### 5. No ecosystem — local file search only, no registry/resolver/LSP
+
+* Today: `fusion.toml` + newest local `test-releases/<name>-<ver>.kslib` wins,
+  no lockfile, no semver range, no `fmt/vet/test/bench/doc/repl/LSP/debugger/profiler`.
+* Go level needs: proxy-style registry + checksums, `fusion.lock`, `^/~ />=` resolver,
+  `vendor/`, `fusion fmt/vet/test/bench/doc`, `cpuprofile`, VS Code ext.
+* Rust level needs: `cargo publish/yank`, namespaces (`scope/name`), yank + audit,
+  docs.rs-like docs, criterion-style benches.
+* Planned: `futures.md` P0 tooling + P2 registry/DX.
+* Score impact: `Ecosystem 3→8 (+5)`, `Tooling 4→9 (+5)`, `Maturity 3→8 (+5)`.
+
+### Go/Rust-level checklist (all things, with owner doc)
+
+| # | Area | Go bar | Rust bar | .ks v2.0 | Needed to close | Closes in |
+|---|---|---|---|---|---|---|
+| 1 | Compiler | `go build` static bin | `rustc` LLVM + LTO | tree-walk only | VM → AOT `--bin` | `futures.md` P1 runtime |
+| 2 | Targets | `GOOS/GOARCH` | tiers + WASM | none | `--target` matrix + WASM | `futures.md` P1 runtime |
+| 3 | Types | structs/interfaces/generics | traits/enums/`Result` | 8 dynamic types | opt-in structs/enums/`Result` | `futures.md` P0+P1 core |
+| 4 | Errors | multi-return | `Result/Option/?` | `error()`+`try/catch` | error values, keep `try/catch` | `futures.md` P0 |
+| 5 | Concurrency | `select`/race | `tokio`/rayon | `go/chan` only | `select`, `--race`, timeouts | `futures.md` P0+P1 |
+| 6 | Memory | GC + `sync` | borrowck | Go GC (ok) | document sharing rules, no borrowck | non-goal, docs only |
+| 7 | Stdlib net | `net/http` | `std::net`+crates | none | `http_*`, `net/ws`+TLS | `futures.md` P1 stdlib |
+| 8 | Stdlib OS | `os/exec` | `std::process` | `sleep/exit` only | `exec`/pipes/signals, full `fs` | `futures.md` P1 stdlib |
+| 9 | Data | `encoding/*` | `serde` | `json_*` only | schema validation, `regex`, `crypto`, `sqlite/postgres` | `futures.md` P1 stdlib |
+| 10 | Packages | proxy + `go.sum` | crates.io + lock | local newest-wins | registry + `fusion.lock` + semver + vendor | `futures.md` P0+P2 |
+| 11 | Tooling | `fmt/vet/test/bench/pprof` | `clippy/fmt/bench` | `new/run/build` only | `fmt/vet/test/bench/doc/repl` | `futures.md` P0+P2 DX |
+| 12 | IDE | `gopls` | `rust-analyzer` | none | LSP + VS Code ext + debugger | `futures.md` P2 DX |
+| 13 | Frontend | `html/template`/WASM | WASM pkgs | console `frontend/` | `--web` reload + `--js` subset + Next.js pattern | `futures.md` P2 frontend |
+| 14 | FFI | `cgo` | `unsafe`/FFI | none | opt-in `ffi_*` + Go plugin API | `futures.md` P2 interop |
+| 15 | Stability | compat promise | editions | v2.0 | RFC process + semver + LTS | `futures.md` §5 |
+
+Close rows 1–5 + 10–11 and `.ks` moves `44 → ~75/100` (Go/Rust-class for scripts/services).
+Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
+
 ## Decision guide
 
 1. Browser UI? → Next.js.
