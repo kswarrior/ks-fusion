@@ -130,16 +130,65 @@ Truthiness: `nil false 0 0.0 "" [] {}` are falsy, everything else truthy.
 ### Builtins
 
 ```
+# core
 print(...)             statement (also print("a", "b"))
-len(x)                 string/array/map length
-str(x) int(x) float(x) conversions
+len(x)                 string/array/map/chan length
+str(x) int(x) float(x) bool(x)   conversions (bool = truthiness)
+chr(n) ord(s) hex(n)   char codes, 255 -> "0xff"
 type(x)                 "nil|bool|int|float|string|array|map|func|chan"
 range(n) range(a,b) range(a,b,step)
-push(arr, v) pop(arr)  mutate array
+assert(cond, msg?) error(msg) panic(msg)
+
+# arrays
+push(arr, v) pop(arr)  mutate array (push returns new len)
+insert(arr, i, v) remove(arr, i)   index ops (remove returns value)
+clear(arr/map)         empty in place
+reverse(arr) sort(arr) in place, return arr
+slice(x, i, j?)        array/string slice (negatives ok); or x[i:j]
+
+# maps
 keys(m) values(m) has(m, k)
+delete(m, k)           returns true if the key existed
+merge(m1, m2, ...)     new map combining all (later wins)
+get(m, k, default?)    value or default/nil
+
+# strings (all return new strings)
+split(s, sep) join(arr, sep)
+upper(s) lower(s) trim(s, cutset?)
+contains(h, n)         substring / array member / map key
+index_of(h, n)         rune index (string) or position (array), -1 if absent
+starts_with(s, p) ends_with(s, sfx)
+replace(s, old, new) substr(s, start, len?) repeat(s, n)
+
+# math + time + random
+abs(x) min(...) max(...)      (also min/max of one array)
+floor(x) ceil(x) round(x) sqrt(x) pow(a, b) pi()
+now()                  ms since epoch
+rand()                 float in [0, 1); randint(lo, hi); seed(n)
+
+# bitwise (ints)
+bit_and(a,b) bit_or(a,b) bit_xor(a,b) bit_shl(a,n) bit_shr(a,n) bit_not(a)
+
+# functional
+map(arr, fn) filter(arr, fn) each(arr, fn)
+reduce(arr, fn, init?) apply(fn, argsArray)
+
+# json
+json_stringify(v) json_parse(s)
+
+# files + OS
+read_file(p) write_file(p, s) append_file(p, s)
+exists(p) list_dir(dir?) mkdir(p) remove(p) remove_file(p)
+input(prompt?)         read a line from stdin
+argv()                 process args; env(name, default?)
+exit(code?)
+
+# concurrency
 chan(n?) send(ch, v) recv(ch) close(ch)
+try_send(ch, v)        non-blocking send, returns bool
+try_recv(ch)           non-blocking recv, nil when empty
+chan_len(ch) chan_cap(ch)
 sleep(ms)              also a statement
-assert(cond, msg?) error(msg)
 ```
 
 ### Scoping

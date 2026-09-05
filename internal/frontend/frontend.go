@@ -307,7 +307,8 @@ func isDigitForBase(c byte, kind byte) bool {
 	}
 }
 
-func lex(src, path string) ([]token, error) {	var toks []token
+func lex(src, path string) ([]token, error) {
+	var toks []token
 	line := 1
 	i := 0
 	n := len(src)
