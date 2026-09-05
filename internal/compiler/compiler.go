@@ -208,7 +208,8 @@ type local struct {
 
 type loopCtx struct {
 	breaks       []int
-	continueAt   int
+	continues    []int
+	continueAt   int // >=0 when known before body; -1 defers to continues list
 	savedDepth   int
 	savedNLocals int
 }
@@ -405,7 +406,13 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 			return fmt.Errorf("line %d: continue outside loop (compiler v0.1)", st.Line)
 		}
 		c.popToLoopDepth(st.Line)
-		c.emit(OpJump, c.loops[len(c.loops)-1].continueAt, st.Line)
+		lc := &c.loops[len(c.loops)-1]
+		if lc.continueAt >= 0 {
+			c.emit(OpJump, lc.continueAt, st.Line)
+		} else {
+			pos := c.emit(OpJump, -1, st.Line)
+			lc.continues = append(lc.continues, pos)
+		}
 		return nil
 	case frontend.StmtExpr:
 		if err := c.compileExpr(st.Expr); err != nil {
@@ -433,19 +440,31 @@ func (c *compiler) popToLoopDepth(line int) {
 	if len(c.loops) == 0 {
 		return
 	}
+	// Emit pops for the jump path only; do NOT mutate the lexical locals
+	// list (following statements in the same block still see them).
 	want := c.loops[len(c.loops)-1].savedNLocals
-	cur := c.cur()
-	for len(cur.locals) > want {
-		cur.locals = cur.locals[:len(cur.locals)-1]
+	n := len(c.cur().locals) - want
+	for i := 0; i < n; i++ {
 		c.emit(OpPop, 0, line)
 	}
+}
+
+func (c *compiler) emitGetGlobal(name string, line int) {
+	gi := c.globalIndex(name)
+	c.emitNamed(OpGetGlobal, gi, name, line)
+}
+
+func (c *compiler) emitGetLocal(slot int, name string, line int) {
+	c.emitNamed(OpGetLocal, slot, name, line)
 }
 
 func (c *compiler) compileLet(st *frontend.Stmt) error {
 	if err := c.compileExpr(st.Expr); err != nil {
 		return err
 	}
-	if len(c.frames) == 1 {
+	// Top-level (depth 0) lets are globals; block-scoped and function lets
+	// are locals so `{ let x = 1 }` does not leak.
+	if len(c.frames) == 1 && c.cur().depth == 0 {
 		gi := c.globalIndex(st.Name)
 		c.emitNamed(OpDefineGlobal, gi, st.Name, st.Line)
 		return nil
