@@ -1,6 +1,6 @@
 # ks-fusion vs Others
 
-> ks-fusion `v2.0`: dynamic interpreted `.ks` language, toolchain written in Go.
+> ks-fusion `v2.1`: gradual-typed interpreted `.ks` language, toolchain written in Go.
 > Easy like Python, concurrency like Go, packaging like Rust.
 > This doc is honest about where `.ks` wins and where it loses.
 
@@ -8,19 +8,19 @@
 
 | If you need… | Pick… | Why not `.ks` yet |
 |---|---|---|
-| Single static binary, max RPS, strict types | Go / Rust | `.ks` is tree-walk interpreted, dynamic, ~5x slower on `fib(25)` |
+| Single static binary, max RPS, strict types | Go / Rust | `.ks` is tree-walk interpreted, gradual-typed, ~5x slower on `fib(25)` |
 | Kernel, drivers, games, hard realtime | C / C++ / Rust | No manual memory, no pointers, no SIMD |
 | Browser UI / React / SSR | Next.js (TS) | `frontend/main.ks` is console logic today, not DOM |
 | CRUD + auth + admin panel tomorrow | PHP Laravel / Python Django | No ORM, migrations, HTTP server stdlib yet |
 | Quick scripts, rules, gluing, learning | ks-fusion | — this is the sweet spot |
-| npm / PyPI ecosystem | Node.js / Python | `.ks` has ~80 builtins + local `.kslib` only |
+| npm / PyPI ecosystem | Node.js / Python | `.ks` has ~90 builtins + local `.kslib` only |
 
 ## Big table
 
 |  | ks-fusion (.ks) | Go | Rust | C | C++ | Node.js (JS/TS) | Python | Next.js | PHP Laravel |
 |---|---|---|---|---|---|---|---|---|---|
 | Model | interpreted tree-walk (Go) | compiled, GC | compiled, no GC (borrowck) | compiled, manual | compiled, RAII | V8 JIT | interpreted (+C ext) | React framework on Node | interpreted + framework |
-| Typing | dynamic: `nil bool int float string array map func chan` | static, interfaces, generics | static, traits, enums, `Result/Option` | weak static, pointers | static, templates, classes | dynamic + optional TS | dynamic + hints | TS-typed components | dynamic |
+| Typing | gradual: dynamic + `: type` annotations, `is`, `?.`/`??`, `ok`/`err` results | static, interfaces, generics | static, traits, enums, `Result/Option` | weak static, pointers | static, templates, classes | dynamic + optional TS | dynamic + hints | TS-typed components | dynamic |
 | Perf | low-medium (scripts, bots, CLIs) | high (servers) | highest (systems) | highest | highest | medium-high (I/O) | medium (glue/AI) | medium (SSR) | medium (CRUD) |
 | Concurrency | `go + chan/send/recv/close` (goroutines underneath, no `select` yet) | goroutines + `select` | `async/tokio`, threads | threads, manual | threads/`async` | event loop + workers | threads/GIL + `asyncio` | server/client components | processes + queues |
 | Packaging | `fusion.toml` + `.kslib` JSON (`kslib-1`), local `test-releases/`/`target/` | `go.mod` + proxy | `cargo` + crates.io | make/cmake | cmake/vcpkg/conan | npm/pnpm | pip/poetry | npm + Vercel | composer + artisan |
