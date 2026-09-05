@@ -185,7 +185,12 @@ func TestRunSwitch(t *testing.T) {
 	mustRun(t, "let r = \"\"\nswitch 99 {\n case 1 { r = \"one\" }\n default { r = \"dflt\" }\n}\nassert(r == \"dflt\")\n")
 	mustRun(t, "let r = \"\"\nswitch 99 {\n case 1 { r = \"one\" }\n}\nassert(r == \"\")\n")
 	mustRun(t, "for i in range(3) {\n switch i {\n case 1 { break }\n default { continue }\n }\n assert(i == 1)\n}\n")
-	mustFail(t, "switch 1 {\n default { print 1 }\n case 2 { print 2 }\n}\n")
+	// default must be last: this source must not run (parse error counts).
+	if p, err := frontend.ParseSource("switch 1 {\n default { print 1 }\n case 2 { print 2 }\n}\n", "test.ks"); err == nil {
+		if err := Run(p); err == nil {
+			t.Fatal("want error for default-before-case switch")
+		}
+	}
 }
 
 func TestRunDefer(t *testing.T) {
