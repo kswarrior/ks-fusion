@@ -32,7 +32,7 @@ See `docs/futures.md` for what closes each gap (`--bin`, `select`, `http_*`, reg
 ## How scoring works (out of 100)
 
 Each language / stack is scored `0-10` on 10 dimensions = `100` max.
-Snapshot for ks-fusion `v2.0`. Higher = better, except simplicity where
+Snapshot for ks-fusion `v2.1`. Higher = better, except simplicity where
 easier = higher. Scores are opinionated but rubric-based, not benchmarks.
 
 Dimensions: `Perf + Types + Concurrency + Stdlib + Ecosystem + Tooling +
@@ -43,7 +43,7 @@ Simplicity + Build/Deploy + Frontend + Maturity = 100`.
 | Dim (max 10) | .ks | Go | Rust | C | C++ | Node | Python | Next.js | Laravel |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | Perf | 4 | 8 | 10 | 10 | 10 | 7 | 5 | 7 | 5 |
-| Types | 4 | 8 | 10 | 5 | 8 | 6 | 6 | 8 | 5 |
+| Types | 6 | 8 | 10 | 5 | 8 | 6 | 6 | 8 | 5 |
 | Concurrency | 6 | 9 | 8 | 5 | 7 | 7 | 5 | 6 | 4 |
 | Stdlib | 4 | 9 | 8 | 6 | 8 | 8 | 10 | 8 | 8 |
 | Ecosystem | 3 | 8 | 8 | 6 | 7 | 10 | 10 | 10 | 8 |
@@ -52,7 +52,7 @@ Simplicity + Build/Deploy + Frontend + Maturity = 100`.
 | Build/Deploy | 4 | 10 | 9 | 8 | 8 | 6 | 5 | 7 | 6 |
 | Frontend | 3 | 5 | 6 | 2 | 4 | 8 | 5 | 10 | 7 |
 | Maturity | 3 | 9 | 8 | 9 | 9 | 9 | 10 | 8 | 8 |
-| **Total /100** | **44** | **82** | **81** | **62** | **73** | **77** | **74** | **79** | **67** |
+| **Total /100** | **46** | **82** | **81** | **62** | **73** | **77** | **74** | **79** | **67** |
 
 Extra stacks (same rubric): `TypeScript 79`, `Java/Kotlin/Spring 78`,
 `Vite 77`, `Deno/Bun 77`, `React 76`, `Lua 58`, `Ruby/Rails 68`, `Bash 45`.
@@ -61,7 +61,7 @@ Details in `More` below. Frontend breakdown:
 | Dim (max 10) | .ks | TypeScript | React | Vite | Next.js |
 |---|---:|---:|---:|---:|---:|
 | Perf | 4 | 6 | 7 | 8 | 7 |
-| Types | 4 | 9 | 8 | 6 | 8 |
+| Types | 6 | 9 | 8 | 6 | 8 |
 | Concurrency | 6 | 6 | 5 | 4 | 6 |
 | Stdlib | 4 | 7 | 5 | 4 | 8 |
 | Ecosystem | 3 | 10 | 10 | 9 | 10 |
@@ -70,16 +70,17 @@ Details in `More` below. Frontend breakdown:
 | Build/Deploy | 4 | 7 | 7 | 10 | 7 |
 | Frontend | 3 | 10 | 10 | 10 | 10 |
 | Maturity | 3 | 9 | 9 | 8 | 8 |
-| **Total /100** | **44** | **79** | **76** | **77** | **79** |
+| **Total /100** | **46** | **79** | **76** | **77** | **79** |
 
 ## Language-by-language
 
 ### vs Go (implementation language)
 
-**Score: ks-fusion 44/100 vs Go 82/100 — Go wins by 38.**
+**Score: ks-fusion 46/100 vs Go 82/100 — Go wins by 36.**
 
 Same ideas: `go func(){...}()`, `chan(1)`, `send/recv/close`, `defer` LIFO.
-Difference: Go is compiled + statically typed; `.ks` is interpreted + dynamic.
+Difference: Go is compiled + statically typed; `.ks` is interpreted + gradual-typed
+(optional `: type` annotations checked at runtime, `is`/`?.`/`??`).
 
 ```go
 // Go
@@ -103,19 +104,19 @@ Pick `.ks` for shorter scripts with Go-flavored concurrency and no compile step.
 
 ### vs Rust
 
-**Score: ks-fusion 44/100 vs Rust 81/100 — Rust wins by 37.**
+**Score: ks-fusion 46/100 vs Rust 81/100 — Rust wins by 35.**
 
 Rust gives ownership, `Result/Option`, `cargo` registry, zero-cost abstractions.
 `.ks` copies the `cargo` UX (`fusion new --lib`, `fusion build --release`,
 `test-releases/` like `target/release/`) but bundles are source JSON, imports are
-flat globals, errors are `error(msg)` + `try/catch`.
+flat globals, errors are `ok(v)/err(e)` values + `error(msg)` + `try/catch`.
 
 Pick Rust for perf-critical, safety-critical, WASM libs.
 Pick `.ks` for Day-1 productivity without borrow checker.
 
 ### vs C
 
-**Score: ks-fusion 44/100 vs C 62/100 — C wins by 18.**
+**Score: ks-fusion 46/100 vs C 62/100 — C wins by 16.**
 
 C gives pointers, manual `malloc/free`, direct syscalls, tiny runtimes.
 `.ks` gives `array/map/string` + GC (from Go) + bounds-checked indexing.
@@ -125,7 +126,7 @@ Pick `.ks` for everything where `segfault` is unacceptable.
 
 ### vs C++
 
-**Score: ks-fusion 44/100 vs C++ 73/100 — C++ wins by 29.**
+**Score: ks-fusion 46/100 vs C++ 73/100 — C++ wins by 27.**
 
 C++ gives RAII, templates, classes, deterministic destruction, huge game/engine libs.
 `.ks` gives `func` closures + `defer` + duck-typed maps instead of classes.
@@ -135,10 +136,10 @@ Pick `.ks` for config-driven logic on top of those engines.
 
 ### vs Node.js
 
-**Score: ks-fusion 44/100 vs Node.js 77/100 — Node wins by 33.**
+**Score: ks-fusion 46/100 vs Node.js 77/100 — Node wins by 31.**
 
 Node gives V8, `npm` (2M+ packages), `fetch/http`, event loop, TypeScript.
-`.ks` gives simpler blocking `recv/sleep` + ~80 sync builtins, no `http_*` yet.
+`.ks` gives simpler blocking `recv/sleep` + ~90 sync builtins, no `http_*` yet.
 
 ```js
 // Node
@@ -156,11 +157,12 @@ Pick `.ks` for small deterministic scripts without `node_modules`.
 
 ### vs Python
 
-**Score: ks-fusion 44/100 vs Python 74/100 — Python wins by 30.**
+**Score: ks-fusion 46/100 vs Python 74/100 — Python wins by 28.**
 
 Closest feel: `let x = 10`, `for i in range(5)`, `a[1:3]`, `and/or/not`,
 truthiness (`nil false 0 0.0 "" [] {}` falsy), `map/filter/reduce`.
-Difference: `.ks` adds `go/chan/defer/switch` and braces; Python has huge stdlib
+Difference: `.ks` adds `go/chan/defer/switch`, gradual `: type` annotations,
+`is`/`?.`/`??` and braces; Python has huge stdlib
 (`requests`, `numpy`, `django`) while `.ks` has files/JSON/strings only.
 
 Pick Python for data/AI/science/ops (ecosystem wins).
@@ -168,7 +170,7 @@ Pick `.ks` for learning concurrency early or embedding a tiny Go-based runtime.
 
 ### vs Next.js (framework, not language)
 
-**Score: ks-fusion 44/100 vs Next.js 79/100 — Next.js wins by 35 (different category).**
+**Score: ks-fusion 46/100 vs Next.js 79/100 — Next.js wins by 33 (different category).**
 
 Category error if compared 1:1. Next.js = React + routing + SSR/ISR + Node runtime.
 ks-fusion app = `backend/main.ks + frontend/main.ks` run concurrently in console.
@@ -182,10 +184,11 @@ Pick `.ks` for the logic worker behind it.
 
 ### vs TypeScript (language, not runtime)
 
-**Score: ks-fusion 44/100 vs TypeScript 79/100 — TS wins by 35.**
+**Score: ks-fusion 46/100 vs TypeScript 79/100 — TS wins by 33.**
 
 TypeScript = JS + static types (`tsc`, `strict`, generics, unions).
-`.ks` = dynamic only (`nil bool int float string array map func chan`).
+`.ks` = gradual types (dynamic by default, optional `: type` runtime checks,
+`is` narrowing, `?.`/`??` nil-safety, `ok`/`err` results).
 
 ```ts
 // TypeScript
@@ -194,9 +197,13 @@ type User = { name: string; age: number };
 ```
 
 ```python
-# .ks — no annotations, runtime checks only
-func add(a, b) { return a + b }
+# .ks v2.1 — annotations are runtime-checked (nil passes as nullable)
+func add(a: int, b: int): int { return a + b }
 let user = {name: "ada", age: 36}
+assert(user is map)
+assert(user?.name ?? "anon" == "ada")
+let r = ok(1)
+assert(r is ok)
 ```
 
 Pick TypeScript for any browser/Node code that must scale past 1k lines.

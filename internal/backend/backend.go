@@ -1296,6 +1296,11 @@ func (in *Interpreter) execSelect(env *Env, st *frontend.Stmt) (err error) {
 		ch      Value
 		sendVal Value
 		ms      int
+		// nilCh marks a recv/send case on a nil channel. Like Go, ops on
+		// nil channels block forever, so the case just never becomes
+		// ready. Assigning `ch = nil` after drain is the idiomatic way
+		// to disable a select case (fan-in loops).
+		nilCh bool
 	}
 	var comms []prepared
 	var defBody *frontend.Stmt
@@ -1309,6 +1314,10 @@ func (in *Interpreter) execSelect(env *Env, st *frontend.Stmt) (err error) {
 			if everr != nil {
 				return withLine(sc.Line, everr)
 			}
+			if ch.Kind == VNil {
+				comms = append(comms, prepared{sc: sc, nilCh: true})
+				continue
+			}
 			if ch.Kind != VChan {
 				return withLine(sc.Line, fmt.Errorf("select recv wants chan, got %s", TypeName(ch)))
 			}
@@ -1317,6 +1326,15 @@ func (in *Interpreter) execSelect(env *Env, st *frontend.Stmt) (err error) {
 			ch, everr := in.eval(env, sc.Chan)
 			if everr != nil {
 				return withLine(sc.Line, everr)
+			}
+			if ch.Kind == VNil {
+				// Evaluate the value for its side effects, then park
+				// the case as never-ready (Go: send on nil blocks).
+				if _, everr := in.eval(env, sc.Value); everr != nil {
+					return withLine(sc.Line, everr)
+				}
+				comms = append(comms, prepared{sc: sc, nilCh: true})
+				continue
 			}
 			if ch.Kind != VChan {
 				return withLine(sc.Line, fmt.Errorf("select send wants chan, got %s", TypeName(ch)))
@@ -1381,6 +1399,9 @@ func (in *Interpreter) execSelect(env *Env, st *frontend.Stmt) (err error) {
 		cases := make([]reflect.SelectCase, 0, len(comms)+1)
 		order := make([]prepared, 0, len(comms)+1)
 		for _, p := range comms {
+			if p.nilCh {
+				continue // nil channel: never ready
+			}
 			if p.sc.Kind == "recv" {
 				cases = append(cases, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(p.ch.Chan.Ch)})
 			} else {
