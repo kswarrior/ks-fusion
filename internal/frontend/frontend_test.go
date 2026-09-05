@@ -140,7 +140,8 @@ func TestParseAssignOps(t *testing.T) {
 	}
 }
 
-func TestParseFuncLitAndImport(t *testing.T) {	p, err := ParseSource("let f = func(x) {\n return x + 1\n}\nimport \"lib.ks\"\nbreak\ncontinue\nreturn 1\n", "test.ks")
+func TestParseFuncLitAndImport(t *testing.T) {
+	p, err := ParseSource("let f = func(x) {\n return x + 1\n}\nimport \"lib.ks\"\nbreak\ncontinue\nreturn 1\n", "test.ks")
 	_ = p
 	// break/continue/return outside func/loop still parse (runtime errors)
 	if err != nil {
@@ -151,5 +152,83 @@ func TestParseFuncLitAndImport(t *testing.T) {	p, err := ParseSource("let f = fu
 	}
 	if p.Statements[1].Kind != StmtImport {
 		t.Fatalf("want import, got %+v", p.Statements[1])
+	}
+}
+
+func TestParsePowInSlice(t *testing.T) {
+	p, err := ParseSource("let x = 2 ** 3 ** 2\nlet y = 2 in [1]\nlet z = a[1:2]\n", "test.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Statements[0].Expr.Kind != ExprPow {
+		t.Fatalf("want pow, got %+v", p.Statements[0].Expr)
+	}
+	// right-assoc: 2 ** (3 ** 2)
+	if p.Statements[0].Expr.Right.Kind != ExprPow {
+		t.Fatalf("want right-assoc **, got %+v", p.Statements[0].Expr.Right)
+	}
+	if p.Statements[1].Expr.Kind != ExprIn {
+		t.Fatalf("want in, got %+v", p.Statements[1].Expr)
+	}
+	if p.Statements[2].Expr.Kind != ExprSlice {
+		t.Fatalf("want slice, got %+v", p.Statements[2].Expr)
+	}
+	for _, src := range []string{"let a = [1,2]\nprint a[:2]\n", "print a[1:]\n", "print a[:]\n", "print \"hi\"[-2:]\n"} {
+		if _, err := ParseSource(src, "test.ks"); err != nil {
+			t.Fatalf("slice %q failed: %v", src, err)
+		}
+	}
+}
+
+func TestParseTrySwitchDefer(t *testing.T) {
+	p, err := ParseSource("try {\n print 1\n} catch e {\n print e\n} finally {\n print 2\n}\n", "test.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Statements[0].Kind != StmtTry || p.Statements[0].CaBody == nil || p.Statements[0].FinBody == nil {
+		t.Fatalf("bad try: %+v", p.Statements[0])
+	}
+	if p.Statements[0].Catch != "e" {
+		t.Fatalf("bad catch var: %+v", p.Statements[0])
+	}
+	p2, err := ParseSource("switch x {\n case 1, 2 { print 1 }\n default { print 2 }\n}\ndefer close(c)\ndefer print \"done\"\n", "test.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p2.Statements[0].Kind != StmtSwitch || len(p2.Statements[0].Cases) != 2 {
+		t.Fatalf("bad switch: %+v", p2.Statements[0])
+	}
+	if p2.Statements[1].Kind != StmtDefer || p2.Statements[2].Kind != StmtDefer {
+		t.Fatalf("bad defer: %+v", p2.Statements)
+	}
+	// try needs catch and/or finally
+	if _, err := ParseSource("try {\n print 1\n}\n", "test.ks"); err == nil {
+		t.Fatal("want error for bare try")
+	}
+	// switch needs branches
+	if _, err := ParseSource("switch x {\n}\n", "test.ks"); err == nil {
+		t.Fatal("want error for empty switch")
+	}
+}
+
+func TestLexNewForms(t *testing.T) {
+	p, err := ParseSource("let a = 'hi'\nlet b = 0xFF\nlet c = 1_000\nlet d = 1e3\nlet e = .5\n/* block */\nprint a\n", "test.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Statements) != 6 {
+		t.Fatalf("want 6 stmts, got %d", len(p.Statements))
+	}
+	if p.Statements[0].Expr.Kind != ExprString || p.Statements[0].Expr.StrVal != "hi" {
+		t.Fatalf("bad single-quote string: %+v", p.Statements[0].Expr)
+	}
+	if p.Statements[1].Expr.Kind != ExprInt || p.Statements[1].Expr.IntVal != 255 {
+		t.Fatalf("bad hex: %+v", p.Statements[1].Expr)
+	}
+	if p.Statements[3].Expr.Kind != ExprFloat {
+		t.Fatalf("bad exponent float: %+v", p.Statements[3].Expr)
+	}
+	if _, err := ParseSource("/* unterminated", "test.ks"); err == nil {
+		t.Fatal("want error for unterminated block comment")
 	}
 }
