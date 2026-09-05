@@ -972,6 +972,129 @@ func (in *Interpreter) execForC(env *Env, st *frontend.Stmt) error {
 	}
 }
 
+func (in *Interpreter) execTry(env *Env, st *frontend.Stmt) error {
+	err := in.execStmt(newEnv(env), st.Then)
+	if err == nil {
+		if st.FinBody != nil {
+			return in.execStmt(newEnv(env), st.FinBody)
+		}
+		return nil
+	}
+	// Control flow (return/break/continue) is never caught: run finally
+	// for cleanup, then propagate.
+	if isControl(err) {
+		if st.FinBody != nil {
+			if ferr := in.execStmt(newEnv(env), st.FinBody); ferr != nil {
+				return ferr
+			}
+		}
+		return err
+	}
+	// Runtime error: catch and/or finally.
+	if st.CaBody != nil {
+		catchEnv := newEnv(env)
+		if st.Catch != "" {
+			in.define(catchEnv, st.Catch, StrV(err.Error()))
+		}
+		if cerr := in.execStmt(catchEnv, st.CaBody); cerr != nil {
+			if st.FinBody != nil {
+				if ferr := in.execStmt(newEnv(env), st.FinBody); ferr != nil {
+					return ferr
+				}
+			}
+			return cerr
+		}
+		if st.FinBody != nil {
+			return in.execStmt(newEnv(env), st.FinBody)
+		}
+		return nil
+	}
+	if st.FinBody != nil {
+		if ferr := in.execStmt(newEnv(env), st.FinBody); ferr != nil {
+			return ferr
+		}
+	}
+	return err
+}
+
+func (in *Interpreter) execSwitch(env *Env, st *frontend.Stmt) error {
+	target, err := in.eval(env, st.Expr)
+	if err != nil {
+		return err
+	}
+	var def *frontend.SwitchCase
+	for _, c := range st.Cases {
+		if c.IsDefault {
+			def = c
+			continue
+		}
+		for _, v := range c.Values {
+			cv, err := in.eval(env, v)
+			if err != nil {
+				return err
+			}
+			if deepEqual(target, cv) {
+				return in.execStmt(newEnv(env), c.Body)
+			}
+		}
+	}
+	if def != nil {
+		return in.execStmt(newEnv(env), def.Body)
+	}
+	return nil
+}
+
+func (in *Interpreter) execDefer(env *Env, st *frontend.Stmt) error {
+	// Find the enclosing function call frame.
+	frame := env
+	for frame != nil && !frame.isCall {
+		frame = frame.Parent
+	}
+	if frame == nil {
+		return fmt.Errorf("defer outside function (deferred calls run when the function returns)")
+	}
+	call := st.Expr
+	fn, err := in.eval(env, call.Callee)
+	if err != nil {
+		return err
+	}
+	if fn.Kind != VFunc && fn.Kind != VBuiltin {
+		return fmt.Errorf("defer needs a function, got %s", TypeName(fn))
+	}
+	args := make([]Value, 0, len(call.Args))
+	for _, a := range call.Args {
+		v, err := in.eval(env, a)
+		if err != nil {
+			return err
+		}
+		args = append(args, v)
+	}
+	in.mu.Lock()
+	frame.defers = append(frame.defers, deferredCall{fn: fn, args: args, line: st.Line})
+	in.mu.Unlock()
+	return nil
+}
+
+// runDefers executes a call frame's deferred calls LIFO.
+func (in *Interpreter) runDefers(frame *Env) error {
+	in.mu.Lock()
+	defers := frame.defers
+	frame.defers = nil
+	in.mu.Unlock()
+	var firstErr error
+	for i := len(defers) - 1; i >= 0; i-- {
+		if _, err := in.callValue(defers[i].fn, defers[i].args); err != nil {
+			if firstErr == nil {
+				firstErr = withLine(defers[i].line, err)
+			}
+		}
+		if f := in.fail(); f != nil && firstErr == nil {
+			firstErr = f
+		}
+	}
+	return firstErr
+}
+
 func (in *Interpreter) execImport(env *Env, path string) error {
 	if path == "" {
 		return fmt.Errorf("bad import: empty path")
@@ -1218,6 +1341,26 @@ func (in *Interpreter) eval(env *Env, e *frontend.Expr) (Value, error) {
 			return Nil(), err
 		}
 		return modValues(l, r)
+	case frontend.ExprPow:
+		l, err := in.eval(env, e.Left)
+		if err != nil {
+			return Nil(), err
+		}
+		r, err := in.eval(env, e.Right)
+		if err != nil {
+			return Nil(), err
+		}
+		return powValues(l, r)
+	case frontend.ExprIn:
+		l, err := in.eval(env, e.Left)
+		if err != nil {
+			return Nil(), err
+		}
+		r, err := in.eval(env, e.Right)
+		if err != nil {
+			return Nil(), err
+		}
+		return inValues(l, r)
 	case frontend.ExprEq:
 		l, err := in.eval(env, e.Left)
 		if err != nil {
@@ -1296,6 +1439,35 @@ func (in *Interpreter) eval(env *Env, e *frontend.Expr) (Value, error) {
 			return Nil(), err
 		}
 		return indexValue(obj, idx)
+	case frontend.ExprSlice:
+		obj, err := in.eval(env, e.Left)
+		if err != nil {
+			return Nil(), err
+		}
+		var start, end *int
+		if e.SliceStart != nil {
+			sv, err := in.eval(env, e.SliceStart)
+			if err != nil {
+				return Nil(), err
+			}
+			if sv.Kind != VInt {
+				return Nil(), fmt.Errorf("slice start must be int, got %s", TypeName(sv))
+			}
+			s := sv.Int
+			start = &s
+		}
+		if e.SliceEnd != nil {
+			ev, err := in.eval(env, e.SliceEnd)
+			if err != nil {
+				return Nil(), err
+			}
+			if ev.Kind != VInt {
+				return Nil(), fmt.Errorf("slice end must be int, got %s", TypeName(ev))
+			}
+			s := ev.Int
+			end = &s
+		}
+		return sliceValue(obj, start, end)
 	case frontend.ExprArray:
 		items := make([]Value, 0, len(e.Elements))
 		for _, el := range e.Elements {
@@ -1342,19 +1514,29 @@ func (in *Interpreter) evalCall(env *Env, e *frontend.Expr) (Value, error) {
 			return Nil(), fmt.Errorf("function %q wants %d args, got %d", fn.Func.Name, len(fn.Func.Params), len(args))
 		}
 		callEnv := newEnv(fn.Func.Closure)
+		callEnv.isCall = true
 		for i, p := range fn.Func.Params {
 			callEnv.Vars[p] = args[i]
 		}
 		// lock-free define (single goroutine owns callEnv); direct map write ok
 		// but other goroutines may read closure parents via lookup (locked) - safe.
-		err := in.execStmt(callEnv, fn.Func.Body)
-		if err != nil {
+		var ret Value = Nil()
+		var rerr error
+		if err := in.execStmt(callEnv, fn.Func.Body); err != nil {
 			if ce, ok := err.(*ctrlError); ok && ce.kind == ctrlReturn {
-				return ce.val, nil
+				ret = ce.val
+			} else {
+				rerr = err
 			}
-			return Nil(), err
 		}
-		return Nil(), nil
+		// Deferred calls run on every exit path (return, error, fallthrough).
+		if derr := in.runDefers(callEnv); derr != nil && rerr == nil {
+			return Nil(), derr
+		}
+		if rerr != nil {
+			return Nil(), rerr
+		}
+		return ret, nil
 	case VBuiltin:
 		return fn.Builtin.Fn(in, args)
 	default:
@@ -1462,6 +1644,75 @@ func modValues(l, r Value) (Value, error) {
 		return IntV(l.Int % r.Int), nil
 	}
 	return Nil(), fmt.Errorf("cannot mod %s and %s (need ints)", TypeName(l), TypeName(r))
+}
+
+func powValues(l, r Value) (Value, error) {
+	if !isNum(l) || !isNum(r) {
+		return Nil(), fmt.Errorf("cannot raise %s to %s (need numbers)", TypeName(l), TypeName(r))
+	}
+	if l.Kind == VInt && r.Kind == VInt && r.Int >= 0 {
+		res := 1
+		for i := 0; i < r.Int; i++ {
+			res *= l.Int
+		}
+		return IntV(res), nil
+	}
+	return FloatV(math.Pow(toFloat(l), toFloat(r))), nil
+}
+
+func inValues(l, r Value) (Value, error) {
+	switch r.Kind {
+	case VArray:
+		r.Arr.Mu.RLock()
+		defer r.Arr.Mu.RUnlock()
+		for _, e := range r.Arr.Items {
+			if deepEqual(l, e) {
+				return BoolV(true), nil
+			}
+		}
+		return BoolV(false), nil
+	case VMap:
+		if l.Kind != VString {
+			return Nil(), fmt.Errorf("cannot check %s in map (need string key)", TypeName(l))
+		}
+		r.Map.Mu.RLock()
+		defer r.Map.Mu.RUnlock()
+		_, ok := r.Map.Vals[l.Str]
+		return BoolV(ok), nil
+	case VString:
+		if l.Kind != VString {
+			return Nil(), fmt.Errorf("cannot check %s in string (need string)", TypeName(l))
+		}
+		return BoolV(strings.Contains(r.Str, l.Str)), nil
+	}
+	return Nil(), fmt.Errorf("cannot check in %s (try array, map or string)", TypeName(r))
+}
+
+func sliceValue(obj Value, start, end *int) (Value, error) {
+	s := 0
+	if start != nil {
+		s = *start
+	}
+	var e *int
+	if end != nil {
+		e = end
+	}
+	switch obj.Kind {
+	case VArray:
+		obj.Arr.Mu.RLock()
+		items := make([]Value, len(obj.Arr.Items))
+		copy(items, obj.Arr.Items)
+		obj.Arr.Mu.RUnlock()
+		from, to, _ := normSlice(len(items), s, e)
+		out := make([]Value, to-from)
+		copy(out, items[from:to])
+		return ArrV(out), nil
+	case VString:
+		runes := []rune(obj.Str)
+		from, to, _ := normSlice(len(runes), s, e)
+		return StrV(string(runes[from:to])), nil
+	}
+	return Nil(), fmt.Errorf("cannot slice %s (try array or string)", TypeName(obj))
 }
 
 func cmpValues(kind frontend.ExprKind, l, r Value) (Value, error) {
@@ -1959,17 +2210,26 @@ func (in *Interpreter) callValue(fn Value, args []Value) (Value, error) {
 			return Nil(), fmt.Errorf("function %q wants %d args, got %d", fn.Func.Name, len(fn.Func.Params), len(args))
 		}
 		callEnv := newEnv(fn.Func.Closure)
+		callEnv.isCall = true
 		for i, p := range fn.Func.Params {
 			callEnv.Vars[p] = args[i]
 		}
-		err := in.execStmt(callEnv, fn.Func.Body)
-		if err != nil {
+		var ret Value = Nil()
+		var rerr error
+		if err := in.execStmt(callEnv, fn.Func.Body); err != nil {
 			if ce, ok := err.(*ctrlError); ok && ce.kind == ctrlReturn {
-				return ce.val, nil
+				ret = ce.val
+			} else {
+				rerr = err
 			}
-			return Nil(), err
 		}
-		return Nil(), nil
+		if derr := in.runDefers(callEnv); derr != nil && rerr == nil {
+			return Nil(), derr
+		}
+		if rerr != nil {
+			return Nil(), rerr
+		}
+		return ret, nil
 	case VBuiltin:
 		return fn.Builtin.Fn(in, args)
 	default:
