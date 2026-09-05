@@ -155,3 +155,70 @@ func TestRunLibImport(t *testing.T) {
 		t.Fatal("want error for unknown library")
 	}
 }
+
+func TestRunPowInSlice(t *testing.T) {
+	mustRun(t, "assert(2 ** 10 == 1024)\nassert(2 ** 3 ** 2 == 512)\nassert(-2 ** 2 == -4)\nassert(4 ** 0.5 == 2)\n")
+	mustRun(t, "assert(2 in [1, 2, 3])\nassert(\"ell\" in \"hello\")\nassert(\"a\" in {a: 1})\nassert(!(9 in [1, 2]))\n")
+	mustRun(t, "assert([1,2,3,4][1:3] == [2, 3])\nassert([1,2,3][:2] == [1, 2])\nassert([1,2,3][1:] == [2, 3])\nassert(\"hello\"[1:3] == \"el\")\nassert(\"hello\"[-2:] == \"lo\")\nassert([1,2,3][:] == [1, 2, 3])\n")
+	mustFail(t, "print 1 ** \"a\"\n")
+	mustFail(t, "print 1 in 2\n")
+	mustFail(t, "print 1[0:2]\n")
+}
+
+func TestRunTryCatchFinally(t *testing.T) {
+	mustRun(t, "try {\n error(\"boom\")\n} catch e {\n assert(e == \"boom\")\n}\n")
+	mustRun(t, "let seen = \"\"\ntry {\n error(\"x\")\n} catch e {\n seen = e\n} finally {\n seen = seen + \"!\"\n}\nassert(seen == \"x!\")\n")
+	mustRun(t, "try {\n let x = 1 / 0\n} catch e {\n assert(true)\n}\n")
+	mustRun(t, "let f = []\ntry {\n f = [1]\n} finally {\n f = [2]\n}\nassert(f == [2])\n")
+	mustRun(t, "print \"ok\"\ntry {\n print \"fine\"\n} catch e {\n error(\"must not catch\")\n}\n")
+	// return still propagates (finally runs)
+	mustRun(t, "func f() {\n try {\n return 1\n } finally {\n print \"cleanup\"\n }\n}\nassert(f() == 1)\n")
+	// control flow is not caught
+	mustRun(t, "for i in range(3) {\n try {\n break\n } catch e {\n error(\"must not catch break\")\n }\n}\n")
+	// uncaught error still propagates
+	mustFail(t, "try {\n error(\"nope\")\n} catch e {\n error(\"worse\")\n}\n")
+	mustFail(t, "try {\n error(\"nope\")\n} finally {\n print 1\n}\n")
+}
+
+func TestRunSwitch(t *testing.T) {
+	mustRun(t, "let x = 2\nlet r = \"\"\nswitch x {\n case 1 { r = \"one\" }\n case 2, 3 { r = \"few\" }\n default { r = \"many\" }\n}\nassert(r == \"few\")\n")
+	mustRun(t, "let r = \"\"\nswitch 99 {\n case 1 { r = \"one\" }\n default { r = \"dflt\" }\n}\nassert(r == \"dflt\")\n")
+	mustRun(t, "let r = \"\"\nswitch 99 {\n case 1 { r = \"one\" }\n}\nassert(r == \"\")\n")
+	mustRun(t, "for i in range(3) {\n switch i {\n case 1 { break }\n default { continue }\n }\n assert(i == 1)\n}\n")
+	mustFail(t, "switch 1 {\n default { print 1 }\n case 2 { print 2 }\n}\n")
+}
+
+func TestRunDefer(t *testing.T) {
+	mustRun(t, "func f() {\n defer print \"a\"\n print \"b\"\n return 7\n}\nassert(f() == 7)\n")
+	mustRun(t, "let log = []\nfunc f() {\n defer push(log, \"second\")\n push(log, \"first\")\n}\nf()\nassert(log == [\"first\", \"second\"])\n")
+	mustRun(t, "func g() {\n defer print \"cleanup\"\n error(\"fail\")\n}\ntry {\n g()\n} catch e {\n assert(e == \"fail\")\n}\n")
+	mustRun(t, "func h() {\n let c = chan(1)\n defer close(c)\n send(c, 1)\n assert(recv(c) == 1)\n}\nh()\n")
+	mustFail(t, "defer print \"top\"\n")
+}
+
+func TestRunStdlib(t *testing.T) {
+	mustRun(t, "assert(bool(\"\") == false)\nassert(bool(\"x\") == true)\nassert(chr(65) == \"A\")\nassert(ord(\"A\") == 65)\nassert(hex(255) == \"0xff\")\n")
+	mustRun(t, "assert(split(\"a,b\", \",\") == [\"a\", \"b\"])\nassert(join([\"a\",\"b\"], \"-\") == \"a-b\")\nassert(upper(\"hi\") == \"HI\")\nassert(lower(\"HI\") == \"hi\")\nassert(trim(\"  x  \") == \"x\")\nassert(contains(\"hello\", \"ell\"))\nassert(starts_with(\"hi\", \"h\"))\nassert(ends_with(\"hi\", \"i\"))\nassert(replace(\"aaa\", \"a\", \"b\") == \"bbb\")\nassert(substr(\"hello\", 1, 3) == \"ell\")\nassert(index_of(\"hello\", \"ll\") == 2)\nassert(repeat(\"ab\", 3) == \"ababab\")\n")
+	mustRun(t, "let a = [3, 1, 2]\nsort(a)\nassert(a == [1, 2, 3])\nreverse(a)\nassert(a == [3, 2, 1])\nassert(slice(a, 0, 2) == [3, 2])\ninsert(a, 0, 9)\nassert(a[0] == 9)\nassert(remove(a, 0) == 9)\nclear(a)\nassert(len(a) == 0)\n")
+	mustRun(t, "let m = {a: 1}\nassert(get(m, \"zz\", 9) == 9)\nassert(merge({a: 1}, {b: 2}) == {a: 1, b: 2})\nassert(delete(m, \"a\") == true)\nassert(has(m, \"a\") == false)\n")
+	mustRun(t, "assert(abs(-5) == 5)\nassert(min(3, 1, 2) == 1)\nassert(max([1, 9, 2]) == 9)\nassert(floor(2.9) == 2)\nassert(ceil(2.1) == 3)\nassert(round(2.5) == 3)\nassert(sqrt(16) == 4)\nassert(pow(2, 10) == 1024)\nassert(pi() > 3.14)\nassert(now() > 0)\nassert(rand() < 1)\nassert(randint(1, 6) >= 1)\n")
+	mustRun(t, "assert(bit_and(6, 3) == 2)\nassert(bit_or(6, 3) == 7)\nassert(bit_xor(6, 3) == 5)\nassert(bit_shl(1, 3) == 8)\nassert(bit_shr(8, 2) == 2)\nassert(bit_not(0) == -1)\n")
+	mustRun(t, "assert(map([1,2,3], func(x) { return x * 2 }) == [2, 4, 6])\nassert(filter([1,2,3,4], func(x) { return x % 2 == 0 }) == [2, 4])\nassert(reduce([1,2,3], func(a, b) { return a + b }, 0) == 6)\nassert(apply(func(a, b) { return a + b }, [2, 3]) == 5)\n")
+	mustRun(t, "assert(json_parse(json_stringify({a: [1, 2]})) == {a: [1, 2]})\n")
+	mustRun(t, "let c = chan(1)\nassert(try_send(c, 7) == true)\nassert(try_send(c, 8) == false)\nassert(recv(c) == 7)\nassert(chan_len(c) == 0)\nassert(chan_cap(c) == 1)\nassert(len(c) == 0)\n")
+	mustRun(t, "assert(type(len) == \"func\")\n")
+}
+
+func TestRunStdlibFiles(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "note.txt")
+	prog := "assert(write_file(\"" + file + "\", \"hi\") == 2)\n" +
+		"assert(read_file(\"" + file + "\") == \"hi\")\n" +
+		"assert(append_file(\"" + file + "\", \"!\") == 1)\n" +
+		"assert(read_file(\"" + file + "\") == \"hi!\")\n" +
+		"assert(exists(\"" + file + "\"))\n" +
+		"assert(contains(list_dir(\"" + dir + "\"), \"note.txt\"))\n" +
+		"remove(\"" + file + "\")\n" +
+		"assert(exists(\"" + file + "\") == false)\n"
+	mustRun(t, prog)
+}

@@ -140,8 +140,7 @@ func TestParseAssignOps(t *testing.T) {
 	}
 }
 
-func TestParseFuncLitAndImport(t *testing.T) {
-	p, err := ParseSource("let f = func(x) {\n return x + 1\n}\nimport \"lib.ks\"\nbreak\ncontinue\nreturn 1\n", "test.ks")
+func TestParseFuncLitAndImport(t *testing.T) {	p, err := ParseSource("let f = func(x) {\n return x + 1\n}\nimport \"lib.ks\"\nbreak\ncontinue\nreturn 1\n", "test.ks")
 	_ = p
 	// break/continue/return outside func/loop still parse (runtime errors)
 	if err != nil {
