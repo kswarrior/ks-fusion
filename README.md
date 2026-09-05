@@ -1,6 +1,6 @@
 # ks-fusion
 
-Complete programming language (v1.0) made in Go.
+Complete programming language (v2.0) made in Go.
 Easy like Python, concurrency like Go.
 
 > The toolchain is written in Go (like CPython is written in C).
@@ -25,10 +25,11 @@ entry_backend = "backend/main.ks"
 entry_frontend = "frontend/main.ks"
 ```
 
-## Language v1.0 (.ks)
+## Language v2.0 (.ks)
 
 ```python
-# comment (# and //)
+# comments: # ...  // ...  /* multi-line */
+# strings: "double" and 'single'; numbers: 0xFF 0b101 0o17 1_000 1e3 .5
 let x = 10
 x = x + 1
 x += 5
@@ -70,6 +71,31 @@ func fact(n) {
   return n * fact(n - 1)
 }
 let double = func(x) { return x * 2 }
+print 2 ** 10            # power (right-assoc): 1024
+print 2 in [1, 2]        # membership: array/map-key/substring
+print [1,2,3,4][1:3]     # slicing (also a[:2], a[1:], s[-2:])
+
+# errors: error(msg) aborts, try/catch/finally recovers
+try {
+  let v = 1 / 0
+} catch e {
+  print "caught:", e
+} finally {
+  print "always runs"
+}
+
+# switch (first match wins, no fallthrough, break ends it)
+switch x {
+  case 1 { print "one" }
+  case 2, 3 { print "few" }
+  default { print "many" }
+}
+
+# defer runs when the enclosing function returns (LIFO, like Go)
+func work() {
+  defer print "cleanup"
+  print "doing work"
+}
 
 # concurrency like Go: go + channels
 let c = chan(1)
@@ -86,10 +112,12 @@ import "shared/util.ks"
 ### Operators (precedence high→low)
 
 ```
-() [] .            call, index, field
-- ! not            unary
+() [] [:] .          call, index, slice, field
+**                   power (right-assoc, tighter than unary: -2**2 == -4)
+- ! not              unary
 * / %
 + -
+in                   membership (array member, map key, substring)
 < <= > >=
 == !=
 and &&, or ||

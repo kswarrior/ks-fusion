@@ -1,4 +1,4 @@
-// Command fusion is the ks-fusion tool (v1.0, in Go).
+// Command fusion is the ks-fusion tool (in Go).
 // Usage:
 // fusion new [--lib] <dir>         scaffold app (default) or library (--lib)
 // fusion run [appdir]              run the app (.ks files)
@@ -114,7 +114,7 @@ func main() {
 }
 
 func help() {
-	fmt.Println(`ks-fusion v1.0 (Go)
+	fmt.Println(`ks-fusion v2.0 (Go)
 Commands:
   fusion new [--lib] <dir>   create app (backend/ frontend/ fusion.toml)
                              or library with --lib (src/lib.ks, type="lib")
