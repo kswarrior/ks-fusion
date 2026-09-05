@@ -227,3 +227,53 @@ func TestRunStdlibFiles(t *testing.T) {
 		"assert(exists(\"" + file + "\") == false)\n"
 	mustRun(t, prog)
 }
+
+func TestRunSelect(t *testing.T) {
+	// Ready buffered recv wins over timeout.
+	mustRun(t, "let c1 = chan(1)\nlet c2 = chan(1)\nsend(c1, 42)\nselect {\n case v = recv(c1) { assert(v == 42) }\n case recv(c2) { error(\"wrong branch\") }\n case timeout(500) { error(\"should not time out\") }\n}\n")
+	// Discard form (no bind).
+	mustRun(t, "let c = chan(1)\nsend(c, 1)\nselect {\n case recv(c) { assert(true) }\n}\n")
+	// Either of two ready branches may win; both asserts hold.
+	mustRun(t, "let a = chan(1)\nlet b = chan(1)\nsend(a, 1)\nsend(b, 2)\nselect {\n case v = recv(a) { assert(v == 1) }\n case v = recv(b) { assert(v == 2) }\n}\n")
+	// Buffered send case is immediately ready; value is delivered.
+	mustRun(t, "let c = chan(1)\nselect {\n case send(c, 8) { assert(true) }\n case timeout(100) { error(\"should have sent\") }\n}\nassert(recv(c) == 8)\n")
+	// Rendezvous with a sender goroutine (received, so no leaked goroutine).
+	mustRun(t, "let c = chan(0)\ngo send(c, 7)\nselect {\n case v = recv(c) { assert(v == 7) }\n case timeout(2000) { error(\"should have received\") }\n}\n")
+	// Recv on a closed channel is immediately ready with nil.
+	mustRun(t, "let c = chan(1)\nclose(c)\nselect {\n case v = recv(c) { assert(v == nil) }\n case timeout(100) { error(\"closed recv should be ready\") }\n}\n")
+	// Timeout fires when nothing is ready.
+	mustRun(t, "let c = chan(0)\nselect {\n case recv(c) { error(\"nothing to receive\") }\n case timeout(20) { assert(true) }\n}\n")
+	// Default never blocks (timeouts are skipped on this path).
+	mustRun(t, "let c = chan(0)\nselect {\n case recv(c) { error(\"nothing to receive\") }\n case timeout(10000) { error(\"default should win\") }\n default { assert(true) }\n}\n")
+	// Nil channel disables a case: fan-in drain over two closing channels.
+	mustRun(t, "let a = chan(2)\nlet b = chan(2)\nsend(a, 1)\nsend(a, 2)\nsend(b, 3)\nclose(a)\nclose(b)\nlet total = 0\nwhile a != nil or b != nil {\n select {\n case v = recv(a) { if v == nil { a = nil } else { total = total + v } }\n case v = recv(b) { if v == nil { b = nil } else { total = total + v } }\n }\n}\nassert(total == 6)\n")
+	// break ends the select only (like switch); the loop keeps going.
+	mustRun(t, "let c = chan(1)\nsend(c, 1)\nclose(c)\nlet steps = []\nwhile len(steps) < 2 {\n select {\n case v = recv(c) { push(steps, v)\n break }\n }\n}\nassert(steps == [1, nil])\n")
+	// Send on a closed channel fails instead of panicking.
+	mustFail(t, "let c = chan(1)\nclose(c)\nselect {\n case send(c, 1) { print 1 }\n}\n")
+}
+
+func TestRunChanIteration(t *testing.T) {
+	// `for v in ch` drains until close (like Go's `for v := range ch`).
+	mustRun(t, "let ch = chan(3)\nsend(ch, 10)\nsend(ch, 20)\nclose(ch)\nlet total = 0\nfor v in ch {\n total = total + v\n}\nassert(total == 30)\n")
+	// break/continue work inside channel loops.
+	mustRun(t, "let ch = chan(3)\nsend(ch, 1)\nsend(ch, 2)\nsend(ch, 3)\nclose(ch)\nlet seen = []\nfor v in ch {\n if v == 3 { continue }\n push(seen, v)\n if v == 2 { break }\n}\nassert(seen == [1, 2])\n")
+	// Closed empty channel: loop body never runs.
+	mustRun(t, "let ch = chan(1)\nclose(ch)\nlet n = 0\nfor v in ch {\n n = n + 1\n}\nassert(n == 0)\n")
+	// Two loop vars are meaningless for channels.
+	mustFail(t, "let ch = chan(1)\nfor k, v in ch {\n print k\n}\n")
+}
+
+func TestRunChanTimeoutBuiltins(t *testing.T) {
+	// recv_timeout returns the value when one is available.
+	mustRun(t, "let c = chan(1)\nsend(c, 9)\nassert(recv_timeout(c, 100) == 9)\n")
+	// recv_timeout yields nil on timeout (and on drained close, like recv).
+	mustRun(t, "let c = chan(0)\nassert(recv_timeout(c, 20) == nil)\nlet d = chan(1)\nclose(d)\nassert(recv_timeout(d, 20) == nil)\n")
+	// send_timeout reports whether the send happened.
+	mustRun(t, "let free = chan(1)\nassert(send_timeout(free, 1, 50) == true)\nassert(recv(free) == 1)\nlet stuck = chan(0)\nassert(send_timeout(stuck, 1, 20) == false)\n")
+	mustFail(t, "let c = chan(1)\nclose(c)\nprint send_timeout(c, 1, 10)\n")
+	// chan_closed introspection.
+	mustRun(t, "let c = chan(1)\nassert(chan_closed(c) == false)\nclose(c)\nassert(chan_closed(c))\n")
+	mustFail(t, "print chan_closed(7)\n")
+	mustFail(t, "print recv_timeout(7, 10)\n")
+}

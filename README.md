@@ -1,6 +1,6 @@
 # ks-fusion
 
-Complete programming language (v2.0) made in Go.
+Complete programming language (v2.1) made in Go.
 Easy like Python, concurrency like Go.
 
 > The toolchain is written in Go (like CPython is written in C).
@@ -25,7 +25,7 @@ entry_backend = "backend/main.ks"
 entry_frontend = "frontend/main.ks"
 ```
 
-## Language v2.0 (.ks)
+## Language v2.1 (.ks)
 
 ```python
 # comments: # ...  // ...  /* multi-line */
@@ -38,12 +38,34 @@ print "a", "b", 123      # multi-arg print
 sleep 500                # ms (also sleep(500))
 
 # types: nil bool int float string array map func chan
+#        (+ number/any/ok/err aliases for annotations and `is`)
 let a = [1, 2.5, "x", true]
 let m = {name: "ada", age: 36}
 print a[0], m.name, m["age"]
 a[0] = 99
 m.age = 37
 print [1] + [2]          # array concat
+
+# gradual types (v2.1): optional annotations, runtime-checked, nil nullable
+let n: int = 10
+let s: string = "hi"
+let maybe: int? = nil    # `?` accepted, nullable is the default
+func add(a: int, b: int): int { return a + b }
+let double = func(x: int): int { return x * 2 }
+assert(n is int)
+assert(n is "int")
+assert(s is not int)
+assert(1 is number and 2.5 is number)
+assert(is_type(n, "int"))
+assert(assert_type(n, "int") == 10)
+
+# nil-safety: `?.` safe access (missing -> nil), `??` default (nil-only, short-circuit)
+let user = {name: "ada"}
+print user?.name         # ada
+print user?.missing      # nil (no error)
+print user?.missing ?? "anon"   # anon
+print nil?.anything ?? "dflt"   # dflt
+print [1, 2]?.[9] ?? "oob"      # oob (out-of-range -> nil with `?.`)
 
 # control flow
 if x > 5 {
@@ -76,6 +98,7 @@ print 2 in [1, 2]        # membership: array/map-key/substring
 print [1,2,3,4][1:3]     # slicing (also a[:2], a[1:], s[-2:])
 
 # errors: error(msg) aborts, try/catch/finally recovers
+# v2.1 also has Result values: ok(v)/err(e) + is_ok/is_err/unwrap/unwrap_or
 try {
   let v = 1 / 0
 } catch e {
@@ -83,6 +106,10 @@ try {
 } finally {
   print "always runs"
 }
+let r = ok(42)
+assert(r is ok and is_ok(r))
+assert(unwrap(r) == 42)
+assert(unwrap_or(err("boom"), 99) == 99)
 
 # switch (first match wins, no fallthrough, break ends it)
 switch x {
@@ -112,19 +139,23 @@ import "shared/util.ks"
 ### Operators (precedence high→low)
 
 ```
-() [] [:] .          call, index, slice, field
+() [] [:] . ?.         call, index, slice, field, safe access
 **                   power (right-assoc, tighter than unary: -2**2 == -4)
 - ! not              unary
 * / %
 + -
-in                   membership (array member, map key, substring)
+in is                membership (array member, map key, substring); type test
 < <= > >=
 == !=
 and &&, or ||
+??                   nil-coalescing (nil-only, short-circuit; looser than or)
 ```
 
 `/ `always yields float (`7/2 == 3.5`), `%` needs ints.
 `and`/`or` return operand values (Python-like); `!`/`not` return bool.
+`??` returns left when non-nil else right (short-circuit, nil-only unlike `or`).
+`is` tests runtime types: `x is int`, `x is "int"`, `x is not "int"`
+(names: `nil bool int float number string array map func chan any ok err`).
 Truthiness: `nil false 0 0.0 "" [] {}` are falsy, everything else truthy.
 
 ### Builtins

@@ -2383,18 +2383,17 @@ func toMillis(v Value) (int, error) {
 // ---------------------------------------------------------------------------
 
 func (in *Interpreter) defineBuiltins(env *Env) {
-	for _, b := range allBuiltins() {
+	for _, b := range cachedBuiltins {
 		env.Vars[b.Name] = Value{Kind: VBuiltin, Builtin: b}
 	}
 }
 
+// builtinByName is an O(1) map lookup over a process-wide cache.
+// The old version rebuilt the ~80-entry slice and linearly scanned
+// it on every unresolved variable, allocating on the hot path.
 func builtinByName(name string) (*BuiltinObj, bool) {
-	for _, b := range allBuiltins() {
-		if b.Name == name {
-			return b, true
-		}
-	}
-	return nil, false
+	b, ok := cachedBuiltinMap[name]
+	return b, ok
 }
 
 func allBuiltins() []*BuiltinObj {
@@ -2497,6 +2496,20 @@ func allBuiltins() []*BuiltinObj {
 		{Name: "unwrap_or", Fn: bUnwrapOr},
 	}
 }
+
+// Process-wide builtin cache: built once, reused by every interpreter.
+// allBuiltins() allocates a fresh slice per call; the cache avoids
+// that allocation on New() and on every unknown-variable lookup.
+var (
+	cachedBuiltins   = allBuiltins()
+	cachedBuiltinMap = func() map[string]*BuiltinObj {
+		m := make(map[string]*BuiltinObj, len(cachedBuiltins))
+		for _, b := range cachedBuiltins {
+			m[b.Name] = b
+		}
+		return m
+	}()
+)
 
 func needArgs(name string, args []Value, min, max int) error {
 	if len(args) < min || (max >= 0 && len(args) > max) {
@@ -3114,18 +3127,48 @@ func bSort(in *Interpreter, args []Value) (Value, error) {
 	args[0].Arr.Mu.Lock()
 	defer args[0].Arr.Mu.Unlock()
 	items := args[0].Arr.Items
-	for i := 1; i < len(items); i++ {
-		for j := i; j > 0; j-- {
-			less, err := sortLess(items[j], items[j-1])
-			if err != nil {
-				return Nil(), err
+	if len(items) < 2 {
+		return args[0], nil
+	}
+	// Validate homogeneity once so the sort closure stays error-free
+	// and fast (O(n) check + O(n log n) sort instead of O(n^2)).
+	allNum := true
+	allStr := true
+	for _, v := range items {
+		if !isNum(v) {
+			allNum = false
+		}
+		if v.Kind != VString {
+			allStr = false
+		}
+		if !allNum && !allStr {
+			// Find the offending pair for a helpful error.
+			for i := 1; i < len(items); i++ {
+				if _, err := sortLess(items[i], items[i-1]); err != nil {
+					return Nil(), err
+				}
 			}
-			if !less {
-				break
-			}
-			items[j], items[j-1] = items[j-1], items[j]
+			return Nil(), fmt.Errorf("sort needs all numbers or all strings")
 		}
 	}
+	if allStr && !allNum {
+		sort.SliceStable(items, func(a, b int) bool { return items[a].Str < items[b].Str })
+		return args[0], nil
+	}
+	// Numeric (int/float mix): compare as float. Pure-int fast path
+	// avoids float conversion.
+	pureInt := true
+	for _, v := range items {
+		if v.Kind != VInt {
+			pureInt = false
+			break
+		}
+	}
+	if pureInt {
+		sort.SliceStable(items, func(a, b int) bool { return items[a].Int < items[b].Int })
+		return args[0], nil
+	}
+	sort.SliceStable(items, func(a, b int) bool { return toFloat(items[a]) < toFloat(items[b]) })
 	return args[0], nil
 }
 
@@ -3177,13 +3220,13 @@ func bSlice(in *Interpreter, args []Value) (Value, error) {
 	}
 	switch args[0].Kind {
 	case VArray:
+		// Copy only the requested window.
 		args[0].Arr.Mu.RLock()
-		items := make([]Value, len(args[0].Arr.Items))
-		copy(items, args[0].Arr.Items)
-		args[0].Arr.Mu.RUnlock()
-		s, e, _ := normSlice(len(items), args[1].Int, endP)
+		n := len(args[0].Arr.Items)
+		s, e, _ := normSlice(n, args[1].Int, endP)
 		out := make([]Value, e-s)
-		copy(out, items[s:e])
+		copy(out, args[0].Arr.Items[s:e])
+		args[0].Arr.Mu.RUnlock()
 		return ArrV(out), nil
 	case VString:
 		r := []rune(args[0].Str)

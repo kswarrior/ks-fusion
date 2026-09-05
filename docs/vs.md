@@ -381,7 +381,7 @@ until `futures.md` P0/P1 land.
 | 14 | FFI | `cgo` | `unsafe`/FFI | none | opt-in `ffi_*` + Go plugin API | `futures.md` P2 interop |
 | 15 | Stability | compat promise | editions | v2.0 | RFC process + semver + LTS | `futures.md` §5 |
 
-Close rows 1–5 + 10–11 and `.ks` moves `44 → ~75/100` (Go/Rust-class for scripts/services).
+Close rows 1–2 + 5 + 10–11 and the rest of rows 3–4 and `.ks` moves `46 → ~75/100` (Go/Rust-class for scripts/services).
 Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
 
 ## Decision guide
@@ -392,10 +392,10 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
 4. Script, bot, rule engine, teaching `go/chan`, prototype? → `.ks`.
 5. Need `http/DB` in `.ks` today? → shell out or wait — see `docs/futures.md` P1 stdlib.
 
-## Honest limits of `.ks` v2.0 (do not hide)
+## Honest limits of `.ks` v2.1 (do not hide)
 
 * Interpreted, no JIT/native binary, no cross-compile matrix.
-* Dynamic only, no structs/enums/generics, `==` uses deep equality.
+* Gradual types only (no structs/enums/generics yet), `==` uses deep equality.
 * Flat lib namespace (prefix functions), newest local bundle wins, no lockfile.
 * No `select`, no `for v in chan`, no HTTP/WS/DB/regex/crypto stdlib.
 * `frontend/` is not web — no DOM, no CSS, no SSR.
