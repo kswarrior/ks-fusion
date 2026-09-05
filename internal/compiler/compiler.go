@@ -221,7 +221,7 @@ type funcCtx struct {
 }
 
 type compiler struct {
-	funcs   []Func
+	funcs   []*Func
 	globals []string
 	gindex  map[string]int
 	frames  []*funcCtx
@@ -326,9 +326,10 @@ func (c *compiler) endScope(line int) {
 // CompileProgram compiles a parsed program (subset) to a Bundle.
 func CompileProgram(p *frontend.Program) (*Bundle, error) {
 	c := newCompiler()
-	main := Func{Name: "<main>"}
-	c.funcs = append(c.funcs, main)
-	c.frames = append(c.frames, &funcCtx{fn: &c.funcs[0]})
+	// NOTE: Funcs are heap-allocated individually: frames keep raw *Func
+	// pointers, so c.funcs must never move them (no []Func + append).
+	c.funcs = append(c.funcs, &Func{Name: "<main>"})
+	c.frames = append(c.frames, &funcCtx{fn: c.funcs[0]})
 	c.isMain = true
 	// Pre-register top-level globals so functions compiled before the
 	// textual definition still resolve (calls happen after all defs run).
@@ -345,7 +346,11 @@ func CompileProgram(p *frontend.Program) (*Bundle, error) {
 	// main falls through returning nil
 	c.emit(OpConst, c.addConst(Const{Kind: CKNil}), 0)
 	c.emit(OpReturn, 0, 0)
-	b := &Bundle{Format: Format, Name: p.Path, Funcs: c.funcs, Globals: c.globals, Main: 0}
+	funcs := make([]Func, len(c.funcs))
+	for i, f := range c.funcs {
+		funcs[i] = *f
+	}
+	b := &Bundle{Format: Format, Name: p.Path, Funcs: funcs, Globals: c.globals, Main: 0}
 	return b, nil
 }
 
@@ -837,10 +842,11 @@ func (c *compiler) compileForC(st *frontend.Stmt) error {
 }
 
 func (c *compiler) compileFuncDef(name string, params []string, body *frontend.Stmt, line int) error {
-	idx := len(c.funcs)
-	c.funcs = append(c.funcs, Func{Name: name, Params: append([]string{}, params...)})
+	fn := &Func{Name: name, Params: append([]string{}, params...)}
+	c.funcs = append(c.funcs, fn)
+	idx := len(c.funcs) - 1
 	// compile body in new frame
-	c.frames = append(c.frames, &funcCtx{fn: &c.funcs[idx]})
+	c.frames = append(c.frames, &funcCtx{fn: fn})
 	for _, p := range params {
 		c.defineLocal(p)
 	}

@@ -286,6 +286,91 @@ func toFloat(v Value) float64 {
 	return float64(v.Int)
 }
 
+func validType(name string) bool {
+	switch name {
+	case "nil", "bool", "int", "float", "number", "string",
+		"array", "map", "func", "chan", "any", "ok", "err":
+		return true
+	}
+	return false
+}
+
+func isOkValue(v Value) bool {
+	if v.Kind != VMap {
+		return false
+	}
+	v.Map.Mu.RLock()
+	defer v.Map.Mu.RUnlock()
+	_, hasOk := v.Map.Vals["ok"]
+	_, hasErr := v.Map.Vals["err"]
+	return hasOk && !hasErr
+}
+
+func isErrValue(v Value) bool {
+	if v.Kind != VMap {
+		return false
+	}
+	v.Map.Mu.RLock()
+	defer v.Map.Mu.RUnlock()
+	_, hasErr := v.Map.Vals["err"]
+	return hasErr
+}
+
+func matchesTypeStrict(v Value, typ string) bool {
+	switch typ {
+	case "any":
+		return true
+	case "nil":
+		return v.Kind == VNil
+	case "bool":
+		return v.Kind == VBool
+	case "int":
+		return v.Kind == VInt
+	case "float":
+		return v.Kind == VFloat
+	case "number":
+		return v.Kind == VInt || v.Kind == VFloat
+	case "string":
+		return v.Kind == VString
+	case "array":
+		return v.Kind == VArray
+	case "map":
+		return v.Kind == VMap
+	case "func":
+		return v.Kind == VFunc || v.Kind == VBuiltin
+	case "chan":
+		return v.Kind == VChan
+	case "ok":
+		return isOkValue(v)
+	case "err":
+		return isErrValue(v)
+	}
+	return false
+}
+
+func matchesTypeNullable(v Value, typ string) bool {
+	if typ == "" || typ == "any" {
+		return true
+	}
+	if v.Kind == VNil {
+		return true
+	}
+	return matchesTypeStrict(v, typ)
+}
+
+func checkTypeNullable(v Value, typ, what string) error {
+	if typ == "" || typ == "any" {
+		return nil
+	}
+	if !validType(typ) {
+		return fmt.Errorf("unknown type %q", typ)
+	}
+	if !matchesTypeNullable(v, typ) {
+		return fmt.Errorf("%s wants %s, got %s", what, typ, TypeName(v))
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Environments (lexical scopes, goroutine-safe via interpreter lock)
 // ---------------------------------------------------------------------------
@@ -294,6 +379,7 @@ func toFloat(v Value) float64 {
 type Env struct {
 	Parent *Env
 	Vars   map[string]Value
+	TypeAnns map[string]string
 	// Defer support: function call frames (isCall) collect deferred calls
 	// registered by `defer` and run them LIFO when the call returns.
 	isCall bool
@@ -309,13 +395,15 @@ type deferredCall struct {
 	line int
 }
 
-func newEnv(parent *Env) *Env { return &Env{Parent: parent, Vars: map[string]Value{}} }
+func newEnv(parent *Env) *Env {
+	return &Env{Parent: parent, Vars: map[string]Value{}, TypeAnns: map[string]string{}}
+}
 
 func newEnvSized(parent *Env, size int) *Env {
 	if size < 0 {
 		size = 0
 	}
-	return &Env{Parent: parent, Vars: make(map[string]Value, size)}
+	return &Env{Parent: parent, Vars: make(map[string]Value, size), TypeAnns: map[string]string{}}
 }
 
 // ---------------------------------------------------------------------------
@@ -558,6 +646,38 @@ func (in *Interpreter) assign(env *Env, name string, v Value) bool {
 	return false
 }
 
+func (in *Interpreter) defineTypeAnn(env *Env, name, typ string) {
+	if typ == "" {
+		return
+	}
+	if !in.conc.Load() {
+		env.TypeAnns[name] = typ
+		return
+	}
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	env.TypeAnns[name] = typ
+}
+
+func (in *Interpreter) lookupTypeAnn(env *Env, name string) (string, bool) {
+	if !in.conc.Load() {
+		for e := env; e != nil; e = e.Parent {
+			if t, ok := e.TypeAnns[name]; ok {
+				return t, true
+			}
+		}
+		return "", false
+	}
+	in.mu.RLock()
+	defer in.mu.RUnlock()
+	for e := env; e != nil; e = e.Parent {
+		if t, ok := e.TypeAnns[name]; ok {
+			return t, true
+		}
+	}
+	return "", false
+}
+
 // ---------------------------------------------------------------------------
 // Statement execution
 // ---------------------------------------------------------------------------
@@ -692,7 +812,11 @@ func (in *Interpreter) execStmt(env *Env, st *frontend.Stmt) error {
 	case frontend.StmtForC:
 		return in.execForC(env, st)
 	case frontend.StmtFunc:
-		fn := &FuncObj{Name: st.Name, Params: append([]string{}, st.Names...), Body: st.Body, Closure: env}
+		fn := &FuncObj{Name: st.Name, Params: append([]string{}, st.Names...), ParamTypes: append([]string{}, st.ParamTypes...), ReturnType: st.ReturnType, Body: st.Body, Closure: env}
+		// normalize param types length
+		for len(fn.ParamTypes) < len(fn.Params) {
+			fn.ParamTypes = append(fn.ParamTypes, "")
+		}
 		in.define(env, st.Name, Value{Kind: VFunc, Func: fn})
 		return nil
 	case frontend.StmtReturn:
@@ -747,6 +871,11 @@ func (in *Interpreter) execAssign(env *Env, st *frontend.Stmt) error {
 			}
 			v, err = applyAssignOp(old, st.Op, v)
 			if err != nil {
+				return err
+			}
+		}
+		if ann, ok := in.lookupTypeAnn(env, st.Name); ok && ann != "" {
+			if err := checkTypeNullable(v, ann, st.Name); err != nil {
 				return err
 			}
 		}
