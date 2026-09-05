@@ -570,7 +570,13 @@ func (in *Interpreter) execStmt(env *Env, st *frontend.Stmt) error {
 		if err != nil {
 			return err
 		}
+		if st.TypeAnn != "" {
+			if err := checkTypeNullable(v, st.TypeAnn, "let "+st.Name); err != nil {
+				return err
+			}
+		}
 		in.define(env, st.Name, v)
+		in.defineTypeAnn(env, st.Name, st.TypeAnn)
 		return nil
 	case frontend.StmtAssign:
 		return in.execAssign(env, st)
