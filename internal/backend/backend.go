@@ -1279,6 +1279,8 @@ func (in *Interpreter) execSwitch(env *Env, st *frontend.Stmt) error {
 //
 // Without `default` it blocks until one case is ready (ready cases win
 // uniformly at random, like Go); with `default` it never blocks.
+// A case on a nil channel is never ready: assigning `ch = nil` after
+// drain is the idiomatic way to disable a case (fan-in loops).
 // `break` inside a case body ends the select (like `switch`).
 func (in *Interpreter) execSelect(env *Env, st *frontend.Stmt) (err error) {
 	if len(st.SelectCases) == 0 {
@@ -1427,10 +1429,14 @@ func (in *Interpreter) execSelect(env *Env, st *frontend.Stmt) (err error) {
 		return runBody(p.sc, Nil(), false)
 	}
 	// Blocking: wait for the first ready comm or timeout.
+	// Nil-channel cases are skipped (never ready, like Go).
 	cases := make([]reflect.SelectCase, 0, len(comms)+len(timeouts))
 	order := make([]prepared, 0, len(comms)+len(timeouts))
 	isTimeout := make([]bool, 0, len(comms)+len(timeouts))
 	for _, p := range comms {
+		if p.nilCh {
+			continue
+		}
 		if p.sc.Kind == "recv" {
 			cases = append(cases, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(p.ch.Chan.Ch)})
 		} else {
@@ -1445,7 +1451,9 @@ func (in *Interpreter) execSelect(env *Env, st *frontend.Stmt) (err error) {
 		isTimeout = append(isTimeout, true)
 	}
 	if len(cases) == 0 {
-		return fmt.Errorf("select needs at least one case/default")
+		// Only disabled (nil) cases and no timeout/default:
+		// block forever, like Go's `select {}`.
+		select {}
 	}
 	chosen, recvVal, _ := reflect.Select(cases)
 	p := order[chosen]
@@ -2243,16 +2251,29 @@ func modValues(l, r Value) (Value, error) {
 	return Nil(), fmt.Errorf("cannot mod %s and %s (need ints)", TypeName(l), TypeName(r))
 }
 
+// intPow is exponentiation by squaring: O(log n) instead of O(n).
+func intPow(base, exp int) int {
+	res := 1
+	b := base
+	e := exp
+	for e > 0 {
+		if e&1 == 1 {
+			res *= b
+		}
+		e >>= 1
+		if e > 0 {
+			b *= b
+		}
+	}
+	return res
+}
+
 func powValues(l, r Value) (Value, error) {
 	if !isNum(l) || !isNum(r) {
 		return Nil(), fmt.Errorf("cannot raise %s to %s (need numbers)", TypeName(l), TypeName(r))
 	}
 	if l.Kind == VInt && r.Kind == VInt && r.Int >= 0 {
-		res := 1
-		for i := 0; i < r.Int; i++ {
-			res *= l.Int
-		}
-		return IntV(res), nil
+		return IntV(intPow(l.Int, r.Int)), nil
 	}
 	return FloatV(math.Pow(toFloat(l), toFloat(r))), nil
 }
@@ -2296,13 +2317,13 @@ func sliceValue(obj Value, start, end *int) (Value, error) {
 	}
 	switch obj.Kind {
 	case VArray:
+		// Copy only the requested window, not the whole array.
 		obj.Arr.Mu.RLock()
-		items := make([]Value, len(obj.Arr.Items))
-		copy(items, obj.Arr.Items)
-		obj.Arr.Mu.RUnlock()
-		from, to, _ := normSlice(len(items), s, e)
+		n := len(obj.Arr.Items)
+		from, to, _ := normSlice(n, s, e)
 		out := make([]Value, to-from)
-		copy(out, items[from:to])
+		copy(out, obj.Arr.Items[from:to])
+		obj.Arr.Mu.RUnlock()
 		return ArrV(out), nil
 	case VString:
 		runes := []rune(obj.Str)
