@@ -167,8 +167,13 @@ len(x)                 string/array/map/chan length
 str(x) int(x) float(x) bool(x)   conversions (bool = truthiness)
 chr(n) ord(s) hex(n)   char codes, 255 -> "0xff"
 type(x)                 "nil|bool|int|float|string|array|map|func|chan"
+is_type(v, t)          bool: v is T (T in nil|bool|int|float|number|string|array|map|func|chan|any|ok|err)
+assert_type(v, t)      v when v is T else error
 range(n) range(a,b) range(a,b,step)
 assert(cond, msg?) error(msg) panic(msg)
+ok(v) err(e)           Result values {ok: v} / {err: "msg"}
+is_ok(v) is_err(v)     Result tests (also `v is ok` / `v is err`)
+unwrap(v)              ok value or error(err); unwrap_or(v, dflt) for default
 
 # arrays
 push(arr, v) pop(arr)  mutate array (push returns new len)

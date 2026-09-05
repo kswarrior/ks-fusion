@@ -377,8 +377,8 @@ func checkTypeNullable(v Value, typ, what string) error {
 
 // Env is a lexical scope.
 type Env struct {
-	Parent *Env
-	Vars   map[string]Value
+	Parent   *Env
+	Vars     map[string]Value
 	TypeAnns map[string]string
 	// Defer support: function call frames (isCall) collect deferred calls
 	// registered by `defer` and run them LIFO when the call returns.
@@ -2383,7 +2383,7 @@ func toMillis(v Value) (int, error) {
 // ---------------------------------------------------------------------------
 
 func (in *Interpreter) defineBuiltins(env *Env) {
-	for _, b := range cachedBuiltins {
+	for _, b := range cachedBuiltins() {
 		env.Vars[b.Name] = Value{Kind: VBuiltin, Builtin: b}
 	}
 }
@@ -2392,7 +2392,7 @@ func (in *Interpreter) defineBuiltins(env *Env) {
 // The old version rebuilt the ~80-entry slice and linearly scanned
 // it on every unresolved variable, allocating on the hot path.
 func builtinByName(name string) (*BuiltinObj, bool) {
-	b, ok := cachedBuiltinMap[name]
+	b, ok := cachedBuiltinMap()[name]
 	return b, ok
 }
 
@@ -2500,16 +2500,37 @@ func allBuiltins() []*BuiltinObj {
 // Process-wide builtin cache: built once, reused by every interpreter.
 // allBuiltins() allocates a fresh slice per call; the cache avoids
 // that allocation on New() and on every unknown-variable lookup.
+//
+// The cache is filled lazily (sync.Once) rather than in a package-level
+// initializer: eagerly calling allBuiltins() at init time creates an
+// initialization cycle (allBuiltins transitively reaches builtinByName,
+// which reads the cache).
 var (
-	cachedBuiltins   = allBuiltins()
-	cachedBuiltinMap = func() map[string]*BuiltinObj {
-		m := make(map[string]*BuiltinObj, len(cachedBuiltins))
-		for _, b := range cachedBuiltins {
+	builtinCacheOnce sync.Once
+	builtinCacheList []*BuiltinObj
+	builtinCacheMap  map[string]*BuiltinObj
+)
+
+func initBuiltinCache() {
+	builtinCacheOnce.Do(func() {
+		builtinCacheList = allBuiltins()
+		m := make(map[string]*BuiltinObj, len(builtinCacheList))
+		for _, b := range builtinCacheList {
 			m[b.Name] = b
 		}
-		return m
-	}()
-)
+		builtinCacheMap = m
+	})
+}
+
+func cachedBuiltins() []*BuiltinObj {
+	initBuiltinCache()
+	return builtinCacheList
+}
+
+func cachedBuiltinMap() map[string]*BuiltinObj {
+	initBuiltinCache()
+	return builtinCacheMap
+}
 
 func needArgs(name string, args []Value, min, max int) error {
 	if len(args) < min || (max >= 0 && len(args) > max) {
