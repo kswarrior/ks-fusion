@@ -842,8 +842,9 @@ func (in *Interpreter) execForIn(env *Env, st *frontend.Stmt) error {
 	loopEnv := newEnv(env)
 	// Per-iteration env for loop vars (Go 1.22 semantics), so `go`
 	// closures capture the current iteration's values.
+	// Body is a Block with its own scope; no extra env here.
 	runBody := func(iterEnv *Env) error {
-		err := in.execStmt(newEnv(iterEnv), st.Body)
+		err := in.execStmt(iterEnv, st.Body)
 		if err != nil {
 			if ce, ok := err.(*ctrlError); ok {
 				switch ce.kind {
@@ -974,7 +975,8 @@ func (in *Interpreter) execForC(env *Env, st *frontend.Stmt) error {
 		if !IsTruthy(cond) {
 			return nil
 		}
-		err := in.execStmt(newEnv(loopEnv), st.Body)
+		// Body is a Block with its own per-iteration scope.
+		err := in.execStmt(loopEnv, st.Body)
 		if err != nil {
 			if ce, ok := err.(*ctrlError); ok {
 				switch ce.kind {
@@ -1016,10 +1018,11 @@ func (in *Interpreter) execForC(env *Env, st *frontend.Stmt) error {
 }
 
 func (in *Interpreter) execTry(env *Env, st *frontend.Stmt) error {
-	err := in.execStmt(newEnv(env), st.Then)
+	// Then/CaBody/FinBody are Blocks which scope themselves.
+	err := in.execStmt(env, st.Then)
 	if err == nil {
 		if st.FinBody != nil {
-			return in.execStmt(newEnv(env), st.FinBody)
+			return in.execStmt(env, st.FinBody)
 		}
 		return nil
 	}
@@ -1027,7 +1030,7 @@ func (in *Interpreter) execTry(env *Env, st *frontend.Stmt) error {
 	// for cleanup, then propagate.
 	if isControl(err) {
 		if st.FinBody != nil {
-			if ferr := in.execStmt(newEnv(env), st.FinBody); ferr != nil {
+			if ferr := in.execStmt(env, st.FinBody); ferr != nil {
 				return ferr
 			}
 		}
@@ -1041,19 +1044,19 @@ func (in *Interpreter) execTry(env *Env, st *frontend.Stmt) error {
 		}
 		if cerr := in.execStmt(catchEnv, st.CaBody); cerr != nil {
 			if st.FinBody != nil {
-				if ferr := in.execStmt(newEnv(env), st.FinBody); ferr != nil {
+				if ferr := in.execStmt(env, st.FinBody); ferr != nil {
 					return ferr
 				}
 			}
 			return cerr
 		}
 		if st.FinBody != nil {
-			return in.execStmt(newEnv(env), st.FinBody)
+			return in.execStmt(env, st.FinBody)
 		}
 		return nil
 	}
 	if st.FinBody != nil {
-		if ferr := in.execStmt(newEnv(env), st.FinBody); ferr != nil {
+		if ferr := in.execStmt(env, st.FinBody); ferr != nil {
 			return ferr
 		}
 	}
@@ -1078,7 +1081,8 @@ func (in *Interpreter) execSwitch(env *Env, st *frontend.Stmt) error {
 			}
 			if deepEqual(target, cv) {
 				// Like Go, `break` inside a case ends the switch.
-				if err := in.execStmt(newEnv(env), c.Body); err != nil {
+				// Body is a Block which scopes itself.
+				if err := in.execStmt(env, c.Body); err != nil {
 					if ce, ok := err.(*ctrlError); ok && ce.kind == ctrlBreak {
 						return nil
 					}
@@ -1089,7 +1093,7 @@ func (in *Interpreter) execSwitch(env *Env, st *frontend.Stmt) error {
 		}
 	}
 	if def != nil {
-		if err := in.execStmt(newEnv(env), def.Body); err != nil {
+		if err := in.execStmt(env, def.Body); err != nil {
 			if ce, ok := err.(*ctrlError); ok && ce.kind == ctrlBreak {
 				return nil
 			}
@@ -1116,26 +1120,24 @@ func (in *Interpreter) execDefer(env *Env, st *frontend.Stmt) error {
 	if fn.Kind != VFunc && fn.Kind != VBuiltin {
 		return fmt.Errorf("defer needs a function, got %s", TypeName(fn))
 	}
-	args := make([]Value, 0, len(call.Args))
-	for _, a := range call.Args {
+	args := make([]Value, len(call.Args))
+	for i, a := range call.Args {
 		v, err := in.eval(env, a)
 		if err != nil {
 			return err
 		}
-		args = append(args, v)
+		args[i] = v
 	}
-	in.mu.Lock()
+	// frame is goroutine-private (one call frame per invocation);
+	// no lock needed even in concurrent mode.
 	frame.defers = append(frame.defers, deferredCall{fn: fn, args: args, line: st.Line})
-	in.mu.Unlock()
 	return nil
 }
 
 // runDefers executes a call frame's deferred calls LIFO.
 func (in *Interpreter) runDefers(frame *Env) error {
-	in.mu.Lock()
 	defers := frame.defers
 	frame.defers = nil
-	in.mu.Unlock()
 	var firstErr error
 	for i := len(defers) - 1; i >= 0; i-- {
 		if _, err := in.callValue(defers[i].fn, defers[i].args); err != nil {
@@ -1550,48 +1552,71 @@ func (in *Interpreter) eval(env *Env, e *frontend.Expr) (Value, error) {
 	return Nil(), fmt.Errorf("bad expression")
 }
 
-func (in *Interpreter) evalCall(env *Env, e *frontend.Expr) (Value, error) {
-	fn, err := in.eval(env, e.Callee)
-	if err != nil {
-		return Nil(), err
-	}
-	args := make([]Value, 0, len(e.Args))
-	for _, a := range e.Args {
-		v, err := in.eval(env, a)
-		if err != nil {
-			return Nil(), err
+// execFuncBody runs a user function body in an already-prepared callEnv.
+// The body is always a Block; its statements run directly in callEnv
+// (one scope for params + locals) instead of allocating a redundant
+// child Block env per call. Semantics are preserved: `let` in the
+// body shadows params in the same map, which is unobservable after
+// return, and closures capture callEnv either way.
+func (in *Interpreter) execFuncBody(callEnv *Env, body *frontend.Stmt) (Value, error) {
+	var ret Value = Nil()
+	var rerr error
+	if body != nil && body.Kind == frontend.StmtBlock {
+		for _, s := range body.List {
+			if err := in.execStmt(callEnv, s); err != nil {
+				if ce, ok := err.(*ctrlError); ok && ce.kind == ctrlReturn {
+					ret = ce.val
+					rerr = nil
+					break
+				}
+				rerr = err
+				break
+			}
 		}
-		args = append(args, v)
-	}
-	switch fn.Kind {
-	case VFunc:
-		if len(args) != len(fn.Func.Params) {
-			return Nil(), fmt.Errorf("function %q wants %d args, got %d", fn.Func.Name, len(fn.Func.Params), len(args))
-		}
-		callEnv := newEnv(fn.Func.Closure)
-		callEnv.isCall = true
-		for i, p := range fn.Func.Params {
-			callEnv.Vars[p] = args[i]
-		}
-		// lock-free define (single goroutine owns callEnv); direct map write ok
-		// but other goroutines may read closure parents via lookup (locked) - safe.
-		var ret Value = Nil()
-		var rerr error
-		if err := in.execStmt(callEnv, fn.Func.Body); err != nil {
+	} else if body != nil {
+		if err := in.execStmt(callEnv, body); err != nil {
 			if ce, ok := err.(*ctrlError); ok && ce.kind == ctrlReturn {
 				ret = ce.val
 			} else {
 				rerr = err
 			}
 		}
-		// Deferred calls run on every exit path (return, error, fallthrough).
-		if derr := in.runDefers(callEnv); derr != nil && rerr == nil {
-			return Nil(), derr
+	}
+	if derr := in.runDefers(callEnv); derr != nil && rerr == nil {
+		return Nil(), derr
+	}
+	if rerr != nil {
+		return Nil(), rerr
+	}
+	return ret, nil
+}
+
+func (in *Interpreter) evalCall(env *Env, e *frontend.Expr) (Value, error) {
+	fn, err := in.eval(env, e.Callee)
+	if err != nil {
+		return Nil(), err
+	}
+	args := make([]Value, len(e.Args))
+	for i, a := range e.Args {
+		v, err := in.eval(env, a)
+		if err != nil {
+			return Nil(), err
 		}
-		if rerr != nil {
-			return Nil(), rerr
+		args[i] = v
+	}
+	switch fn.Kind {
+	case VFunc:
+		if len(args) != len(fn.Func.Params) {
+			return Nil(), fmt.Errorf("function %q wants %d args, got %d", fn.Func.Name, len(fn.Func.Params), len(args))
 		}
-		return ret, nil
+		callEnv := newEnvSized(fn.Func.Closure, len(fn.Func.Params))
+		callEnv.isCall = true
+		for i, p := range fn.Func.Params {
+			callEnv.Vars[p] = args[i]
+		}
+		// lock-free define (single goroutine owns callEnv); direct map write ok
+		// but other goroutines may read closure parents via lookup (locked) - safe.
+		return in.execFuncBody(callEnv, fn.Func.Body)
 	case VBuiltin:
 		return fn.Builtin.Fn(in, args)
 	default:
@@ -1642,6 +1667,12 @@ func addValues(l, r Value) (Value, error) {
 	}
 	if isNum(l) && isNum(r) {
 		return FloatV(toFloat(l) + toFloat(r)), nil
+	}
+	// Fast path: string+string avoids Display() dispatch.
+	if l.Kind == VString && r.Kind == VString {
+		// Pre-grow via string concat (Go handles this efficiently;
+		// hot `s += chunk` loops stay O(n) amortized per append).
+		return StrV(l.Str + r.Str), nil
 	}
 	if l.Kind == VString || r.Kind == VString {
 		// string concat (ints auto-converted) - v0.1 compat: "hi " + x
@@ -2264,27 +2295,12 @@ func (in *Interpreter) callValue(fn Value, args []Value) (Value, error) {
 		if len(args) != len(fn.Func.Params) {
 			return Nil(), fmt.Errorf("function %q wants %d args, got %d", fn.Func.Name, len(fn.Func.Params), len(args))
 		}
-		callEnv := newEnv(fn.Func.Closure)
+		callEnv := newEnvSized(fn.Func.Closure, len(fn.Func.Params))
 		callEnv.isCall = true
 		for i, p := range fn.Func.Params {
 			callEnv.Vars[p] = args[i]
 		}
-		var ret Value = Nil()
-		var rerr error
-		if err := in.execStmt(callEnv, fn.Func.Body); err != nil {
-			if ce, ok := err.(*ctrlError); ok && ce.kind == ctrlReturn {
-				ret = ce.val
-			} else {
-				rerr = err
-			}
-		}
-		if derr := in.runDefers(callEnv); derr != nil && rerr == nil {
-			return Nil(), derr
-		}
-		if rerr != nil {
-			return Nil(), rerr
-		}
-		return ret, nil
+		return in.execFuncBody(callEnv, fn.Func.Body)
 	case VBuiltin:
 		return fn.Builtin.Fn(in, args)
 	default:

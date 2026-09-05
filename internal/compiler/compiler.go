@@ -330,6 +330,13 @@ func CompileProgram(p *frontend.Program) (*Bundle, error) {
 	c.funcs = append(c.funcs, main)
 	c.frames = append(c.frames, &funcCtx{fn: &c.funcs[0]})
 	c.isMain = true
+	// Pre-register top-level globals so functions compiled before the
+	// textual definition still resolve (calls happen after all defs run).
+	for _, st := range p.Statements {
+		if st.Kind == frontend.StmtLet || st.Kind == frontend.StmtFunc {
+			c.globalIndex(st.Name)
+		}
+	}
 	for _, st := range p.Statements {
 		if err := c.compileStmt(st); err != nil {
 			return nil, err
@@ -761,7 +768,33 @@ func (c *compiler) hiddenName(base string) string {
 func (c *compiler) compileForC(st *frontend.Stmt) error {
 	c.beginScope()
 	if st.Init != nil {
-		if err := c.compileStmt(st.Init); err != nil {
+		// `for i = 0; ...` implicitly defines the loop var (like the
+		// interpreter); plain `storeVar` would reject unknown names.
+		if st.Init.Kind == frontend.StmtAssign && st.Init.Name != "" {
+			if _, isLocal, enclosing := c.resolve(st.Init.Name); !isLocal && !enclosing {
+				if _, ok := c.gindex[st.Init.Name]; !ok {
+					op := st.Init.Op
+					if op == "" || op == "=" {
+						if err := c.compileExpr(st.Init.Expr); err != nil {
+							return err
+						}
+						c.defineLocal(st.Init.Name)
+					} else {
+						if err := c.compileStmt(st.Init); err != nil {
+							return err
+						}
+					}
+				} else {
+					if err := c.compileStmt(st.Init); err != nil {
+						return err
+					}
+				}
+			} else {
+				if err := c.compileStmt(st.Init); err != nil {
+					return err
+				}
+			}
+		} else if err := c.compileStmt(st.Init); err != nil {
 			return err
 		}
 	}

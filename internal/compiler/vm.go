@@ -330,7 +330,7 @@ func newVM(b *Bundle) *VM {
 		globals: make([]Val, len(b.Globals)),
 		defined: make([]bool, len(b.Globals)),
 	}
-	vm builtinsInit(vm)
+	vm.builtinsInit(vm)
 	return vm
 }
 

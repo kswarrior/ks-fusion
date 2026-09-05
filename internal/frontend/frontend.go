@@ -7,7 +7,7 @@
 //	stmts: let, assign (+= -= *= /= %=), print, sleep, go,
 //	       if/else, while, for-in, for-c-style, func, return,
 //	       break, continue, import, try/catch/finally, switch,
-//	       defer, block { }, expr-statement
+//	       select (recv/send/timeout/default), defer, block { }, expr-statement
 //	exprs: literals, vars, a+b - * / % **, in, == != < <= > >=,
 //	       and/or/not (also && || !), unary - !,
 //	       calls f(...), index a[i], slice a[l:r], field m.key,
@@ -110,6 +110,7 @@ const (
 	StmtImport
 	StmtTry
 	StmtSwitch
+	StmtSelect
 	StmtDefer
 )
 
@@ -121,11 +122,32 @@ type SwitchCase struct {
 	Line      int
 }
 
+// SelectCase is one `case`/`default` branch of a select statement.
+//
+//	Kind "recv":    Chan is the channel expr, Bind is the optional
+//	                receive variable (`case v = recv(c)`).
+//	Kind "send":    Chan is the channel expr, Value is the value expr
+//	                (`case send(c, v)`).
+//	Kind "timeout": Timeout is the ms expr (`case timeout(100)`).
+//	Kind "default": Body only (non-blocking fallback).
+type SelectCase struct {
+	Kind    string // "recv" | "send" | "timeout" | "default"
+	Chan    *Expr  // recv/send channel expr
+	Value   *Expr  // send value expr
+	Timeout *Expr  // timeout ms expr
+	Bind    string // recv bind var ("" = discard)
+	Body    *Stmt
+	Line    int
+}
+
 // Stmt is one statement node.
 type Stmt struct {
 	Kind    StmtKind
 	Name    string   // let/assign var, func name
 	Names   []string // for-in vars, func params (def)
+	ParamTypes []string // parallel to Names for func def, "" = any
+	ReturnType string   // func def return annotation, "" = any
+	TypeAnn string   // let type annotation, "" = any
 	Expr    *Expr    // let value, assign value, return, while cond, if cond, for iter/cond, sleep value, expr-stmt, switch target, defer call
 	Exprs   []*Expr  // print args
 	Inner   *Stmt    // go inner
@@ -134,9 +156,10 @@ type Stmt struct {
 	Else    *Stmt    // if else (block or if)
 	Init    *Stmt    // for-c init (may be nil)
 	Post    *Stmt    // for-c post (may be nil)
-	List    []*Stmt  // block statements
-	Cases   []*SwitchCase
-	StrVal  string // import path
+	List        []*Stmt  // block statements
+	Cases       []*SwitchCase
+	SelectCases []*SelectCase // select branches
+	StrVal      string        // import path
 	Catch   string // try: catch variable ("" = none)
 	CaBody  *Stmt  // try: catch body (nil = no catch)
 	FinBody *Stmt  // try: finally body (nil = none)
@@ -263,6 +286,10 @@ const (
 	tCase
 	tDefault
 	tDefer
+	tSelect
+	tQuestion
+	tCoalesce
+	tQuestionDot
 )
 
 type token struct {
@@ -299,6 +326,7 @@ var keywords = map[string]tokKind{
 	"case":     tCase,
 	"default":  tDefault,
 	"defer":    tDefer,
+	"select":   tSelect,
 }
 
 func isDigitForBase(c byte, kind byte) bool {
@@ -588,6 +616,14 @@ func lex(src, path string) ([]token, error) {
 			add(tModAssign, two)
 			i += 2
 			continue
+		case "??":
+			add(tCoalesce, two)
+			i += 2
+			continue
+		case "?.":
+			add(tQuestionDot, two)
+			i += 2
+			continue
 		}
 		// `//` comment
 		if c == '/' && i+1 < n && src[i+1] == '/' {
@@ -617,6 +653,8 @@ func lex(src, path string) ([]token, error) {
 			add(tBang, "!")
 		case '.':
 			add(tDot, ".")
+		case '?':
+			add(tQuestion, "?")
 		case ',':
 			add(tComma, ",")
 		case ':':
@@ -814,9 +852,19 @@ func (p *parser) parseLet() (*Stmt, error) {
 		return nil, p.errf(nameTok, "bad let: want `let x = ...`, got %q", nameTok.Lit)
 	}
 	p.next()
-	// allow `let x` (= nil)
+	// optional `: type` annotation, e.g. `let x: int = 10`
+	typeAnn := ""
+	if p.peek().K == tColon {
+		p.next()
+		tn, err := p.parseTypeName()
+		if err != nil {
+			return nil, err
+		}
+		typeAnn = tn
+	}
+	// allow `let x` (= nil) and `let x: int` (= nil, nullable)
 	if p.peek().K == tNewline || p.peek().K == tSemi || p.peek().K == tEOF || p.peek().K == tRBrace {
-		return &Stmt{Kind: StmtLet, Name: nameTok.Lit, Expr: &Expr{Kind: ExprNil}, Line: lt.Line}, nil
+		return &Stmt{Kind: StmtLet, Name: nameTok.Lit, Expr: &Expr{Kind: ExprNil}, TypeAnn: typeAnn, Line: lt.Line}, nil
 	}
 	if _, err := p.expect(tAssign, "`=`"); err != nil {
 		return nil, fmt.Errorf("%s:%d: bad let: want `let x = ...`: %v", p.path, lt.Line, err)
@@ -825,32 +873,71 @@ func (p *parser) parseLet() (*Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Stmt{Kind: StmtLet, Name: nameTok.Lit, Expr: e, Line: lt.Line}, nil
+	return &Stmt{Kind: StmtLet, Name: nameTok.Lit, Expr: e, TypeAnn: typeAnn, Line: lt.Line}, nil
+}
+
+// validTypeNames is the set of type annotation / `is` names.
+func validTypeName(s string) bool {
+	switch s {
+	case "nil", "bool", "int", "float", "number", "string",
+		"array", "map", "func", "chan", "any", "ok", "err":
+		return true
+	}
+	return false
+}
+
+// parseTypeName parses a single type name (ident) with optional trailing `?`
+// nullable marker (accepted and ignored: annotations are nullable by default).
+func (p *parser) parseTypeName() (string, error) {
+	t := p.peek()
+	if t.K != tIdent {
+		return "", p.errf(t, "want type name (nil|bool|int|float|number|string|array|map|func|chan|any|ok|err), got %q", t.Lit)
+	}
+	p.next()
+	if !validTypeName(t.Lit) {
+		return "", p.errf(t, "unknown type %q (want nil|bool|int|float|number|string|array|map|func|chan|any|ok|err)", t.Lit)
+	}
+	// trailing `?` (e.g. `int?`) = nullable marker, accepted for familiarity.
+	if p.peek().K == tQuestion {
+		p.next()
+	}
+	return t.Lit, nil
 }
 
 func (p *parser) parseFuncStmt() (*Stmt, error) {
 	ft := p.next()   // func
 	name := p.next() // ident (checked by caller)
-	params, err := p.parseParams()
+	params, paramTypes, err := p.parseParams()
 	if err != nil {
 		return nil, err
+	}
+	// optional return type: `func f(): int { ... }`
+	returnType := ""
+	if p.peek().K == tColon {
+		p.next()
+		tn, err := p.parseTypeName()
+		if err != nil {
+			return nil, err
+		}
+		returnType = tn
 	}
 	body, err := p.parseBlock()
 	if err != nil {
 		return nil, err
 	}
-	return &Stmt{Kind: StmtFunc, Name: name.Lit, Names: params, Body: body, Line: ft.Line}, nil
+	return &Stmt{Kind: StmtFunc, Name: name.Lit, Names: params, ParamTypes: paramTypes, ReturnType: returnType, Body: body, Line: ft.Line}, nil
 }
 
-func (p *parser) parseParams() ([]string, error) {
+func (p *parser) parseParams() ([]string, []string, error) {
 	if _, err := p.expect(tLParen, "`(`"); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var out []string
+	var types []string
 	p.skipSeps()
 	if p.peek().K == tRParen {
 		p.next()
-		return out, nil
+		return out, types, nil
 	}
 	for {
 		// allow newlines inside parens
@@ -859,10 +946,20 @@ func (p *parser) parseParams() ([]string, error) {
 		}
 		t := p.peek()
 		if t.K != tIdent {
-			return nil, p.errf(t, "bad parameter %q, want name", t.Lit)
+			return nil, nil, p.errf(t, "bad parameter %q, want name", t.Lit)
 		}
 		p.next()
 		out = append(out, t.Lit)
+		pt := ""
+		if p.peek().K == tColon {
+			p.next()
+			tn, err := p.parseTypeName()
+			if err != nil {
+				return nil, nil, err
+			}
+			pt = tn
+		}
+		types = append(types, pt)
 		for p.peek().K == tNewline {
 			p.next()
 		}
@@ -872,9 +969,9 @@ func (p *parser) parseParams() ([]string, error) {
 		}
 		if p.peek().K == tRParen {
 			p.next()
-			return out, nil
+			return out, types, nil
 		}
-		return nil, p.errf(p.peek(), "want `,` or `)` in parameter list, got %q", p.peek().Lit)
+		return nil, nil, p.errf(p.peek(), "want `,` or `)` in parameter list, got %q", p.peek().Lit)
 	}
 }
 
@@ -1846,15 +1943,25 @@ func (p *parser) parseFuncLit() (*Expr, error) {
 	if p.peek().K == tIdent && p.peekAt(1).K == tLParen {
 		p.next()
 	}
-	params, err := p.parseParams()
+	params, paramTypes, err := p.parseParams()
 	if err != nil {
 		return nil, err
+	}
+	// optional return type: `func(a: int): int { ... }`
+	returnType := ""
+	if p.peek().K == tColon {
+		p.next()
+		tn, err := p.parseTypeName()
+		if err != nil {
+			return nil, err
+		}
+		returnType = tn
 	}
 	body, err := p.parseBlock()
 	if err != nil {
 		return nil, err
 	}
-	return &Expr{Kind: ExprFunc, FuncParams: params, FuncBody: body}, nil
+	return &Expr{Kind: ExprFunc, FuncParams: params, FuncParamTypes: paramTypes, FuncReturnType: returnType, FuncBody: body}, nil
 }
 
 // isIdent reports whether s is a valid identifier (kept for compat).
