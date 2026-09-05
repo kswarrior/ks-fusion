@@ -13,7 +13,7 @@
 | Browser UI / React / SSR | Next.js (TS) | `frontend/main.ks` is console logic today, not DOM |
 | CRUD + auth + admin panel tomorrow | PHP Laravel / Python Django | No ORM, migrations, HTTP server stdlib yet |
 | Quick scripts, rules, gluing, learning | ks-fusion | — this is the sweet spot |
-| npm / PyPI ecosystem | Node.js / Python | `.ks` has ~90 builtins + local `.kslib` only |
+| npm / PyPI ecosystem | Node.js / Python | `.ks` has 97 builtins + local `.kslib` only |
 
 ## Big table
 
@@ -27,7 +27,7 @@
 | Binary | needs `fusion` on PATH (shebang), no `--bin` yet | single static binary | single binary | binary | binary | needs node/runtime | needs python | needs node | needs php+server |
 | Best for | learning, automation, rules engines, small backends | APIs, DevOps, cloud | systems, WASM, games | OS, embedded | engines, trading, desktop | APIs, realtime, SSR | scripts, data, AI | fullstack React apps | monolith CRUD apps |
 
-See `docs/futures.md` for what closes each gap (`--bin`, `select`, `http_*`, registry, `--js`).
+See `docs/futures.md` for what closes each gap (`--bin`, `http_*`, registry, `--js`).
 
 ## How scoring works (out of 100)
 
@@ -76,9 +76,9 @@ Details in `More` below. Frontend breakdown:
 
 ### vs Go (implementation language)
 
-**Score: ks-fusion 48/100 vs Go 82/100 — Go wins by 36.**
+**Score: ks-fusion 48/100 vs Go 82/100 — Go wins by 34.**
 
-Same ideas: `go func(){...}()`, `chan(1)`, `send/recv/close`, `defer` LIFO.
+Same ideas: `go func(){...}()`, `chan(1)`, `send/recv/close`, `select`, `defer` LIFO.
 Difference: Go is compiled + statically typed; `.ks` is interpreted + gradual-typed
 (optional `: type` annotations checked at runtime, `is`/`?.`/`??`).
 
@@ -99,12 +99,33 @@ go func() {
 print recv(c)
 ```
 
+Multiplexing works like Go too (uniformly-random ready branch, `break`
+ends the `select`, `ch = nil` disables a case):
+
+```go
+// Go
+select {
+case v := <-ch1:
+    fmt.Println(v)
+case <-time.After(100 * time.Millisecond):
+    fmt.Println("timeout")
+}
+```
+
+```python
+# .ks
+select {
+  case v = recv(c1) { print v }
+  case timeout(100) { print "timeout" }
+}
+```
+
 Pick Go for prod servers, strict APIs, single binary.
 Pick `.ks` for shorter scripts with Go-flavored concurrency and no compile step.
 
 ### vs Rust
 
-**Score: ks-fusion 48/100 vs Rust 81/100 — Rust wins by 35.**
+**Score: ks-fusion 48/100 vs Rust 81/100 — Rust wins by 33.**
 
 Rust gives ownership, `Result/Option`, `cargo` registry, zero-cost abstractions.
 `.ks` copies the `cargo` UX (`fusion new --lib`, `fusion build --release`,
@@ -116,7 +137,7 @@ Pick `.ks` for Day-1 productivity without borrow checker.
 
 ### vs C
 
-**Score: ks-fusion 48/100 vs C 62/100 — C wins by 16.**
+**Score: ks-fusion 48/100 vs C 62/100 — C wins by 14.**
 
 C gives pointers, manual `malloc/free`, direct syscalls, tiny runtimes.
 `.ks` gives `array/map/string` + GC (from Go) + bounds-checked indexing.
@@ -126,7 +147,7 @@ Pick `.ks` for everything where `segfault` is unacceptable.
 
 ### vs C++
 
-**Score: ks-fusion 48/100 vs C++ 73/100 — C++ wins by 27.**
+**Score: ks-fusion 48/100 vs C++ 73/100 — C++ wins by 25.**
 
 C++ gives RAII, templates, classes, deterministic destruction, huge game/engine libs.
 `.ks` gives `func` closures + `defer` + duck-typed maps instead of classes.
@@ -136,10 +157,10 @@ Pick `.ks` for config-driven logic on top of those engines.
 
 ### vs Node.js
 
-**Score: ks-fusion 48/100 vs Node.js 77/100 — Node wins by 31.**
+**Score: ks-fusion 48/100 vs Node.js 77/100 — Node wins by 29.**
 
 Node gives V8, `npm` (2M+ packages), `fetch/http`, event loop, TypeScript.
-`.ks` gives simpler blocking `recv/sleep` + ~90 sync builtins, no `http_*` yet.
+`.ks` gives simpler blocking `recv`/`select` + 97 sync builtins, no `http_*` yet.
 
 ```js
 // Node
@@ -157,11 +178,11 @@ Pick `.ks` for small deterministic scripts without `node_modules`.
 
 ### vs Python
 
-**Score: ks-fusion 48/100 vs Python 74/100 — Python wins by 28.**
+**Score: ks-fusion 48/100 vs Python 74/100 — Python wins by 26.**
 
 Closest feel: `let x = 10`, `for i in range(5)`, `a[1:3]`, `and/or/not`,
 truthiness (`nil false 0 0.0 "" [] {}` falsy), `map/filter/reduce`.
-Difference: `.ks` adds `go/chan/defer/switch`, gradual `: type` annotations,
+Difference: `.ks` adds `go/chan/select/defer/switch`, gradual `: type` annotations,
 `is`/`?.`/`??` and braces; Python has huge stdlib
 (`requests`, `numpy`, `django`) while `.ks` has files/JSON/strings only.
 

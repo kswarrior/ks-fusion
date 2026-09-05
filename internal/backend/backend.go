@@ -3667,11 +3667,7 @@ func bPow(in *Interpreter, args []Value) (Value, error) {
 		return Nil(), fmt.Errorf("pow wants numbers, got (%s, %s)", TypeName(args[0]), TypeName(args[1]))
 	}
 	if args[0].Kind == VInt && args[1].Kind == VInt && args[1].Int >= 0 {
-		res := 1
-		for i := 0; i < args[1].Int; i++ {
-			res *= args[0].Int
-		}
-		return IntV(res), nil
+		return IntV(intPow(args[0].Int, args[1].Int)), nil
 	}
 	return FloatV(math.Pow(toFloat(args[0]), toFloat(args[1]))), nil
 }
