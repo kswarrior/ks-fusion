@@ -758,12 +758,8 @@ func (p *parser) parseIf() (*Stmt, error) {
 	saved := p.pos
 	p.skipSeps()
 	if p.peek().K != tElse {
+		// No else: rewind so outer skipSeps handles separators.
 		p.pos = saved
-		// rewind to right after then-block but keep single newline handling:
-		// find actual position after then block: it is saved-? Simpler: restore
-		// and consume at most one separator set only if else follows.
-		// We already know no else, so restore to right after block + seps? No:
-		// outer skipSeps will handle them. Restore to after-block.
 		return &Stmt{Kind: StmtIf, Expr: cond, Then: then, Line: it.Line}, nil
 	}
 	p.next() // else

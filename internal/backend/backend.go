@@ -115,10 +115,8 @@ func TypeName(v Value) string {
 		return "array"
 	case VMap:
 		return "map"
-	case VFunc:
+	case VFunc, VBuiltin:
 		return "func"
-	case VBuiltin:
-		return "builtin"
 	case VChan:
 		return "chan"
 	}
@@ -320,13 +318,18 @@ func Run(p *frontend.Program) error {
 }
 
 // RunWithDir executes a program with imports resolved relative to dir
-// (typically the app dir). If dir is "", it defaults to the program's dir.
+// (typically the app dir). If dir is "", it defaults to the program's dir
+// when the program came from a real file path.
 func RunWithDir(p *frontend.Program, dir string) error {
 	in := New()
 	if dir != "" {
 		in.baseDir = dir
-	} else if p.Path != "" && p.Path != "<expr>" && p.Path != "test.ks" {
-		in.baseDir = filepath.Dir(p.Path)
+	} else if p.Path != "" && p.Path != "<expr>" {
+		// Bare names like "test.ks" (unit tests) carry no directory;
+		// only adopt the dir when the path actually has one.
+		if d := filepath.Dir(p.Path); d != "" && d != "." {
+			in.baseDir = d
+		}
 	}
 	if err := in.ExecProgram(p); err != nil {
 		return err
@@ -453,8 +456,8 @@ func withLine(line int, err error) error {
 		return err
 	}
 	msg := err.Error()
-	// avoid double "line N:"
-	if strings.Contains(msg, "line ") {
+	// avoid double "line N:" (only when this error already carries one)
+	if strings.HasPrefix(msg, "line ") {
 		return err
 	}
 	if line > 0 {
