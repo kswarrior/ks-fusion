@@ -1857,6 +1857,9 @@ func (in *Interpreter) eval(env *Env, e *frontend.Expr) (Value, error) {
 		if err != nil {
 			return Nil(), err
 		}
+		if e.Safe {
+			return indexValueSafe(obj, idx)
+		}
 		return indexValue(obj, idx)
 	case frontend.ExprSlice:
 		obj, err := in.eval(env, e.Left)
@@ -2101,6 +2104,48 @@ func indexValue(obj, idx Value) (Value, error) {
 			return Nil(), fmt.Errorf("index %d out of range (len %d)", idx.Int, len(runes))
 		}
 		return StrV(string(runes[idx.Int])), nil
+	}
+	return Nil(), fmt.Errorf("cannot index %s", TypeName(obj))
+}
+
+// indexValueSafe implements `?.`: nil base already handled by the caller.
+// Missing map keys and out-of-range array/string indexes yield nil instead
+// of an error; genuine type errors (indexing an int, wrong index type)
+// still fail so bugs stay visible.
+func indexValueSafe(obj, idx Value) (Value, error) {
+	switch obj.Kind {
+	case VArray:
+		if idx.Kind != VInt {
+			return Nil(), fmt.Errorf("array index must be int, got %s", TypeName(idx))
+		}
+		obj.Arr.Mu.RLock()
+		defer obj.Arr.Mu.RUnlock()
+		if idx.Int < 0 || idx.Int >= len(obj.Arr.Items) {
+			return Nil(), nil
+		}
+		return obj.Arr.Items[idx.Int], nil
+	case VMap:
+		if idx.Kind != VString {
+			return Nil(), fmt.Errorf("map key must be string, got %s", TypeName(idx))
+		}
+		obj.Map.Mu.RLock()
+		defer obj.Map.Mu.RUnlock()
+		v, ok := obj.Map.Vals[idx.Str]
+		if !ok {
+			return Nil(), nil
+		}
+		return v, nil
+	case VString:
+		if idx.Kind != VInt {
+			return Nil(), fmt.Errorf("string index must be int, got %s", TypeName(idx))
+		}
+		runes := []rune(obj.Str)
+		if idx.Int < 0 || idx.Int >= len(runes) {
+			return Nil(), nil
+		}
+		return StrV(string(runes[idx.Int])), nil
+	case VNil:
+		return Nil(), nil
 	}
 	return Nil(), fmt.Errorf("cannot index %s", TypeName(obj))
 }
