@@ -2525,7 +2525,6 @@ func minMaxVals(name string, args []Value, wantMin bool) (Value, error) {
 		}
 		return IntV(best), nil
 	}
-	best := items[0]
 	bestF := toFloat(items[0])
 	if !isNum(items[0]) {
 		return Nil(), fmt.Errorf("%s: cannot mix strings and numbers", name)
@@ -2536,7 +2535,7 @@ func minMaxVals(name string, args []Value, wantMin bool) (Value, error) {
 		}
 		f := toFloat(a)
 		if wantMin == (f < bestF) {
-			best, bestF = a, f
+			bestF = f
 		}
 	}
 	return FloatV(bestF), nil
