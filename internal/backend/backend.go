@@ -1624,8 +1624,10 @@ func bLen(in *Interpreter, args []Value) (Value, error) {
 		args[0].Map.Mu.RLock()
 		defer args[0].Map.Mu.RUnlock()
 		return IntV(len(args[0].Map.Vals)), nil
+	case VChan:
+		return IntV(len(args[0].Chan.Ch)), nil
 	}
-	return Nil(), fmt.Errorf("len wants string/array/map, got %s", TypeName(args[0]))
+	return Nil(), fmt.Errorf("len wants string/array/map/chan, got %s", TypeName(args[0]))
 }
 
 func bStr(in *Interpreter, args []Value) (Value, error) {
