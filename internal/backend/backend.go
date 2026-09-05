@@ -1577,7 +1577,7 @@ func allBuiltins() []*BuiltinObj {
 		{Name: "exists", Fn: bExists},
 		{Name: "list_dir", Fn: bListDir},
 		{Name: "mkdir", Fn: bMkdir},
-		{Name: "remove", Fn: bRemovePath},
+		{Name: "remove_file", Fn: bRemovePath},
 		{Name: "exit", Fn: bExit},
 		{Name: "argv", Fn: bArgv},
 		{Name: "env", Fn: bEnv},
@@ -2030,6 +2030,13 @@ func bInsert(in *Interpreter, args []Value) (Value, error) {
 }
 
 func bRemove(in *Interpreter, args []Value) (Value, error) {
+	// Unified remove: remove(array, idx) -> value, or remove(path) -> nil.
+	if len(args) == 1 && args[0].Kind == VString {
+		if err := os.Remove(args[0].Str); err != nil {
+			return Nil(), err
+		}
+		return Nil(), nil
+	}
 	if err := needArgs("remove", args, 2, 2); err != nil {
 		return Nil(), err
 	}
@@ -3109,11 +3116,11 @@ func bMkdir(in *Interpreter, args []Value) (Value, error) {
 }
 
 func bRemovePath(in *Interpreter, args []Value) (Value, error) {
-	if err := needArgs("remove", args, 1, 1); err != nil {
+	if err := needArgs("remove_file", args, 1, 1); err != nil {
 		return Nil(), err
 	}
 	if args[0].Kind != VString {
-		return Nil(), fmt.Errorf("remove wants path string, got %s", TypeName(args[0]))
+		return Nil(), fmt.Errorf("remove_file wants path string, got %s", TypeName(args[0]))
 	}
 	if err := os.Remove(args[0].Str); err != nil {
 		return Nil(), err
