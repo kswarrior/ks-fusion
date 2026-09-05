@@ -829,6 +829,8 @@ func (p *parser) parseStmt() (*Stmt, error) {
 		return p.parseTry()
 	case tSwitch:
 		return p.parseSwitch()
+	case tSelect:
+		return p.parseSelect()
 	case tDefer:
 		return p.parseDefer()
 	case tLBrace:
@@ -1406,6 +1408,166 @@ func (p *parser) parseSwitch() (*Stmt, error) {
 		return nil, p.errf(st, "switch needs at least one case/default")
 	}
 	return out, nil
+}
+
+// parseSelect parses Go-like channel multiplexing:
+//
+//	select {
+//	  case v = recv(c1) { print v }  # receive + bind (bind optional)
+//	  case recv(c2) { print "got" }  # receive + discard
+//	  case send(c3, 42) { print "sent" }
+//	  case timeout(100) { print "timed out" }
+//	  default { print "none ready" }
+//	}
+//
+// Rules (Go semantics): at least one case/default; `default` (if any)
+// must be last and unique; with `default` the select never blocks
+// (timeouts are skipped); without `default` it blocks until one case
+// is ready (multiple timeouts allowed, earliest wins; ready cases are
+// chosen uniformly at random).
+func (p *parser) parseSelect() (*Stmt, error) {
+	st := p.next() // select
+	if _, err := p.expect(tLBrace, "`{`"); err != nil {
+		return nil, err
+	}
+	out := &Stmt{Kind: StmtSelect, Line: st.Line}
+	p.skipSeps()
+	seenDefault := false
+	for p.peek().K != tRBrace {
+		if p.atEnd() {
+			return nil, p.errf(st, "unterminated select, missing `}`")
+		}
+		t := p.peek()
+		if t.K == tCase {
+			if seenDefault {
+				return nil, p.errf(t, "default must be the last branch in select")
+			}
+			p.next() // case
+			sc, err := p.parseSelectCase(t)
+			if err != nil {
+				return nil, err
+			}
+			out.SelectCases = append(out.SelectCases, sc)
+		} else if t.K == tDefault {
+			if seenDefault {
+				return nil, p.errf(t, "duplicate default in select")
+			}
+			seenDefault = true
+			p.next() // default
+			body, err := p.parseBlock()
+			if err != nil {
+				return nil, err
+			}
+			out.SelectCases = append(out.SelectCases, &SelectCase{Kind: "default", Body: body, Line: t.Line})
+		} else {
+			return nil, p.errf(t, "want `case` or `default` in select, got %q", t.Lit)
+		}
+		p.skipSeps()
+	}
+	p.next() // }
+	if len(out.SelectCases) == 0 {
+		return nil, p.errf(st, "select needs at least one case/default")
+	}
+	return out, nil
+}
+
+// parseSelectCase parses one `case <op>` header (the leading `case`
+// was already consumed) plus its `{ block }`.
+func (p *parser) parseSelectCase(t token) (*SelectCase, error) {
+	// Bind form: `case v = recv(c) { ... }`
+	if p.peek().K == tIdent && p.peekAt(1).K == tAssign {
+		bind := p.next().Lit
+		p.next() // =
+		nm := p.peek()
+		if nm.K != tIdent || nm.Lit != "recv" {
+			return nil, p.errf(nm, "bad select case: want `v = recv(ch)`, got %q", nm.Lit)
+		}
+		if !isIdent(bind) {
+			return nil, p.errf(nm, "bad select bind %q, want variable name", bind)
+		}
+		p.next() // recv
+		if _, err := p.expect(tLParen, "`(`"); err != nil {
+			return nil, err
+		}
+		ch, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(tRParen, "`)`"); err != nil {
+			return nil, err
+		}
+		body, err := p.parseBlock()
+		if err != nil {
+			return nil, err
+		}
+		return &SelectCase{Kind: "recv", Chan: ch, Bind: bind, Body: body, Line: t.Line}, nil
+	}
+	nm := p.peek()
+	if nm.K != tIdent {
+		return nil, p.errf(nm, "bad select case: want `recv(ch)`, `send(ch, v)` or `timeout(ms)`, got %q", nm.Lit)
+	}
+	switch nm.Lit {
+	case "recv":
+		p.next()
+		if _, err := p.expect(tLParen, "`(`"); err != nil {
+			return nil, err
+		}
+		ch, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(tRParen, "`)`"); err != nil {
+			return nil, err
+		}
+		body, err := p.parseBlock()
+		if err != nil {
+			return nil, err
+		}
+		return &SelectCase{Kind: "recv", Chan: ch, Body: body, Line: t.Line}, nil
+	case "send":
+		p.next()
+		if _, err := p.expect(tLParen, "`(`"); err != nil {
+			return nil, err
+		}
+		ch, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(tComma, "`,`"); err != nil {
+			return nil, err
+		}
+		val, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(tRParen, "`)`"); err != nil {
+			return nil, err
+		}
+		body, err := p.parseBlock()
+		if err != nil {
+			return nil, err
+		}
+		return &SelectCase{Kind: "send", Chan: ch, Value: val, Body: body, Line: t.Line}, nil
+	case "timeout":
+		p.next()
+		if _, err := p.expect(tLParen, "`(`"); err != nil {
+			return nil, err
+		}
+		ms, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(tRParen, "`)`"); err != nil {
+			return nil, err
+		}
+		body, err := p.parseBlock()
+		if err != nil {
+			return nil, err
+		}
+		return &SelectCase{Kind: "timeout", Timeout: ms, Body: body, Line: t.Line}, nil
+	default:
+		return nil, p.errf(nm, "bad select case: want `recv(ch)`, `send(ch, v)` or `timeout(ms)`, got %q", nm.Lit)
+	}
 }
 
 func (p *parser) parseDefer() (*Stmt, error) {

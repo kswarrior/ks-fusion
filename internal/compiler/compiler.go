@@ -1004,35 +1004,31 @@ func (c *compiler) compileExpr(e *frontend.Expr) error {
 		}
 		c.emit(OpMap, len(e.MapKeys), 0)
 	case frontend.ExprFunc:
-		// anonymous literal: compile as hidden function
+		// anonymous literal: compile as a hidden function, then unbind the
+		// hidden name so only the value stays on the stack for the caller
+		// (`let f = func...`, call args, ...) to bind.
 		name := c.hiddenName("fn")
 		if e.FuncBody == nil {
 			return fmt.Errorf("bad func literal (compiler v0.1)")
 		}
+		topLevel := len(c.frames) == 1 && c.frames[0].depth == 0
 		if err := c.compileFuncDef(name, e.FuncParams, e.FuncBody, 0); err != nil {
 			return err
 		}
-		// compileFuncDef pushed + defined a named value; for literals we want
-		// just the value on the stack. Remove the define and keep the push.
-		code := &c.cur().fn.Chunk.Code
-		if len(*code) == 0 {
-			return fmt.Errorf("bad func literal (compiler v0.1)")
-		}
-		last := (*code)[len(*code)-1]
-		if last.Op != OpDefineGlobal && last.Op != OpPop {
-			// last op defines the name; drop it, keep OpConst func value.
-			// OpDefineGlobal pops the value, so remove it to keep value.
-			*code = (*code)[:len(*code)-1]
-			// remove the local/global binding too
-			if len(c.frames) == 1 {
-				delete(c.gindex, name)
-				c.globals = c.globals[:len(c.globals)-1]
-			} else {
-				cur := c.cur()
-				if len(cur.locals) > 0 && cur.locals[len(cur.locals)-1].name == name {
-					cur.locals = cur.locals[:len(cur.locals)-1]
-				}
+		if topLevel {
+			code := &c.cur().fn.Chunk.Code
+			if len(*code) == 0 || (*code)[len(*code)-1].Op != OpDefineGlobal {
+				return fmt.Errorf("bad func literal (compiler v0.1)")
 			}
+			*code = (*code)[:len(*code)-1]
+			delete(c.gindex, name)
+			c.globals = c.globals[:len(c.globals)-1]
+		} else {
+			cur := c.cur()
+			if len(cur.locals) == 0 || cur.locals[len(cur.locals)-1].name != name {
+				return fmt.Errorf("bad func literal (compiler v0.1)")
+			}
+			cur.locals = cur.locals[:len(cur.locals)-1]
 		}
 	default:
 		return fmt.Errorf("bad expression (compiler v0.1)")

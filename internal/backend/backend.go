@@ -1558,6 +1558,25 @@ func (in *Interpreter) eval(env *Env, e *frontend.Expr) (Value, error) {
 			return Nil(), err
 		}
 		return inValues(l, r)
+	case frontend.ExprIs:
+		l, err := in.eval(env, e.Left)
+		if err != nil {
+			return Nil(), err
+		}
+		want, err := in.resolveIsType(env, e.Right)
+		if err != nil {
+			return Nil(), err
+		}
+		return BoolV(matchesTypeStrict(l, want)), nil
+	case frontend.ExprCoalesce:
+		l, err := in.eval(env, e.Left)
+		if err != nil {
+			return Nil(), err
+		}
+		if l.Kind != VNil {
+			return l, nil
+		}
+		return in.eval(env, e.Right)
 	case frontend.ExprEq:
 		l, err := in.eval(env, e.Left)
 		if err != nil {
@@ -1631,6 +1650,9 @@ func (in *Interpreter) eval(env *Env, e *frontend.Expr) (Value, error) {
 		if err != nil {
 			return Nil(), err
 		}
+		if e.Safe && obj.Kind == VNil {
+			return Nil(), nil
+		}
 		idx, err := in.eval(env, e.Right)
 		if err != nil {
 			return Nil(), err
@@ -1686,10 +1708,83 @@ func (in *Interpreter) eval(env *Env, e *frontend.Expr) (Value, error) {
 		}
 		return MapV(m), nil
 	case frontend.ExprFunc:
-		fn := &FuncObj{Params: append([]string{}, e.FuncParams...), Body: e.FuncBody, Closure: env}
+		fn := &FuncObj{Params: append([]string{}, e.FuncParams...), ParamTypes: append([]string{}, e.FuncParamTypes...), ReturnType: e.FuncReturnType, Body: e.FuncBody, Closure: env}
+		for len(fn.ParamTypes) < len(fn.Params) {
+			fn.ParamTypes = append(fn.ParamTypes, "")
+		}
 		return Value{Kind: VFunc, Func: fn}, nil
 	}
 	return Nil(), fmt.Errorf("bad expression")
+}
+
+// resolveIsType extracts the type name for `x is T` without requiring
+// `T` to be a bound variable: ident `int` means "int", string "int"
+// means "int", nil means "nil", otherwise eval and require a string.
+func (in *Interpreter) resolveIsType(env *Env, e *frontend.Expr) (string, error) {
+	if e == nil {
+		return "", fmt.Errorf("is wants a type name (nil|bool|int|float|number|string|array|map|func|chan|any|ok|err)")
+	}
+	switch e.Kind {
+	case frontend.ExprVar:
+		if !validType(e.Name) {
+			return "", fmt.Errorf("unknown type %q (want nil|bool|int|float|number|string|array|map|func|chan|any|ok|err)", e.Name)
+		}
+		return e.Name, nil
+	case frontend.ExprString:
+		if !validType(e.StrVal) {
+			return "", fmt.Errorf("unknown type %q (want nil|bool|int|float|number|string|array|map|func|chan|any|ok|err)", e.StrVal)
+		}
+		return e.StrVal, nil
+	case frontend.ExprNil:
+		return "nil", nil
+	}
+	v, err := in.eval(env, e)
+	if err != nil {
+		return "", err
+	}
+	if v.Kind != VString {
+		return "", fmt.Errorf("is wants a type name string, got %s", TypeName(v))
+	}
+	if !validType(v.Str) {
+		return "", fmt.Errorf("unknown type %q (want nil|bool|int|float|number|string|array|map|func|chan|any|ok|err)", v.Str)
+	}
+	return v.Str, nil
+}
+
+// checkFuncArgs enforces gradual param types (nil passes, like `let x: T`).
+func checkFuncArgs(fn *FuncObj, args []Value) error {
+	for i, p := range fn.Params {
+		if i >= len(fn.ParamTypes) {
+			break
+		}
+		want := fn.ParamTypes[i]
+		if want == "" || want == "any" {
+			continue
+		}
+		if i >= len(args) {
+			break
+		}
+		if err := checkTypeNullable(args[i], want, "param "+p); err != nil {
+			if fn.Name != "" {
+				return fmt.Errorf("function %q: %v", fn.Name, err)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+func checkFuncReturn(fn *FuncObj, ret Value) error {
+	if fn.ReturnType == "" || fn.ReturnType == "any" {
+		return nil
+	}
+	if err := checkTypeNullable(ret, fn.ReturnType, "return"); err != nil {
+		if fn.Name != "" {
+			return fmt.Errorf("function %q: %v", fn.Name, err)
+		}
+		return err
+	}
+	return nil
 }
 
 // execFuncBody runs a user function body in an already-prepared callEnv.
@@ -1749,6 +1844,9 @@ func (in *Interpreter) evalCall(env *Env, e *frontend.Expr) (Value, error) {
 		if len(args) != len(fn.Func.Params) {
 			return Nil(), fmt.Errorf("function %q wants %d args, got %d", fn.Func.Name, len(fn.Func.Params), len(args))
 		}
+		if err := checkFuncArgs(fn.Func, args); err != nil {
+			return Nil(), err
+		}
 		callEnv := newEnvSized(fn.Func.Closure, len(fn.Func.Params))
 		callEnv.isCall = true
 		for i, p := range fn.Func.Params {
@@ -1756,7 +1854,14 @@ func (in *Interpreter) evalCall(env *Env, e *frontend.Expr) (Value, error) {
 		}
 		// lock-free define (single goroutine owns callEnv); direct map write ok
 		// but other goroutines may read closure parents via lookup (locked) - safe.
-		return in.execFuncBody(callEnv, fn.Func.Body)
+		ret, err := in.execFuncBody(callEnv, fn.Func.Body)
+		if err != nil {
+			return Nil(), err
+		}
+		if err := checkFuncReturn(fn.Func, ret); err != nil {
+			return Nil(), err
+		}
+		return ret, nil
 	case VBuiltin:
 		return fn.Builtin.Fn(in, args)
 	default:
@@ -2435,12 +2540,22 @@ func (in *Interpreter) callValue(fn Value, args []Value) (Value, error) {
 		if len(args) != len(fn.Func.Params) {
 			return Nil(), fmt.Errorf("function %q wants %d args, got %d", fn.Func.Name, len(fn.Func.Params), len(args))
 		}
+		if err := checkFuncArgs(fn.Func, args); err != nil {
+			return Nil(), err
+		}
 		callEnv := newEnvSized(fn.Func.Closure, len(fn.Func.Params))
 		callEnv.isCall = true
 		for i, p := range fn.Func.Params {
 			callEnv.Vars[p] = args[i]
 		}
-		return in.execFuncBody(callEnv, fn.Func.Body)
+		ret, err := in.execFuncBody(callEnv, fn.Func.Body)
+		if err != nil {
+			return Nil(), err
+		}
+		if err := checkFuncReturn(fn.Func, ret); err != nil {
+			return Nil(), err
+		}
+		return ret, nil
 	case VBuiltin:
 		return fn.Builtin.Fn(in, args)
 	default:
