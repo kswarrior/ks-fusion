@@ -146,26 +146,9 @@ func (c *Config) FrontendPath() string {
 
 // stripInlineComment cuts a trailing `# comment` outside quotes so
 // `name = "myapp" # comment` parses as `myapp`. `#` inside `"..."`
-// is preserved.
+// or `'...'` is preserved.
 func stripInlineComment(s string) string {
-	inStr := false
-	for i := 0; i < len(s); i++ {
-		if s[i] == '"' || s[i] == '\'' {
-			// TOML values are quoted; a `#` inside quotes is data.
-			// Toggle only on matching quote style is overkill for v0.1:
-			// any quote toggles, which is enough to protect `#` in
-			// `"a#b"` and `'a#b'`.
-			inStr = !inStr
-			_ = inStr
-			// Recompute properly: track double vs single separately.
-			// Simpler correct version below replaces this toggle.
-			break
-		}
-		if s[i] == '#' {
-			return s[:i]
-		}
-	}
-	// Correct implementation: track " and ' separately.
+	// Track " and ' separately.
 	inDouble := false
 	inSingle := false
 	for i := 0; i < len(s); i++ {
