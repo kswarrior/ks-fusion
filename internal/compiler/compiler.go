@@ -393,6 +393,19 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 	case frontend.StmtForC:
 		return c.compileForC(st)
 	case frontend.StmtFunc:
+		if len(st.ParamTypes) > 0 {
+			for _, t := range st.ParamTypes {
+				if t != "" {
+					return fmt.Errorf("line %d: typed params not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
+				}
+			}
+		}
+		if st.ReturnType != "" {
+			return fmt.Errorf("line %d: return types not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
+		}
+		if st.TypeAnn != "" {
+			return fmt.Errorf("line %d: type annotations not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
+		}
 		return c.compileFuncDef(st.Name, st.Names, st.Body, st.Line)
 	case frontend.StmtReturn:
 		if len(c.frames) == 1 {
@@ -442,6 +455,8 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 		return fmt.Errorf("line %d: `try/catch` not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
 	case frontend.StmtSwitch:
 		return fmt.Errorf("line %d: `switch` not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
+	case frontend.StmtSelect:
+		return fmt.Errorf("line %d: `select` not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
 	case frontend.StmtDefer:
 		return fmt.Errorf("line %d: `defer` not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
 	}
@@ -471,6 +486,9 @@ func (c *compiler) emitGetLocal(slot int, name string, line int) {
 }
 
 func (c *compiler) compileLet(st *frontend.Stmt) error {
+	if st.TypeAnn != "" {
+		return fmt.Errorf("line %d: `let x: %s` not yet supported by compiler v0.1 (runs in interpreter)", st.Line, st.TypeAnn)
+	}
 	if err := c.compileExpr(st.Expr); err != nil {
 		return err
 	}
@@ -979,6 +997,9 @@ func (c *compiler) compileExpr(e *frontend.Expr) error {
 		}
 		c.emit(OpCall, len(e.Args), 0)
 	case frontend.ExprIndex:
+		if e.Safe {
+			return fmt.Errorf("`?.` not yet supported by compiler v0.1 (use the interpreter)")
+		}
 		if err := c.compileExpr(e.Left); err != nil {
 			return err
 		}
@@ -986,6 +1007,10 @@ func (c *compiler) compileExpr(e *frontend.Expr) error {
 			return err
 		}
 		c.emit(OpIndex, 0, 0)
+	case frontend.ExprIs:
+		return fmt.Errorf("`is` not yet supported by compiler v0.1 (use the interpreter)")
+	case frontend.ExprCoalesce:
+		return fmt.Errorf("`??` not yet supported by compiler v0.1 (use the interpreter)")
 	case frontend.ExprSlice:
 		return fmt.Errorf("slices not yet supported by compiler v0.1 (use the interpreter)")
 	case frontend.ExprArray:
@@ -1004,6 +1029,16 @@ func (c *compiler) compileExpr(e *frontend.Expr) error {
 		}
 		c.emit(OpMap, len(e.MapKeys), 0)
 	case frontend.ExprFunc:
+		if len(e.FuncParamTypes) > 0 {
+			for _, t := range e.FuncParamTypes {
+				if t != "" {
+					return fmt.Errorf("typed func params not yet supported by compiler v0.1 (use the interpreter)")
+				}
+			}
+		}
+		if e.FuncReturnType != "" {
+			return fmt.Errorf("func return types not yet supported by compiler v0.1 (use the interpreter)")
+		}
 		// anonymous literal: compile as a hidden function, then unbind the
 		// hidden name so only the value stays on the stack for the caller
 		// (`let f = func...`, call args, ...) to bind.
