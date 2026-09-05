@@ -1,17 +1,19 @@
-// Package frontend is the ks-fusion compiler frontend v1.0:
+// Package frontend is the ks-fusion compiler frontend:
 // full lexer + recursive-descent parser for .ks files.
 //
-// Language summary (v1.0):
+// Language summary:
 //
 //	types: nil, bool, int, float, string, array, map, func, chan
 //	stmts: let, assign (+= -= *= /= %=), print, sleep, go,
 //	       if/else, while, for-in, for-c-style, func, return,
-//	       break, continue, import, block { }, expr-statement
-//	exprs: literals, vars, a+b - * / %, == != < <= > >=,
+//	       break, continue, import, try/catch/finally, switch,
+//	       defer, block { }, expr-statement
+//	exprs: literals, vars, a+b - * / % **, in, == != < <= > >=,
 //	       and/or/not (also && || !), unary - !,
-//	       calls f(...), index a[i], field m.key,
+//	       calls f(...), index a[i], slice a[l:r], field m.key,
 //	       arrays [..], maps {k: v, ..}, func literals
-//	comments: # ... and // ...
+//	comments: # ..., // ..., /* ... */
+//	strings: "double" and 'single'; numbers: 0xFF 0b11 0o17 1_000 1e3 .5
 package frontend
 
 import (
@@ -1429,6 +1431,14 @@ func (p *parser) parseCmp() (*Expr, error) {
 			kind = ExprGt
 		case tGe:
 			kind = ExprGe
+		case tIn:
+			p.next()
+			right, err := p.parseAdd()
+			if err != nil {
+				return nil, err
+			}
+			left = &Expr{Kind: ExprIn, Left: left, Right: right}
+			continue
 		default:
 			return left, nil
 		}
@@ -1510,7 +1520,25 @@ func (p *parser) parseUnary() (*Expr, error) {
 		}
 		return &Expr{Kind: ExprNot, Right: e}, nil
 	}
-	return p.parsePostfix()
+	return p.parsePow()
+}
+
+// parsePow handles `**` (right-associative, tighter than unary on the
+// left like Python: -2**2 == -(2**2)).
+func (p *parser) parsePow() (*Expr, error) {
+	base, err := p.parsePostfix()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().K == tStarStar {
+		p.next()
+		exp, err := p.parseUnary()
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprPow, Left: base, Right: exp}, nil
+	}
+	return base, nil
 }
 
 func (p *parser) parsePostfix() (*Expr, error) {
@@ -1558,12 +1586,64 @@ func (p *parser) parsePostfix() (*Expr, error) {
 			for p.peek().K == tNewline {
 				p.next()
 			}
+			// slice with omitted start: a[:2], a[:]
+			if p.peek().K == tColon {
+				p.next()
+				for p.peek().K == tNewline {
+					p.next()
+				}
+				var end *Expr
+				if p.peek().K != tRBracket {
+					e, err := p.parseExpr()
+					if err != nil {
+						return nil, err
+					}
+					end = e
+					for p.peek().K == tNewline {
+						p.next()
+					}
+				}
+				if p.peek().K == tColon {
+					return nil, p.errf(p.peek(), "slice stride not supported, use slice()")
+				}
+				if _, err := p.expect(tRBracket, "`]`"); err != nil {
+					return nil, err
+				}
+				base = &Expr{Kind: ExprSlice, Left: base, SliceEnd: end}
+				continue
+			}
 			idx, err := p.parseExpr()
 			if err != nil {
 				return nil, err
 			}
 			for p.peek().K == tNewline {
 				p.next()
+			}
+			// slice: a[1:3], a[1:], a[1:3] with newlines allowed
+			if p.peek().K == tColon {
+				p.next()
+				for p.peek().K == tNewline {
+					p.next()
+				}
+				var end *Expr
+				if p.peek().K != tRBracket {
+					e, err := p.parseExpr()
+					if err != nil {
+						return nil, err
+					}
+					end = e
+					for p.peek().K == tNewline {
+						p.next()
+					}
+				}
+				if p.peek().K == tColon {
+					return nil, p.errf(p.peek(), "slice stride not supported, use slice()")
+				}
+				if _, err := p.expect(tRBracket, "`]`"); err != nil {
+					return nil, err
+				}
+				base = &Expr{Kind: ExprSlice, Left: base, SliceStart: idx, SliceEnd: end}
+				continue
 			}
 			if _, err := p.expect(tRBracket, "`]`"); err != nil {
 				return nil, err

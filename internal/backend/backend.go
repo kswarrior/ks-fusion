@@ -290,6 +290,19 @@ func toFloat(v Value) float64 {
 type Env struct {
 	Parent *Env
 	Vars   map[string]Value
+	// Defer support: function call frames (isCall) collect deferred calls
+	// registered by `defer` and run them LIFO when the call returns.
+	isCall bool
+	defers []deferredCall
+}
+
+// deferredCall is one `defer f(args)` pending on a call frame.
+// The function and arguments are evaluated when `defer` runs;
+// the call happens when the enclosing function returns.
+type deferredCall struct {
+	fn   Value
+	args []Value
+	line int
 }
 
 func newEnv(parent *Env) *Env { return &Env{Parent: parent, Vars: map[string]Value{}} }
@@ -557,6 +570,9 @@ func (in *Interpreter) execStmt(env *Env, st *frontend.Stmt) error {
 		return nil
 	case frontend.StmtGo:
 		inner := st.Inner
+		if inner.Kind == frontend.StmtDefer {
+			return fmt.Errorf("go defer is not allowed (defer runs when the enclosing function returns)")
+		}
 		child := newEnv(env)
 		in.wg.Add(1)
 		go func() {
@@ -642,6 +658,12 @@ func (in *Interpreter) execStmt(env *Env, st *frontend.Stmt) error {
 		return err
 	case frontend.StmtImport:
 		return in.execImport(env, st.StrVal)
+	case frontend.StmtTry:
+		return in.execTry(env, st)
+	case frontend.StmtSwitch:
+		return in.execSwitch(env, st)
+	case frontend.StmtDefer:
+		return in.execDefer(env, st)
 	default:
 		return fmt.Errorf("unknown statement")
 	}
