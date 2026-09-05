@@ -277,3 +277,27 @@ func TestRunChanTimeoutBuiltins(t *testing.T) {
 	mustFail(t, "print chan_closed(7)\n")
 	mustFail(t, "print recv_timeout(7, 10)\n")
 }
+
+func TestRunTypesV21(t *testing.T) {
+	mustRun(t, "let x: int = 10\nassert(x == 10)\nassert(x is int)\nassert(x is \"int\")\nassert(x is not \"string\")\n")
+	mustRun(t, "let s: string = \"hi\"\nassert(s is string)\nassert(is_type(s, \"string\"))\nassert(assert_type(s, \"string\") == \"hi\")\n")
+	mustRun(t, "assert(1 is number)\nassert(2.5 is number)\nassert(\"a\" is not number)\nassert(nil is nil)\nassert(nil is any)\nassert([1] is array)\nassert({a: 1} is map)\n")
+	mustRun(t, "let u = {name: \"ada\"}\nassert(u?.name == \"ada\")\nassert(u?.missing == nil)\nassert(u?.missing ?? \"anon\" == \"anon\")\n")
+	mustRun(t, "let n = nil\nassert(n?.anything == nil)\nassert((n ?? \"d\") == \"d\")\nassert((nil ?? nil ?? 7) == 7)\n")
+	mustRun(t, "let a = [1, 2]\nassert(a?.[0] == 1)\nassert(a?.[9] == nil)\nassert((a?.[9] ?? 99) == 99)\n")
+	mustRun(t, "func add(a: int, b: int): int {\n return a + b\n}\nassert(add(2, 3) == 5)\n")
+	mustRun(t, "let f = func(a: string): string {\n return a + \"!\"\n}\nassert(f(\"hi\") == \"hi!\")\n")
+	mustRun(t, "let r1 = ok(42)\nassert(r1 is ok)\nassert(is_ok(r1))\nassert(unwrap(r1) == 42)\n")
+	mustRun(t, "let r2 = err(\"boom\")\nassert(r2 is err)\nassert(is_err(r2))\nassert(unwrap_or(r2, 99) == 99)\n")
+	mustRun(t, "let r = err(\"boom\")\ntry {\n unwrap(r)\n} catch e {\n assert(e == \"boom\")\n}\n")
+	mustRun(t, "let maybe: int? = nil\nassert(maybe == nil)\nassert((maybe ?? 5) == 5)\n")
+	// `is` stays contextual: `is` works as a variable name.
+	mustRun(t, "let is = 5\nassert(is == 5)\n")
+	mustFail(t, "let x: int = \"nope\"\n")
+	mustFail(t, "let x: int = 1\nx = \"bad\"\n")
+	mustFail(t, "func add(a: int, b: int): int {\n return a + b\n}\nprint add(\"a\", \"b\")\n")
+	mustFail(t, "func f(): int {\n return \"nope\"\n}\nprint f()\n")
+	mustFail(t, "print assert_type(1, \"string\")\n")
+	mustFail(t, "print 1 is \"nope\"\n")
+	mustFail(t, "let x: nope = 1\n")
+}
