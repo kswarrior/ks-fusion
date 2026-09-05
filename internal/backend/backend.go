@@ -1917,3 +1917,1312 @@ func bError(in *Interpreter, args []Value) (Value, error) {
 	}
 	return Nil(), fmt.Errorf("%s", args[0].Display())
 }
+
+// ---------------------------------------------------------------------------
+// Complete-language standard library
+// ---------------------------------------------------------------------------
+
+// shared RNG (global math/rand is fine on modern Go, but an explicit
+// locked source keeps `seed(n)` deterministic for tests).
+var (
+	rngMu sync.Mutex
+	rng   = rand.New(rand.NewSource(time.Now().UnixNano()))
+)
+
+// callValue invokes a func/builtin value (for map/filter/each/reduce/apply).
+func (in *Interpreter) callValue(fn Value, args []Value) (Value, error) {
+	switch fn.Kind {
+	case VFunc:
+		if len(args) != len(fn.Func.Params) {
+			return Nil(), fmt.Errorf("function %q wants %d args, got %d", fn.Func.Name, len(fn.Func.Params), len(args))
+		}
+		callEnv := newEnv(fn.Func.Closure)
+		for i, p := range fn.Func.Params {
+			callEnv.Vars[p] = args[i]
+		}
+		err := in.execStmt(callEnv, fn.Func.Body)
+		if err != nil {
+			if ce, ok := err.(*ctrlError); ok && ce.kind == ctrlReturn {
+				return ce.val, nil
+			}
+			return Nil(), err
+		}
+		return Nil(), nil
+	case VBuiltin:
+		return fn.Builtin.Fn(in, args)
+	default:
+		return Nil(), fmt.Errorf("cannot call %s", TypeName(fn))
+	}
+}
+
+// funcArity reports user-func param count, or -1 for builtins.
+func funcArity(fn Value) int {
+	if fn.Kind == VFunc {
+		return len(fn.Func.Params)
+	}
+	return -1
+}
+
+func bBool(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("bool", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	return BoolV(IsTruthy(args[0])), nil
+}
+
+func bChr(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("chr", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VInt {
+		return Nil(), fmt.Errorf("chr wants int, got %s", TypeName(args[0]))
+	}
+	return StrV(string(rune(args[0].Int))), nil
+}
+
+func bOrd(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("ord", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VString {
+		return Nil(), fmt.Errorf("ord wants string, got %s", TypeName(args[0]))
+	}
+	r := []rune(args[0].Str)
+	if len(r) == 0 {
+		return Nil(), fmt.Errorf("ord of empty string")
+	}
+	return IntV(int(r[0])), nil
+}
+
+func bHex(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("hex", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VInt {
+		return Nil(), fmt.Errorf("hex wants int, got %s", TypeName(args[0]))
+	}
+	return StrV(fmt.Sprintf("0x%x", args[0].Int)), nil
+}
+
+// --- collections ---
+
+func bInsert(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("insert", args, 3, 3); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VArray {
+		return Nil(), fmt.Errorf("insert wants array, got %s", TypeName(args[0]))
+	}
+	if args[1].Kind != VInt {
+		return Nil(), fmt.Errorf("insert index must be int, got %s", TypeName(args[1]))
+	}
+	args[0].Arr.Mu.Lock()
+	defer args[0].Arr.Mu.Unlock()
+	idx := args[1].Int
+	if idx < 0 {
+		idx += len(args[0].Arr.Items)
+	}
+	if idx < 0 || idx > len(args[0].Arr.Items) {
+		return Nil(), fmt.Errorf("insert index %d out of range (len %d)", args[1].Int, len(args[0].Arr.Items))
+	}
+	args[0].Arr.Items = append(args[0].Arr.Items[:idx:idx], append([]Value{args[2]}, args[0].Arr.Items[idx:]...)...)
+	return IntV(len(args[0].Arr.Items)), nil
+}
+
+func bRemove(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("remove", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VArray {
+		return Nil(), fmt.Errorf("remove wants array, got %s", TypeName(args[0]))
+	}
+	if args[1].Kind != VInt {
+		return Nil(), fmt.Errorf("remove index must be int, got %s", TypeName(args[1]))
+	}
+	args[0].Arr.Mu.Lock()
+	defer args[0].Arr.Mu.Unlock()
+	idx := args[1].Int
+	if idx < 0 {
+		idx += len(args[0].Arr.Items)
+	}
+	if idx < 0 || idx >= len(args[0].Arr.Items) {
+		return Nil(), fmt.Errorf("remove index %d out of range (len %d)", args[1].Int, len(args[0].Arr.Items))
+	}
+	v := args[0].Arr.Items[idx]
+	args[0].Arr.Items = append(args[0].Arr.Items[:idx], args[0].Arr.Items[idx+1:]...)
+	return v, nil
+}
+
+func bClear(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("clear", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	switch args[0].Kind {
+	case VArray:
+		args[0].Arr.Mu.Lock()
+		args[0].Arr.Items = []Value{}
+		args[0].Arr.Mu.Unlock()
+		return Nil(), nil
+	case VMap:
+		args[0].Map.Mu.Lock()
+		args[0].Map.Vals = map[string]Value{}
+		args[0].Map.Mu.Unlock()
+		return Nil(), nil
+	}
+	return Nil(), fmt.Errorf("clear wants array/map, got %s", TypeName(args[0]))
+}
+
+func bReverse(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("reverse", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VArray {
+		return Nil(), fmt.Errorf("reverse wants array, got %s", TypeName(args[0]))
+	}
+	args[0].Arr.Mu.Lock()
+	defer args[0].Arr.Mu.Unlock()
+	for i, j := 0, len(args[0].Arr.Items)-1; i < j; i, j = i+1, j-1 {
+		args[0].Arr.Items[i], args[0].Arr.Items[j] = args[0].Arr.Items[j], args[0].Arr.Items[i]
+	}
+	return args[0], nil
+}
+
+func sortLess(a, b Value) (bool, error) {
+	if isNum(a) && isNum(b) {
+		return toFloat(a) < toFloat(b), nil
+	}
+	if a.Kind == VString && b.Kind == VString {
+		return a.Str < b.Str, nil
+	}
+	return false, fmt.Errorf("sort needs all numbers or all strings, got %s and %s", TypeName(a), TypeName(b))
+}
+
+func bSort(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("sort", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VArray {
+		return Nil(), fmt.Errorf("sort wants array, got %s", TypeName(args[0]))
+	}
+	args[0].Arr.Mu.Lock()
+	defer args[0].Arr.Mu.Unlock()
+	items := args[0].Arr.Items
+	for i := 1; i < len(items); i++ {
+		for j := i; j > 0; j-- {
+			less, err := sortLess(items[j], items[j-1])
+			if err != nil {
+				return Nil(), err
+			}
+			if !less {
+				break
+			}
+			items[j], items[j-1] = items[j-1], items[j]
+		}
+	}
+	return args[0], nil
+}
+
+// normSlice resolves Python-like start/end (nil end = rest) for length n.
+func normSlice(n, start int, end *int) (int, int, error) {
+	s := start
+	if s < 0 {
+		s += n
+	}
+	if s < 0 {
+		s = 0
+	}
+	if s > n {
+		s = n
+	}
+	e := n
+	if end != nil {
+		e = *end
+		if e < 0 {
+			e += n
+		}
+		if e < 0 {
+			e = 0
+		}
+		if e > n {
+			e = n
+		}
+	}
+	if e < s {
+		e = s
+	}
+	return s, e, nil
+}
+
+func bSlice(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("slice", args, 2, 3); err != nil {
+		return Nil(), err
+	}
+	if args[1].Kind != VInt {
+		return Nil(), fmt.Errorf("slice start must be int, got %s", TypeName(args[1]))
+	}
+	var endP *int
+	if len(args) == 3 {
+		if args[2].Kind != VInt {
+			return Nil(), fmt.Errorf("slice end must be int, got %s", TypeName(args[2]))
+		}
+		e := args[2].Int
+		endP = &e
+	}
+	switch args[0].Kind {
+	case VArray:
+		args[0].Arr.Mu.RLock()
+		items := make([]Value, len(args[0].Arr.Items))
+		copy(items, args[0].Arr.Items)
+		args[0].Arr.Mu.RUnlock()
+		s, e, _ := normSlice(len(items), args[1].Int, endP)
+		out := make([]Value, e-s)
+		copy(out, items[s:e])
+		return ArrV(out), nil
+	case VString:
+		r := []rune(args[0].Str)
+		s, e, _ := normSlice(len(r), args[1].Int, endP)
+		return StrV(string(r[s:e])), nil
+	}
+	return Nil(), fmt.Errorf("slice wants array/string, got %s", TypeName(args[0]))
+}
+
+func bDelete(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("delete", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VMap {
+		return Nil(), fmt.Errorf("delete wants map, got %s", TypeName(args[0]))
+	}
+	if args[1].Kind != VString {
+		return Nil(), fmt.Errorf("delete key must be string, got %s", TypeName(args[1]))
+	}
+	args[0].Map.Mu.Lock()
+	defer args[0].Map.Mu.Unlock()
+	_, ok := args[0].Map.Vals[args[1].Str]
+	delete(args[0].Map.Vals, args[1].Str)
+	return BoolV(ok), nil
+}
+
+func bMerge(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("merge", args, 1, -1); err != nil {
+		return Nil(), err
+	}
+	out := map[string]Value{}
+	for _, a := range args {
+		if a.Kind != VMap {
+			return Nil(), fmt.Errorf("merge wants maps, got %s", TypeName(a))
+		}
+		a.Map.Mu.RLock()
+		for k, v := range a.Map.Vals {
+			out[k] = v
+		}
+		a.Map.Mu.RUnlock()
+	}
+	return MapV(out), nil
+}
+
+func bGet(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("get", args, 2, 3); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VMap {
+		return Nil(), fmt.Errorf("get wants map, got %s", TypeName(args[0]))
+	}
+	if args[1].Kind != VString {
+		return Nil(), fmt.Errorf("get key must be string, got %s", TypeName(args[1]))
+	}
+	args[0].Map.Mu.RLock()
+	v, ok := args[0].Map.Vals[args[1].Str]
+	args[0].Map.Mu.RUnlock()
+	if ok {
+		return v, nil
+	}
+	if len(args) == 3 {
+		return args[2], nil
+	}
+	return Nil(), nil
+}
+
+func bContains(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("contains", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	hay, needle := args[0], args[1]
+	switch hay.Kind {
+	case VString:
+		if needle.Kind != VString {
+			return Nil(), fmt.Errorf("contains on string needs string needle, got %s", TypeName(needle))
+		}
+		return BoolV(strings.Contains(hay.Str, needle.Str)), nil
+	case VArray:
+		hay.Arr.Mu.RLock()
+		defer hay.Arr.Mu.RUnlock()
+		for _, e := range hay.Arr.Items {
+			if deepEqual(e, needle) {
+				return BoolV(true), nil
+			}
+		}
+		return BoolV(false), nil
+	case VMap:
+		if needle.Kind != VString {
+			return Nil(), fmt.Errorf("contains on map needs string key, got %s", TypeName(needle))
+		}
+		hay.Map.Mu.RLock()
+		defer hay.Map.Mu.RUnlock()
+		_, ok := hay.Map.Vals[needle.Str]
+		return BoolV(ok), nil
+	}
+	return Nil(), fmt.Errorf("contains wants string/array/map, got %s", TypeName(hay))
+}
+
+func bIndexOf(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("index_of", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	hay, needle := args[0], args[1]
+	switch hay.Kind {
+	case VString:
+		if needle.Kind != VString {
+			return Nil(), fmt.Errorf("index_of on string needs string needle, got %s", TypeName(needle))
+		}
+		// rune-based index
+		if needle.Str == "" {
+			return IntV(0), nil
+		}
+		byteIdx := strings.Index(hay.Str, needle.Str)
+		if byteIdx < 0 {
+			return IntV(-1), nil
+		}
+		return IntV(utf8.RuneCountInString(hay.Str[:byteIdx])), nil
+	case VArray:
+		hay.Arr.Mu.RLock()
+		defer hay.Arr.Mu.RUnlock()
+		for i, e := range hay.Arr.Items {
+			if deepEqual(e, needle) {
+				return IntV(i), nil
+			}
+		}
+		return IntV(-1), nil
+	}
+	return Nil(), fmt.Errorf("index_of wants string/array, got %s", TypeName(hay))
+}
+
+// --- strings ---
+
+func bSplit(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("split", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VString || args[1].Kind != VString {
+		return Nil(), fmt.Errorf("split wants (string, string), got (%s, %s)", TypeName(args[0]), TypeName(args[1]))
+	}
+	parts := strings.Split(args[0].Str, args[1].Str)
+	out := make([]Value, 0, len(parts))
+	for _, p := range parts {
+		out = append(out, StrV(p))
+	}
+	return ArrV(out), nil
+}
+
+func bJoin(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("join", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VArray {
+		return Nil(), fmt.Errorf("join wants array, got %s", TypeName(args[0]))
+	}
+	if args[1].Kind != VString {
+		return Nil(), fmt.Errorf("join separator must be string, got %s", TypeName(args[1]))
+	}
+	args[0].Arr.Mu.RLock()
+	parts := make([]string, len(args[0].Arr.Items))
+	for i, e := range args[0].Arr.Items {
+		if e.Kind == VString {
+			parts[i] = e.Str
+		} else {
+			parts[i] = e.Display()
+		}
+	}
+	args[0].Arr.Mu.RUnlock()
+	return StrV(strings.Join(parts, args[1].Str)), nil
+}
+
+func bUpper(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("upper", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VString {
+		return Nil(), fmt.Errorf("upper wants string, got %s", TypeName(args[0]))
+	}
+	return StrV(strings.ToUpper(args[0].Str)), nil
+}
+
+func bLower(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("lower", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VString {
+		return Nil(), fmt.Errorf("lower wants string, got %s", TypeName(args[0]))
+	}
+	return StrV(strings.ToLower(args[0].Str)), nil
+}
+
+func bTrim(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("trim", args, 1, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VString {
+		return Nil(), fmt.Errorf("trim wants string, got %s", TypeName(args[0]))
+	}
+	if len(args) == 1 {
+		return StrV(strings.TrimSpace(args[0].Str)), nil
+	}
+	if args[1].Kind != VString {
+		return Nil(), fmt.Errorf("trim cutset must be string, got %s", TypeName(args[1]))
+	}
+	return StrV(strings.Trim(args[0].Str, args[1].Str)), nil
+}
+
+func bStartsWith(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("starts_with", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VString || args[1].Kind != VString {
+		return Nil(), fmt.Errorf("starts_with wants strings, got (%s, %s)", TypeName(args[0]), TypeName(args[1]))
+	}
+	return BoolV(strings.HasPrefix(args[0].Str, args[1].Str)), nil
+}
+
+func bEndsWith(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("ends_with", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VString || args[1].Kind != VString {
+		return Nil(), fmt.Errorf("ends_with wants strings, got (%s, %s)", TypeName(args[0]), TypeName(args[1]))
+	}
+	return BoolV(strings.HasSuffix(args[0].Str, args[1].Str)), nil
+}
+
+func bReplace(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("replace", args, 3, 3); err != nil {
+		return Nil(), err
+	}
+	for _, a := range args {
+		if a.Kind != VString {
+			return Nil(), fmt.Errorf("replace wants strings, got %s", TypeName(a))
+		}
+	}
+	return StrV(strings.ReplaceAll(args[0].Str, args[1].Str, args[2].Str)), nil
+}
+
+func bSubstr(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("substr", args, 2, 3); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VString {
+		return Nil(), fmt.Errorf("substr wants string, got %s", TypeName(args[0]))
+	}
+	if args[1].Kind != VInt {
+		return Nil(), fmt.Errorf("substr start must be int, got %s", TypeName(args[1]))
+	}
+	r := []rune(args[0].Str)
+	if len(args) == 3 {
+		if args[2].Kind != VInt {
+			return Nil(), fmt.Errorf("substr length must be int, got %s", TypeName(args[2]))
+		}
+		if args[2].Int < 0 {
+			return Nil(), fmt.Errorf("substr length must be >= 0")
+		}
+		// substr(s, start, length): negative start counts from the end.
+		s := args[1].Int
+		if s < 0 {
+			s += len(r)
+		}
+		e := s + args[2].Int
+		s2, e2, _ := normSlice(len(r), s, &e)
+		return StrV(string(r[s2:e2])), nil
+	}
+	s, e, _ := normSlice(len(r), args[1].Int, nil)
+	return StrV(string(r[s:e])), nil
+}
+
+func bRepeat(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("repeat", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VString {
+		return Nil(), fmt.Errorf("repeat wants string, got %s", TypeName(args[0]))
+	}
+	if args[1].Kind != VInt || args[1].Int < 0 {
+		return Nil(), fmt.Errorf("repeat count must be int >= 0")
+	}
+	return StrV(strings.Repeat(args[0].Str, args[1].Int)), nil
+}
+
+// --- math ---
+
+func bAbs(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("abs", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	switch args[0].Kind {
+	case VInt:
+		if args[0].Int < 0 {
+			return IntV(-args[0].Int), nil
+		}
+		return args[0], nil
+	case VFloat:
+		return FloatV(math.Abs(args[0].Float)), nil
+	}
+	return Nil(), fmt.Errorf("abs wants number, got %s", TypeName(args[0]))
+}
+
+func minMaxVals(name string, args []Value, wantMin bool) (Value, error) {
+	if err := needArgs(name, args, 1, -1); err != nil {
+		return Nil(), err
+	}
+	items := args
+	if len(args) == 1 && args[0].Kind == VArray {
+		args[0].Arr.Mu.RLock()
+		items = make([]Value, len(args[0].Arr.Items))
+		copy(items, args[0].Arr.Items)
+		args[0].Arr.Mu.RUnlock()
+		if len(items) == 0 {
+			return Nil(), fmt.Errorf("%s of empty array", name)
+		}
+	}
+	allInt := true
+	allStr := true
+	for _, a := range items {
+		if a.Kind != VInt {
+			allInt = false
+		}
+		if a.Kind != VString {
+			allStr = false
+		}
+		if !isNum(a) && a.Kind != VString {
+			return Nil(), fmt.Errorf("%s wants numbers or strings, got %s", name, TypeName(a))
+		}
+	}
+	if allStr {
+		best := items[0].Str
+		for _, a := range items[1:] {
+			if wantMin == (a.Str < best) {
+				best = a.Str
+			}
+		}
+		return StrV(best), nil
+	}
+	if allInt {
+		best := items[0].Int
+		for _, a := range items[1:] {
+			if !isNum(a) {
+				return Nil(), fmt.Errorf("%s: cannot mix strings and numbers", name)
+			}
+			if wantMin == (a.Int < best) {
+				best = a.Int
+			}
+		}
+		return IntV(best), nil
+	}
+	best := items[0]
+	bestF := toFloat(items[0])
+	if !isNum(items[0]) {
+		return Nil(), fmt.Errorf("%s: cannot mix strings and numbers", name)
+	}
+	for _, a := range items[1:] {
+		if !isNum(a) {
+			return Nil(), fmt.Errorf("%s: cannot mix strings and numbers", name)
+		}
+		f := toFloat(a)
+		if wantMin == (f < bestF) {
+			best, bestF = a, f
+		}
+	}
+	return FloatV(bestF), nil
+}
+
+func bMin(in *Interpreter, args []Value) (Value, error) { return minMaxVals("min", args, true) }
+func bMax(in *Interpreter, args []Value) (Value, error) { return minMaxVals("max", args, false) }
+
+func bFloor(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("floor", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if !isNum(args[0]) {
+		return Nil(), fmt.Errorf("floor wants number, got %s", TypeName(args[0]))
+	}
+	return IntV(int(math.Floor(toFloat(args[0])))), nil
+}
+
+func bCeil(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("ceil", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if !isNum(args[0]) {
+		return Nil(), fmt.Errorf("ceil wants number, got %s", TypeName(args[0]))
+	}
+	return IntV(int(math.Ceil(toFloat(args[0])))), nil
+}
+
+func bRound(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("round", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if !isNum(args[0]) {
+		return Nil(), fmt.Errorf("round wants number, got %s", TypeName(args[0]))
+	}
+	return IntV(int(math.Round(toFloat(args[0])))), nil
+}
+
+func bSqrt(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("sqrt", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if !isNum(args[0]) {
+		return Nil(), fmt.Errorf("sqrt wants number, got %s", TypeName(args[0]))
+	}
+	f := toFloat(args[0])
+	if f < 0 {
+		return Nil(), fmt.Errorf("sqrt of negative number")
+	}
+	return FloatV(math.Sqrt(f)), nil
+}
+
+func bPow(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("pow", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if !isNum(args[0]) || !isNum(args[1]) {
+		return Nil(), fmt.Errorf("pow wants numbers, got (%s, %s)", TypeName(args[0]), TypeName(args[1]))
+	}
+	if args[0].Kind == VInt && args[1].Kind == VInt && args[1].Int >= 0 {
+		res := 1
+		for i := 0; i < args[1].Int; i++ {
+			res *= args[0].Int
+		}
+		return IntV(res), nil
+	}
+	return FloatV(math.Pow(toFloat(args[0]), toFloat(args[1]))), nil
+}
+
+func bPi(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("pi", args, 0, 0); err != nil {
+		return Nil(), err
+	}
+	return FloatV(math.Pi), nil
+}
+
+func bNow(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("now", args, 0, 0); err != nil {
+		return Nil(), err
+	}
+	return IntV(int(time.Now().UnixMilli())), nil
+}
+
+func bRand(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("rand", args, 0, 0); err != nil {
+		return Nil(), err
+	}
+	rngMu.Lock()
+	f := rng.Float64()
+	rngMu.Unlock()
+	return FloatV(f), nil
+}
+
+func bRandint(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("randint", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VInt || args[1].Kind != VInt {
+		return Nil(), fmt.Errorf("randint wants ints, got (%s, %s)", TypeName(args[0]), TypeName(args[1]))
+	}
+	lo, hi := args[0].Int, args[1].Int
+	if hi < lo {
+		return Nil(), fmt.Errorf("randint needs lo <= hi")
+	}
+	rngMu.Lock()
+	n := rng.Intn(hi-lo+1) + lo
+	rngMu.Unlock()
+	return IntV(n), nil
+}
+
+func bSeed(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("seed", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VInt {
+		return Nil(), fmt.Errorf("seed wants int, got %s", TypeName(args[0]))
+	}
+	rngMu.Lock()
+	rng = rand.New(rand.NewSource(int64(args[0].Int)))
+	rngMu.Unlock()
+	return Nil(), nil
+}
+
+// --- bitwise ---
+
+func needInts(name string, args []Value) error {
+	for _, a := range args {
+		if a.Kind != VInt {
+			return fmt.Errorf("%s wants ints, got %s", name, TypeName(a))
+		}
+	}
+	return nil
+}
+
+func bBitAnd(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("bit_and", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if err := needInts("bit_and", args); err != nil {
+		return Nil(), err
+	}
+	return IntV(args[0].Int & args[1].Int), nil
+}
+
+func bBitOr(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("bit_or", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if err := needInts("bit_or", args); err != nil {
+		return Nil(), err
+	}
+	return IntV(args[0].Int | args[1].Int), nil
+}
+
+func bBitXor(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("bit_xor", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if err := needInts("bit_xor", args); err != nil {
+		return Nil(), err
+	}
+	return IntV(args[0].Int ^ args[1].Int), nil
+}
+
+func bBitShl(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("bit_shl", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if err := needInts("bit_shl", args); err != nil {
+		return Nil(), err
+	}
+	if args[1].Int < 0 {
+		return Nil(), fmt.Errorf("bit_shl shift must be >= 0")
+	}
+	return IntV(args[0].Int << uint(args[1].Int)), nil
+}
+
+func bBitShr(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("bit_shr", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if err := needInts("bit_shr", args); err != nil {
+		return Nil(), err
+	}
+	if args[1].Int < 0 {
+		return Nil(), fmt.Errorf("bit_shr shift must be >= 0")
+	}
+	return IntV(args[0].Int >> uint(args[1].Int)), nil
+}
+
+func bBitNot(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("bit_not", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if err := needInts("bit_not", args); err != nil {
+		return Nil(), err
+	}
+	return IntV(^args[0].Int), nil
+}
+
+// --- functional ---
+
+func bMapFn(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("map", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VArray {
+		return Nil(), fmt.Errorf("map wants array, got %s", TypeName(args[0]))
+	}
+	if args[1].Kind != VFunc && args[1].Kind != VBuiltin {
+		return Nil(), fmt.Errorf("map wants func, got %s", TypeName(args[1]))
+	}
+	args[0].Arr.Mu.RLock()
+	items := make([]Value, len(args[0].Arr.Items))
+	copy(items, args[0].Arr.Items)
+	args[0].Arr.Mu.RUnlock()
+	ar := funcArity(args[1])
+	out := make([]Value, 0, len(items))
+	for i, e := range items {
+		var v Value
+		var err error
+		if ar == 2 {
+			v, err = in.callValue(args[1], []Value{e, IntV(i)})
+		} else {
+			v, err = in.callValue(args[1], []Value{e})
+		}
+		if err != nil {
+			return Nil(), err
+		}
+		out = append(out, v)
+	}
+	return ArrV(out), nil
+}
+
+func bFilter(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("filter", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VArray {
+		return Nil(), fmt.Errorf("filter wants array, got %s", TypeName(args[0]))
+	}
+	if args[1].Kind != VFunc && args[1].Kind != VBuiltin {
+		return Nil(), fmt.Errorf("filter wants func, got %s", TypeName(args[1]))
+	}
+	args[0].Arr.Mu.RLock()
+	items := make([]Value, len(args[0].Arr.Items))
+	copy(items, args[0].Arr.Items)
+	args[0].Arr.Mu.RUnlock()
+	ar := funcArity(args[1])
+	out := []Value{}
+	for i, e := range items {
+		var v Value
+		var err error
+		if ar == 2 {
+			v, err = in.callValue(args[1], []Value{e, IntV(i)})
+		} else {
+			v, err = in.callValue(args[1], []Value{e})
+		}
+		if err != nil {
+			return Nil(), err
+		}
+		if IsTruthy(v) {
+			out = append(out, e)
+		}
+	}
+	return ArrV(out), nil
+}
+
+func bEach(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("each", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VArray {
+		return Nil(), fmt.Errorf("each wants array, got %s", TypeName(args[0]))
+	}
+	if args[1].Kind != VFunc && args[1].Kind != VBuiltin {
+		return Nil(), fmt.Errorf("each wants func, got %s", TypeName(args[1]))
+	}
+	args[0].Arr.Mu.RLock()
+	items := make([]Value, len(args[0].Arr.Items))
+	copy(items, args[0].Arr.Items)
+	args[0].Arr.Mu.RUnlock()
+	ar := funcArity(args[1])
+	for i, e := range items {
+		var err error
+		if ar == 2 {
+			_, err = in.callValue(args[1], []Value{e, IntV(i)})
+		} else {
+			_, err = in.callValue(args[1], []Value{e})
+		}
+		if err != nil {
+			return Nil(), err
+		}
+	}
+	return Nil(), nil
+}
+
+func bReduce(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("reduce", args, 2, 3); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VArray {
+		return Nil(), fmt.Errorf("reduce wants array, got %s", TypeName(args[0]))
+	}
+	if args[1].Kind != VFunc && args[1].Kind != VBuiltin {
+		return Nil(), fmt.Errorf("reduce wants func, got %s", TypeName(args[1]))
+	}
+	args[0].Arr.Mu.RLock()
+	items := make([]Value, len(args[0].Arr.Items))
+	copy(items, args[0].Arr.Items)
+	args[0].Arr.Mu.RUnlock()
+	var acc Value
+	start := 0
+	if len(args) == 3 {
+		acc = args[2]
+	} else {
+		if len(items) == 0 {
+			return Nil(), fmt.Errorf("reduce of empty array needs init")
+		}
+		acc = items[0]
+		start = 1
+	}
+	for _, e := range items[start:] {
+		var err error
+		acc, err = in.callValue(args[1], []Value{acc, e})
+		if err != nil {
+			return Nil(), err
+		}
+	}
+	return acc, nil
+}
+
+func bApply(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("apply", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VFunc && args[0].Kind != VBuiltin {
+		return Nil(), fmt.Errorf("apply wants func, got %s", TypeName(args[0]))
+	}
+	if args[1].Kind != VArray {
+		return Nil(), fmt.Errorf("apply args must be array, got %s", TypeName(args[1]))
+	}
+	args[1].Arr.Mu.RLock()
+	callArgs := make([]Value, len(args[1].Arr.Items))
+	copy(callArgs, args[1].Arr.Items)
+	args[1].Arr.Mu.RUnlock()
+	return in.callValue(args[0], callArgs)
+}
+
+// --- JSON ---
+
+func valueToJSON(v Value) (any, error) {
+	switch v.Kind {
+	case VNil:
+		return nil, nil
+	case VBool:
+		return v.Bool, nil
+	case VInt:
+		return v.Int, nil
+	case VFloat:
+		return v.Float, nil
+	case VString:
+		return v.Str, nil
+	case VArray:
+		v.Arr.Mu.RLock()
+		defer v.Arr.Mu.RUnlock()
+		out := make([]any, 0, len(v.Arr.Items))
+		for _, e := range v.Arr.Items {
+			j, err := valueToJSON(e)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, j)
+		}
+		return out, nil
+	case VMap:
+		v.Map.Mu.RLock()
+		defer v.Map.Mu.RUnlock()
+		out := make(map[string]any, len(v.Map.Vals))
+		for k, e := range v.Map.Vals {
+			j, err := valueToJSON(e)
+			if err != nil {
+				return nil, err
+			}
+			out[k] = j
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("cannot encode %s as json", TypeName(v))
+	}
+}
+
+func jsonToValue(a any) Value {
+	switch t := a.(type) {
+	case nil:
+		return Nil()
+	case bool:
+		return BoolV(t)
+	case float64:
+		if t == math.Trunc(t) && t >= -9e15 && t <= 9e15 {
+			return IntV(int(t))
+		}
+		return FloatV(t)
+	case string:
+		return StrV(t)
+	case []any:
+		out := make([]Value, 0, len(t))
+		for _, e := range t {
+			out = append(out, jsonToValue(e))
+		}
+		return ArrV(out)
+	case map[string]any:
+		m := make(map[string]Value, len(t))
+		for k, e := range t {
+			m[k] = jsonToValue(e)
+		}
+		return MapV(m)
+	default:
+		return StrV(fmt.Sprint(t))
+	}
+}
+
+func bJsonStringify(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("json_stringify", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	j, err := valueToJSON(args[0])
+	if err != nil {
+		return Nil(), err
+	}
+	data, err := json.Marshal(j)
+	if err != nil {
+		return Nil(), err
+	}
+	return StrV(string(data)), nil
+}
+
+func bJsonParse(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("json_parse", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VString {
+		return Nil(), fmt.Errorf("json_parse wants string, got %s", TypeName(args[0]))
+	}
+	var a any
+	if err := json.Unmarshal([]byte(args[0].Str), &a); err != nil {
+		return Nil(), fmt.Errorf("json_parse failed: %v", err)
+	}
+	return jsonToValue(a), nil
+}
+
+// --- I/O & OS ---
+
+func bInput(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("input", args, 0, 1); err != nil {
+		return Nil(), err
+	}
+	if len(args) == 1 {
+		in.outMu.Lock()
+		fmt.Print(args[0].Display())
+		in.outMu.Unlock()
+	}
+	rd := bufio.NewReader(os.Stdin)
+	line, err := rd.ReadString('\n')
+	if err != nil && len(line) == 0 {
+		return Nil(), fmt.Errorf("input failed: %v", err)
+	}
+	line = strings.TrimRight(line, "\r\n")
+	return StrV(line), nil
+}
+
+func bReadFile(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("read_file", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VString {
+		return Nil(), fmt.Errorf("read_file wants path string, got %s", TypeName(args[0]))
+	}
+	data, err := os.ReadFile(args[0].Str)
+	if err != nil {
+		return Nil(), err
+	}
+	return StrV(string(data)), nil
+}
+
+func bWriteFile(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("write_file", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VString {
+		return Nil(), fmt.Errorf("write_file wants path string, got %s", TypeName(args[0]))
+	}
+	if args[1].Kind != VString {
+		return Nil(), fmt.Errorf("write_file data must be string, got %s", TypeName(args[1]))
+	}
+	if err := os.WriteFile(args[0].Str, []byte(args[1].Str), 0o644); err != nil {
+		return Nil(), err
+	}
+	return IntV(len(args[1].Str)), nil
+}
+
+func bAppendFile(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("append_file", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VString {
+		return Nil(), fmt.Errorf("append_file wants path string, got %s", TypeName(args[0]))
+	}
+	if args[1].Kind != VString {
+		return Nil(), fmt.Errorf("append_file data must be string, got %s", TypeName(args[1]))
+	}
+	f, err := os.OpenFile(args[0].Str, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return Nil(), err
+	}
+	n, err := f.WriteString(args[1].Str)
+	cerr := f.Close()
+	if err != nil {
+		return Nil(), err
+	}
+	if cerr != nil {
+		return Nil(), cerr
+	}
+	return IntV(n), nil
+}
+
+func bExists(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("exists", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VString {
+		return Nil(), fmt.Errorf("exists wants path string, got %s", TypeName(args[0]))
+	}
+	_, err := os.Stat(args[0].Str)
+	return BoolV(err == nil), nil
+}
+
+func bListDir(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("list_dir", args, 0, 1); err != nil {
+		return Nil(), err
+	}
+	dir := "."
+	if len(args) == 1 {
+		if args[0].Kind != VString {
+			return Nil(), fmt.Errorf("list_dir wants path string, got %s", TypeName(args[0]))
+		}
+		dir = args[0].Str
+	}
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return Nil(), err
+	}
+	out := make([]Value, 0, len(ents))
+	for _, e := range ents {
+		out = append(out, StrV(e.Name()))
+	}
+	return ArrV(out), nil
+}
+
+func bMkdir(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("mkdir", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VString {
+		return Nil(), fmt.Errorf("mkdir wants path string, got %s", TypeName(args[0]))
+	}
+	if err := os.MkdirAll(args[0].Str, 0o755); err != nil {
+		return Nil(), err
+	}
+	return Nil(), nil
+}
+
+func bRemovePath(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("remove", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VString {
+		return Nil(), fmt.Errorf("remove wants path string, got %s", TypeName(args[0]))
+	}
+	if err := os.Remove(args[0].Str); err != nil {
+		return Nil(), err
+	}
+	return Nil(), nil
+}
+
+func bExit(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("exit", args, 0, 1); err != nil {
+		return Nil(), err
+	}
+	code := 0
+	if len(args) == 1 {
+		if args[0].Kind != VInt {
+			return Nil(), fmt.Errorf("exit code must be int, got %s", TypeName(args[0]))
+		}
+		code = args[0].Int
+	}
+	os.Exit(code)
+	return Nil(), nil
+}
+
+func bArgv(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("argv", args, 0, 0); err != nil {
+		return Nil(), err
+	}
+	out := make([]Value, 0, len(os.Args)-1)
+	for _, a := range os.Args[1:] {
+		out = append(out, StrV(a))
+	}
+	return ArrV(out), nil
+}
+
+func bEnv(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("env", args, 1, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VString {
+		return Nil(), fmt.Errorf("env name must be string, got %s", TypeName(args[0]))
+	}
+	v, ok := os.LookupEnv(args[0].Str)
+	if ok {
+		return StrV(v), nil
+	}
+	if len(args) == 2 {
+		return args[1], nil
+	}
+	return StrV(""), nil
+}
+
+// --- channels (non-blocking + introspection) ---
+
+func bTrySend(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("try_send", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VChan {
+		return Nil(), fmt.Errorf("try_send wants chan, got %s", TypeName(args[0]))
+	}
+	args[0].Chan.Mu.Lock()
+	ch := args[0].Chan.Ch
+	closed := args[0].Chan.Closed
+	args[0].Chan.Mu.Unlock()
+	if closed {
+		return Nil(), fmt.Errorf("send on closed channel")
+	}
+	select {
+	case ch <- args[1]:
+		return BoolV(true), nil
+	default:
+		return BoolV(false), nil
+	}
+}
+
+func bTryRecv(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("try_recv", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VChan {
+		return Nil(), fmt.Errorf("try_recv wants chan, got %s", TypeName(args[0]))
+	}
+	select {
+	case v, ok := <-args[0].Chan.Ch:
+		if !ok {
+			return Nil(), nil
+		}
+		return v, nil
+	default:
+		return Nil(), nil
+	}
+}
+
+func bChanLen(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("chan_len", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VChan {
+		return Nil(), fmt.Errorf("chan_len wants chan, got %s", TypeName(args[0]))
+	}
+	return IntV(len(args[0].Chan.Ch)), nil
+}
+
+func bChanCap(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("chan_cap", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VChan {
+		return Nil(), fmt.Errorf("chan_cap wants chan, got %s", TypeName(args[0]))
+	}
+	return IntV(cap(args[0].Chan.Ch)), nil
+}
