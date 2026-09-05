@@ -232,3 +232,117 @@ func TestLexNewForms(t *testing.T) {
 		t.Fatal("want error for unterminated block comment")
 	}
 }
+
+func TestParseSelect(t *testing.T) {
+	src := "select {\n case v = recv(c1) { print v }\n case recv(c2) { print 1 }\n case send(c3, 42) { print 2 }\n case timeout(100) { print 3 }\n default { print 4 }\n}\n"
+	p, err := ParseSource(src, "test.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Statements) != 1 || p.Statements[0].Kind != StmtSelect {
+		t.Fatalf("want select stmt, got %+v", p.Statements)
+	}
+	cases := p.Statements[0].SelectCases
+	if len(cases) != 5 {
+		t.Fatalf("want 5 select cases, got %d", len(cases))
+	}
+	if cases[0].Kind != "recv" || cases[0].Bind != "v" {
+		t.Fatalf("bad recv bind case: %+v", cases[0])
+	}
+	if cases[1].Kind != "recv" || cases[1].Bind != "" {
+		t.Fatalf("bad recv discard case: %+v", cases[1])
+	}
+	if cases[2].Kind != "send" || cases[2].Value == nil {
+		t.Fatalf("bad send case: %+v", cases[2])
+	}
+	if cases[3].Kind != "timeout" || cases[3].Timeout == nil {
+		t.Fatalf("bad timeout case: %+v", cases[3])
+	}
+	if cases[4].Kind != "default" {
+		t.Fatalf("bad default case: %+v", cases[4])
+	}
+	for _, bad := range []string{
+		"select {\n}\n",                                    // empty
+		"select {\n default { print 1 }\n default { print 2 }\n}\n", // dup default
+		"select {\n default { print 1 }\n case recv(c) { print 2 }\n}\n", // default first
+		"select {\n case foo(c) { print 1 }\n}\n",          // unknown op
+		"select {\n case recv(c) }\n",                      // missing block
+		"select {\n case v = send(c, 1) { print 1 }\n}\n",  // bind only with recv
+		"select\n",                                         // missing brace
+	} {
+		if _, err := ParseSource(bad, "test.ks"); err == nil {
+			t.Fatalf("want error for %q", bad)
+		}
+	}
+}
+
+func TestParseTypesV21(t *testing.T) {
+	p, err := ParseSource("let x: int = 10\nlet y: string\nfunc add(a: int, b: int): int {\n return a + b\n}\nlet f = func(a: string): string {\n return a\n}\n", "test.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Statements[0].TypeAnn != "int" {
+		t.Fatalf("bad let ann: %+v", p.Statements[0])
+	}
+	if p.Statements[1].TypeAnn != "string" {
+		t.Fatalf("bad let ann: %+v", p.Statements[1])
+	}
+	fn := p.Statements[2]
+	if fn.Kind != StmtFunc || len(fn.ParamTypes) != 2 || fn.ParamTypes[0] != "int" || fn.ReturnType != "int" {
+		t.Fatalf("bad func ann: %+v", fn)
+	}
+	if p.Statements[3].Expr.Kind != ExprFunc || p.Statements[3].Expr.FuncReturnType != "string" {
+		t.Fatalf("bad func lit ann: %+v", p.Statements[3].Expr)
+	}
+	for _, src := range []string{
+		"print a?.b\n", "print a?.[0]\n", "print a ?? b\n",
+		"print x is int\n", "print x is \"int\"\n", "print x is not int\n",
+		"let m: int? = nil\n",
+	} {
+		if _, err := ParseSource(src, "test.ks"); err != nil {
+			t.Fatalf("types %q failed: %v", src, err)
+		}
+	}
+	q, err := ParseSource("let a = x ?? y ?? 1\n", "test.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.Statements[0].Expr.Kind != ExprCoalesce {
+		t.Fatalf("want ??, got %+v", q.Statements[0].Expr)
+	}
+	r, err := ParseSource("let b = x is int\n", "test.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Statements[0].Expr.Kind != ExprIs {
+		t.Fatalf("want is, got %+v", r.Statements[0].Expr)
+	}
+	s, err := ParseSource("print a?.b\n", "test.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// print a?.b -> print(ExprIndex Safe)
+	pe := s.Statements[0]
+	var idx *Expr
+	if len(pe.Exprs) > 0 {
+		idx = pe.Exprs[0]
+	} else {
+		idx = pe.Expr
+	}
+	if idx.Kind != ExprIndex || !idx.Safe {
+		t.Fatalf("want safe ?., got %+v", idx)
+	}
+	// `is` stays contextual: `let is = 1` keeps working
+	if _, err := ParseSource("let is = 1\nprint is\n", "test.ks"); err != nil {
+		t.Fatalf("is as var failed: %v", err)
+	}
+	for _, bad := range []string{
+		"let x: nope = 1\n",
+		"print a ? b\n",
+		"print 1 ??\n",
+	} {
+		if _, err := ParseSource(bad, "test.ks"); err == nil {
+			t.Fatalf("want error for %q", bad)
+		}
+	}
+}
