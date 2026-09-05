@@ -299,5 +299,8 @@ func TestRunTypesV21(t *testing.T) {
 	mustFail(t, "func f(): int {\n return \"nope\"\n}\nprint f()\n")
 	mustFail(t, "print assert_type(1, \"string\")\n")
 	mustFail(t, "print 1 is \"nope\"\n")
-	mustFail(t, "let x: nope = 1\n")
+	// Unknown annotation names are parse errors (covered in frontend tests too).
+	if _, err := frontend.ParseSource("let x: nope = 1\n", "test.ks"); err == nil {
+		t.Fatal("want parse error for unknown type")
+	}
 }
