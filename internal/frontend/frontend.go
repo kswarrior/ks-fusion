@@ -1310,14 +1310,25 @@ func (p *parser) parseDefer() (*Stmt, error) {
 	if k == tNewline || k == tSemi || k == tEOF || k == tRBrace {
 		return nil, p.errf(p.peek(), "defer needs a call, e.g. `defer close(ch)`")
 	}
-	e, err := p.parseExpr()
+	// Fast path: `defer f(args)` evaluates f and args now (Go semantics).
+	saved := p.pos
+	if e, err := p.parseExpr(); err == nil && e.Kind == ExprCall {
+		return &Stmt{Kind: StmtDefer, Expr: e, Line: dt.Line}, nil
+	}
+	// Otherwise any statement works, e.g. `defer print "done"`: wrap it
+	// in a zero-arg func call executed when the function returns.
+	p.pos = saved
+	inner, err := p.parseStmt()
 	if err != nil {
 		return nil, err
 	}
-	if e.Kind != ExprCall {
-		return nil, p.errf(dt, "defer needs a call, e.g. `defer close(ch)`")
+	if inner.Kind == StmtDefer {
+		return nil, p.errf(dt, "defer defer is not allowed")
 	}
-	return &Stmt{Kind: StmtDefer, Expr: e, Line: dt.Line}, nil
+	wrapped := &Expr{Kind: ExprCall,
+		Callee: &Expr{Kind: ExprFunc, FuncBody: &Stmt{Kind: StmtBlock, List: []*Stmt{inner}, Line: inner.Line}},
+	}
+	return &Stmt{Kind: StmtDefer, Expr: wrapped, Line: dt.Line}, nil
 }
 
 // parseExprOrAssignStmt: assignment (incl. indexed, op=) or expression statement.
