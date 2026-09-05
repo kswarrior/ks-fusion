@@ -294,8 +294,18 @@ var keywords = map[string]tokKind{
 	"defer":    tDefer,
 }
 
-func lex(src, path string) ([]token, error) {
-	var toks []token
+func isDigitForBase(c byte, kind byte) bool {
+	switch kind {
+	case 'x', 'X':
+		return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+	case 'b', 'B':
+		return c == '0' || c == '1'
+	default: // octal
+		return c >= '0' && c <= '7'
+	}
+}
+
+func lex(src, path string) ([]token, error) {	var toks []token
 	line := 1
 	i := 0
 	n := len(src)
@@ -343,15 +353,16 @@ func lex(src, path string) ([]token, error) {
 			}
 			continue
 		}
-		// strings
-		if c == '"' {
+		// strings ("double" and 'single', same escapes)
+		if c == '"' || c == '\'' {
+			quote := c
 			startLine := line
 			i++
 			var sb strings.Builder
 			closed := false
 			for i < n {
 				ch := src[i]
-				if ch == '"' {
+				if ch == quote {
 					closed = true
 					i++
 					break
@@ -371,8 +382,12 @@ func lex(src, path string) ([]token, error) {
 						sb.WriteByte('\r')
 					case '"':
 						sb.WriteByte('"')
+					case '\'':
+						sb.WriteByte('\'')
 					case '\\':
 						sb.WriteByte('\\')
+					case '0':
+						sb.WriteByte(0)
 					default:
 						sb.WriteByte(esc)
 					}
@@ -391,21 +406,101 @@ func lex(src, path string) ([]token, error) {
 			toks = append(toks, token{K: tString, Lit: sb.String(), Line: startLine})
 			continue
 		}
-		// numbers
+		// numbers: ints (decimal, 0x hex, 0b binary, 0o octal),
+		// floats (3.5, .5, 1e3, 2.5e-2); underscores allowed (1_000).
 		if c >= '0' && c <= '9' {
 			start := i
-			for i < n && src[i] >= '0' && src[i] <= '9' {
-				i++
-			}
-			if i < n && src[i] == '.' && i+1 < n && src[i+1] >= '0' && src[i+1] <= '9' {
-				i++ // dot
-				for i < n && src[i] >= '0' && src[i] <= '9' {
+			startLine := line
+			// prefixed ints
+			if c == '0' && i+1 < n && (src[i+1] == 'x' || src[i+1] == 'X' || src[i+1] == 'b' || src[i+1] == 'B' || src[i+1] == 'o' || src[i+1] == 'O') {
+				kind := src[i+1]
+				i += 2
+				ds := i
+				for i < n && (src[i] == '_' || isDigitForBase(src[i], kind)) {
 					i++
 				}
-				add(tFloat, src[start:i])
-			} else {
-				add(tInt, src[start:i])
+				raw := strings.ReplaceAll(src[ds:i], "_", "")
+				if raw == "" {
+					return nil, fmt.Errorf("%s:%d: bad number %q", path, startLine, src[start:i])
+				}
+				var base int
+				switch kind {
+				case 'x', 'X':
+					base = 16
+				case 'b', 'B':
+					base = 2
+				default:
+					base = 8
+				}
+				v, err := strconv.ParseInt(raw, base, 64)
+				if err != nil {
+					return nil, fmt.Errorf("%s:%d: bad number %q", path, startLine, src[start:i])
+				}
+				add(tInt, strconv.FormatInt(v, 10))
+				continue
 			}
+			for i < n && (src[i] >= '0' && src[i] <= '9' || src[i] == '_') {
+				i++
+			}
+			isFloat := false
+			if i < n && src[i] == '.' && i+1 < n && src[i+1] >= '0' && src[i+1] <= '9' {
+				isFloat = true
+				i++ // dot
+				for i < n && (src[i] >= '0' && src[i] <= '9' || src[i] == '_') {
+					i++
+				}
+			}
+			if i < n && (src[i] == 'e' || src[i] == 'E') {
+				j := i + 1
+				if j < n && (src[j] == '+' || src[j] == '-') {
+					j++
+				}
+				if j < n && src[j] >= '0' && src[j] <= '9' {
+					isFloat = true
+					i = j
+					for i < n && (src[i] >= '0' && src[i] <= '9' || src[i] == '_') {
+						i++
+					}
+				}
+			}
+			raw := strings.ReplaceAll(src[start:i], "_", "")
+			if isFloat {
+				if _, err := strconv.ParseFloat(raw, 64); err != nil {
+					return nil, fmt.Errorf("%s:%d: bad float %q", path, startLine, src[start:i])
+				}
+				add(tFloat, raw)
+			} else {
+				if _, err := strconv.Atoi(raw); err != nil {
+					return nil, fmt.Errorf("%s:%d: bad integer %q", path, startLine, src[start:i])
+				}
+				add(tInt, raw)
+			}
+			continue
+		}
+		// leading-dot float: .5
+		if c == '.' && i+1 < n && src[i+1] >= '0' && src[i+1] <= '9' {
+			start := i
+			i++ // dot
+			for i < n && (src[i] >= '0' && src[i] <= '9' || src[i] == '_') {
+				i++
+			}
+			if i < n && (src[i] == 'e' || src[i] == 'E') {
+				j := i + 1
+				if j < n && (src[j] == '+' || src[j] == '-') {
+					j++
+				}
+				if j < n && src[j] >= '0' && src[j] <= '9' {
+					i = j
+					for i < n && (src[i] >= '0' && src[i] <= '9' || src[i] == '_') {
+						i++
+					}
+				}
+			}
+			raw := strings.ReplaceAll(src[start:i], "_", "")
+			if _, err := strconv.ParseFloat(raw, 64); err != nil {
+				return nil, fmt.Errorf("%s:%d: bad float %q", path, line, src[start:i])
+			}
+			add(tFloat, raw)
 			continue
 		}
 		// idents / keywords
@@ -439,6 +534,10 @@ func lex(src, path string) ([]token, error) {
 			continue
 		case "!=":
 			add(tNe, two)
+			i += 2
+			continue
+		case "**":
+			add(tStarStar, two)
 			i += 2
 			continue
 		case "<=":
@@ -679,6 +778,12 @@ func (p *parser) parseStmt() (*Stmt, error) {
 		return p.parseGo()
 	case tImport:
 		return p.parseImport()
+	case tTry:
+		return p.parseTry()
+	case tSwitch:
+		return p.parseSwitch()
+	case tDefer:
+		return p.parseDefer()
 	case tLBrace:
 		return p.parseBlock()
 	case tNewline, tSemi:
@@ -1092,6 +1197,125 @@ func (p *parser) parseImport() (*Stmt, error) {
 	}
 	p.next()
 	return &Stmt{Kind: StmtImport, StrVal: t.Lit, Line: it.Line}, nil
+}
+
+func (p *parser) parseTry() (*Stmt, error) {
+	tt := p.next() // try
+	body, err := p.parseBlock()
+	if err != nil {
+		return nil, err
+	}
+	st := &Stmt{Kind: StmtTry, Then: body, Line: tt.Line}
+	// allow `} catch` / `} finally` across newlines
+	saved := p.pos
+	p.skipSeps()
+	if p.peek().K == tCatch {
+		p.next() // catch
+		// optional variable: `catch e { }` or bare `catch { }`
+		if p.peek().K == tIdent {
+			st.Catch = p.next().Lit
+		}
+		cb, err := p.parseBlock()
+		if err != nil {
+			return nil, err
+		}
+		st.CaBody = cb
+		saved = p.pos
+		p.skipSeps()
+	}
+	if p.peek().K == tFinally {
+		p.next() // finally
+		fb, err := p.parseBlock()
+		if err != nil {
+			return nil, err
+		}
+		st.FinBody = fb
+	} else {
+		p.pos = saved
+	}
+	if st.CaBody == nil && st.FinBody == nil {
+		return nil, p.errf(tt, "try needs `catch` and/or `finally`")
+	}
+	return st, nil
+}
+
+func (p *parser) parseSwitch() (*Stmt, error) {
+	st := p.next() // switch
+	target, err := p.parseExpr()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(tLBrace, "`{`"); err != nil {
+		return nil, err
+	}
+	out := &Stmt{Kind: StmtSwitch, Expr: target, Line: st.Line}
+	p.skipSeps()
+	seenDefault := false
+	for p.peek().K != tRBrace {
+		if p.atEnd() {
+			return nil, p.errf(st, "unterminated switch, missing `}`")
+		}
+		t := p.peek()
+		if t.K == tCase {
+			if seenDefault {
+				return nil, p.errf(t, "default must be the last branch in switch")
+			}
+			p.next()
+			var vals []*Expr
+			for {
+				v, err := p.parseExpr()
+				if err != nil {
+					return nil, err
+				}
+				vals = append(vals, v)
+				if p.peek().K == tComma {
+					p.next()
+					continue
+				}
+				break
+			}
+			body, err := p.parseBlock()
+			if err != nil {
+				return nil, err
+			}
+			out.Cases = append(out.Cases, &SwitchCase{Values: vals, Body: body, Line: t.Line})
+		} else if t.K == tDefault {
+			if seenDefault {
+				return nil, p.errf(t, "duplicate default in switch")
+			}
+			seenDefault = true
+			p.next()
+			body, err := p.parseBlock()
+			if err != nil {
+				return nil, err
+			}
+			out.Cases = append(out.Cases, &SwitchCase{Body: body, IsDefault: true, Line: t.Line})
+		} else {
+			return nil, p.errf(t, "want `case` or `default` in switch, got %q", t.Lit)
+		}
+		p.skipSeps()
+	}
+	p.next() // }
+	if len(out.Cases) == 0 {
+		return nil, p.errf(st, "switch needs at least one case/default")
+	}
+	return out, nil
+}
+
+func (p *parser) parseDefer() (*Stmt, error) {
+	dt := p.next() // defer
+	k := p.peek().K
+	if k == tNewline || k == tSemi || k == tEOF || k == tRBrace {
+		return nil, p.errf(p.peek(), "defer needs a call, e.g. `defer close(ch)`")
+	}
+	e, err := p.parseExpr()
+	if err != nil {
+		return nil, err
+	}
+	if e.Kind != ExprCall {
+		return nil, p.errf(dt, "defer needs a call, e.g. `defer close(ch)`")
+	}
+	return &Stmt{Kind: StmtDefer, Expr: e, Line: dt.Line}, nil
 }
 
 // parseExprOrAssignStmt: assignment (incl. indexed, op=) or expression statement.
