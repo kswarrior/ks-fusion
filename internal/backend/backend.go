@@ -1078,8 +1078,32 @@ func (in *Interpreter) execForIn(env *Env, st *frontend.Stmt) error {
 			}
 		}
 		return nil
+	case VChan:
+		// Channel iteration: `for v in ch` receives until the channel
+		// is closed and drained (like Go's `for v := range ch`).
+		// Two loop vars are not meaningful for channels.
+		if two {
+			return fmt.Errorf("cannot iterate chan with 2 vars (try `for v in ch`)")
+		}
+		for {
+			v, ok := <-iter.Chan.Ch
+			if !ok {
+				return nil
+			}
+			iterEnv := newEnv(loopEnv)
+			in.define(iterEnv, st.Names[0], v)
+			if err := runBody(iterEnv); err != nil {
+				if err == errBreak {
+					return nil
+				}
+				if err == errContinue {
+					continue
+				}
+				return err
+			}
+		}
 	default:
-		return fmt.Errorf("cannot iterate %s (try array, map or string)", TypeName(iter))
+		return fmt.Errorf("cannot iterate %s (try array, map, string or chan)", TypeName(iter))
 	}
 }
 
@@ -1241,6 +1265,182 @@ func (in *Interpreter) execSwitch(env *Env, st *frontend.Stmt) error {
 		}
 	}
 	return nil
+}
+
+// execSelect implements Go-like channel multiplexing:
+//
+//	select {
+//	  case v = recv(c1) { ... }  # receive + bind (bind optional)
+//	  case recv(c2) { ... }      # receive + discard
+//	  case send(c3, 42) { ... }
+//	  case timeout(100) { ... }  # ms
+//	  default { ... }            # non-blocking fallback, must be last
+//	}
+//
+// Without `default` it blocks until one case is ready (ready cases win
+// uniformly at random, like Go); with `default` it never blocks.
+// `break` inside a case body ends the select (like `switch`).
+func (in *Interpreter) execSelect(env *Env, st *frontend.Stmt) (err error) {
+	if len(st.SelectCases) == 0 {
+		return fmt.Errorf("select needs at least one case/default")
+	}
+	// A send on a concurrently-closed channel panics inside
+	// reflect.Select; convert that into a regular ks error.
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("select failed: %v", r)
+		}
+	}()
+	type prepared struct {
+		sc      *frontend.SelectCase
+		ch      Value
+		sendVal Value
+		ms      int
+	}
+	var comms []prepared
+	var defBody *frontend.Stmt
+	var timeouts []prepared
+	for _, sc := range st.SelectCases {
+		switch sc.Kind {
+		case "default":
+			defBody = sc.Body
+		case "recv":
+			ch, everr := in.eval(env, sc.Chan)
+			if everr != nil {
+				return withLine(sc.Line, everr)
+			}
+			if ch.Kind != VChan {
+				return withLine(sc.Line, fmt.Errorf("select recv wants chan, got %s", TypeName(ch)))
+			}
+			comms = append(comms, prepared{sc: sc, ch: ch})
+		case "send":
+			ch, everr := in.eval(env, sc.Chan)
+			if everr != nil {
+				return withLine(sc.Line, everr)
+			}
+			if ch.Kind != VChan {
+				return withLine(sc.Line, fmt.Errorf("select send wants chan, got %s", TypeName(ch)))
+			}
+			val, everr := in.eval(env, sc.Value)
+			if everr != nil {
+				return withLine(sc.Line, everr)
+			}
+			ch.Chan.Mu.Lock()
+			closed := ch.Chan.Closed
+			ch.Chan.Mu.Unlock()
+			if closed {
+				return withLine(sc.Line, fmt.Errorf("send on closed channel"))
+			}
+			comms = append(comms, prepared{sc: sc, ch: ch, sendVal: val})
+		case "timeout":
+			mv, everr := in.eval(env, sc.Timeout)
+			if everr != nil {
+				return withLine(sc.Line, everr)
+			}
+			ms, everr := toMillis(mv)
+			if everr != nil {
+				return withLine(sc.Line, everr)
+			}
+			timeouts = append(timeouts, prepared{sc: sc, ms: ms})
+		default:
+			return fmt.Errorf("bad select case %q", sc.Kind)
+		}
+	}
+	runBody := func(sc *frontend.SelectCase, received Value, hasValue bool) error {
+		if sc.Kind == "recv" && sc.Bind != "" {
+			caseEnv := newEnv(env)
+			if hasValue {
+				in.define(caseEnv, sc.Bind, received)
+			} else {
+				in.define(caseEnv, sc.Bind, Nil())
+			}
+			if cerr := in.execStmt(caseEnv, sc.Body); cerr != nil {
+				if ce, ok := cerr.(*ctrlError); ok && ce.kind == ctrlBreak {
+					return nil
+				}
+				return cerr
+			}
+			return nil
+		}
+		if cerr := in.execStmt(env, sc.Body); cerr != nil {
+			if ce, ok := cerr.(*ctrlError); ok && ce.kind == ctrlBreak {
+				return nil
+			}
+			return cerr
+		}
+		return nil
+	}
+	if defBody != nil {
+		// Non-blocking: one reflect.Select with a default clause picks
+		// uniformly among ready comms, else falls to default.
+		// Timeouts never fire on the non-blocking path (Go semantics:
+		// `default` already means "don't wait").
+		if len(comms) == 0 {
+			return runBody(&frontend.SelectCase{Kind: "default", Body: defBody}, Nil(), false)
+		}
+		cases := make([]reflect.SelectCase, 0, len(comms)+1)
+		order := make([]prepared, 0, len(comms)+1)
+		for _, p := range comms {
+			if p.sc.Kind == "recv" {
+				cases = append(cases, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(p.ch.Chan.Ch)})
+			} else {
+				cases = append(cases, reflect.SelectCase{Dir: reflect.SelectSend, Chan: reflect.ValueOf(p.ch.Chan.Ch), Send: reflect.ValueOf(p.sendVal)})
+			}
+			order = append(order, p)
+		}
+		cases = append(cases, reflect.SelectCase{Dir: reflect.SelectDefault})
+		chosen, recvVal, _ := reflect.Select(cases)
+		if chosen == len(order) {
+			return runBody(&frontend.SelectCase{Kind: "default", Body: defBody}, Nil(), false)
+		}
+		p := order[chosen]
+		if p.sc.Kind == "recv" {
+			var v Value
+			if rv, ok := recvVal.Interface().(Value); ok {
+				v = rv
+			} else {
+				v = Nil()
+			}
+			return runBody(p.sc, v, true)
+		}
+		return runBody(p.sc, Nil(), false)
+	}
+	// Blocking: wait for the first ready comm or timeout.
+	cases := make([]reflect.SelectCase, 0, len(comms)+len(timeouts))
+	order := make([]prepared, 0, len(comms)+len(timeouts))
+	isTimeout := make([]bool, 0, len(comms)+len(timeouts))
+	for _, p := range comms {
+		if p.sc.Kind == "recv" {
+			cases = append(cases, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(p.ch.Chan.Ch)})
+		} else {
+			cases = append(cases, reflect.SelectCase{Dir: reflect.SelectSend, Chan: reflect.ValueOf(p.ch.Chan.Ch), Send: reflect.ValueOf(p.sendVal)})
+		}
+		order = append(order, p)
+		isTimeout = append(isTimeout, false)
+	}
+	for _, p := range timeouts {
+		cases = append(cases, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(time.After(time.Duration(p.ms) * time.Millisecond))})
+		order = append(order, p)
+		isTimeout = append(isTimeout, true)
+	}
+	if len(cases) == 0 {
+		return fmt.Errorf("select needs at least one case/default")
+	}
+	chosen, recvVal, _ := reflect.Select(cases)
+	p := order[chosen]
+	if isTimeout[chosen] {
+		return runBody(p.sc, Nil(), false)
+	}
+	if p.sc.Kind == "recv" {
+		var v Value
+		if rv, ok := recvVal.Interface().(Value); ok {
+			v = rv
+		} else {
+			v = Nil()
+		}
+		return runBody(p.sc, v, true)
+	}
+	return runBody(p.sc, Nil(), false)
 }
 
 func (in *Interpreter) execDefer(env *Env, st *frontend.Stmt) error {
@@ -2190,13 +2390,24 @@ func allBuiltins() []*BuiltinObj {
 		{Name: "recv", Fn: bRecv},
 		{Name: "try_send", Fn: bTrySend},
 		{Name: "try_recv", Fn: bTryRecv},
+		{Name: "recv_timeout", Fn: bRecvTimeout},
+		{Name: "send_timeout", Fn: bSendTimeout},
 		{Name: "chan_len", Fn: bChanLen},
 		{Name: "chan_cap", Fn: bChanCap},
+		{Name: "chan_closed", Fn: bChanClosed},
 		{Name: "close", Fn: bClose},
 		{Name: "sleep", Fn: bSleep},
 		{Name: "assert", Fn: bAssert},
 		{Name: "error", Fn: bError},
 		{Name: "panic", Fn: bError},
+		{Name: "is_type", Fn: bIsType},
+		{Name: "assert_type", Fn: bAssertType},
+		{Name: "ok", Fn: bOk},
+		{Name: "err", Fn: bErr},
+		{Name: "is_ok", Fn: bIsOk},
+		{Name: "is_err", Fn: bIsErr},
+		{Name: "unwrap", Fn: bUnwrap},
+		{Name: "unwrap_or", Fn: bUnwrapOr},
 	}
 }
 
@@ -2520,6 +2731,100 @@ func bError(in *Interpreter, args []Value) (Value, error) {
 		return Nil(), err
 	}
 	return Nil(), fmt.Errorf("%s", args[0].Display())
+}
+
+func bIsType(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("is_type", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[1].Kind != VString {
+		return Nil(), fmt.Errorf("is_type wants (value, type-string), got (..., %s)", TypeName(args[1]))
+	}
+	if !validType(args[1].Str) {
+		return Nil(), fmt.Errorf("unknown type %q (want nil|bool|int|float|number|string|array|map|func|chan|any|ok|err)", args[1].Str)
+	}
+	return BoolV(matchesTypeStrict(args[0], args[1].Str)), nil
+}
+
+func bAssertType(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("assert_type", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[1].Kind != VString {
+		return Nil(), fmt.Errorf("assert_type wants (value, type-string), got (..., %s)", TypeName(args[1]))
+	}
+	if !validType(args[1].Str) {
+		return Nil(), fmt.Errorf("unknown type %q (want nil|bool|int|float|number|string|array|map|func|chan|any|ok|err)", args[1].Str)
+	}
+	if !matchesTypeStrict(args[0], args[1].Str) {
+		return Nil(), fmt.Errorf("assert_type failed: wants %s, got %s", args[1].Str, TypeName(args[0]))
+	}
+	return args[0], nil
+}
+
+func bOk(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("ok", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	return MapV(map[string]Value{"ok": args[0]}), nil
+}
+
+func bErr(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("err", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	return MapV(map[string]Value{"err": StrV(args[0].Display())}), nil
+}
+
+func bIsOk(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("is_ok", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	return BoolV(isOkValue(args[0])), nil
+}
+
+func bIsErr(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("is_err", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	return BoolV(isErrValue(args[0])), nil
+}
+
+func bUnwrap(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("unwrap", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	v := args[0]
+	if isOkValue(v) {
+		v.Map.Mu.RLock()
+		out := v.Map.Vals["ok"]
+		v.Map.Mu.RUnlock()
+		return out, nil
+	}
+	if isErrValue(v) {
+		v.Map.Mu.RLock()
+		msg := v.Map.Vals["err"].Display()
+		v.Map.Mu.RUnlock()
+		return Nil(), fmt.Errorf("%s", msg)
+	}
+	return Nil(), fmt.Errorf("unwrap wants ok(v)/err(e), got %s", TypeName(v))
+}
+
+func bUnwrapOr(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("unwrap_or", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	v := args[0]
+	if isOkValue(v) {
+		v.Map.Mu.RLock()
+		out := v.Map.Vals["ok"]
+		v.Map.Mu.RUnlock()
+		return out, nil
+	}
+	if isErrValue(v) {
+		return args[1], nil
+	}
+	return Nil(), fmt.Errorf("unwrap_or wants ok(v)/err(e), got %s", TypeName(v))
 }
 
 // ---------------------------------------------------------------------------
@@ -3839,4 +4144,70 @@ func bChanCap(in *Interpreter, args []Value) (Value, error) {
 		return Nil(), fmt.Errorf("chan_cap wants chan, got %s", TypeName(args[0]))
 	}
 	return IntV(cap(args[0].Chan.Ch)), nil
+}
+
+func bChanClosed(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("chan_closed", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VChan {
+		return Nil(), fmt.Errorf("chan_closed wants chan, got %s", TypeName(args[0]))
+	}
+	args[0].Chan.Mu.Lock()
+	closed := args[0].Chan.Closed
+	args[0].Chan.Mu.Unlock()
+	return BoolV(closed), nil
+}
+
+// bRecvTimeout blocks up to ms milliseconds for a value:
+// `recv_timeout(ch, ms)` returns the value, or nil on timeout
+// (or when a closed channel is already drained, like `recv`).
+func bRecvTimeout(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("recv_timeout", args, 2, 2); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VChan {
+		return Nil(), fmt.Errorf("recv_timeout wants chan, got %s", TypeName(args[0]))
+	}
+	ms, err := toMillis(args[1])
+	if err != nil {
+		return Nil(), err
+	}
+	select {
+	case v, ok := <-args[0].Chan.Ch:
+		if !ok {
+			return Nil(), nil
+		}
+		return v, nil
+	case <-time.After(time.Duration(ms) * time.Millisecond):
+		return Nil(), nil
+	}
+}
+
+// bSendTimeout blocks up to ms milliseconds trying to send:
+// `send_timeout(ch, v, ms)` returns true if sent, false on timeout.
+func bSendTimeout(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("send_timeout", args, 3, 3); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VChan {
+		return Nil(), fmt.Errorf("send_timeout wants chan, got %s", TypeName(args[0]))
+	}
+	ms, err := toMillis(args[2])
+	if err != nil {
+		return Nil(), err
+	}
+	args[0].Chan.Mu.Lock()
+	ch := args[0].Chan.Ch
+	closed := args[0].Chan.Closed
+	args[0].Chan.Mu.Unlock()
+	if closed {
+		return Nil(), fmt.Errorf("send on closed channel")
+	}
+	select {
+	case ch <- args[1]:
+		return BoolV(true), nil
+	case <-time.After(time.Duration(ms) * time.Millisecond):
+		return BoolV(false), nil
+	}
 }
