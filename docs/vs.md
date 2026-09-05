@@ -54,8 +54,23 @@ Simplicity + Build/Deploy + Frontend + Maturity = 100`.
 | Maturity | 3 | 9 | 8 | 9 | 9 | 9 | 10 | 8 | 8 |
 | **Total /100** | **44** | **82** | **81** | **62** | **73** | **77** | **74** | **79** | **67** |
 
-Extra stacks (same rubric): `TypeScript/Deno/Bun 77`, `Java/Kotlin/Spring 78`,
-`Lua 58`, `Ruby/Rails 68`, `Bash 45`. Details in `More` below.
+Extra stacks (same rubric): `TypeScript 79`, `Java/Kotlin/Spring 78`,
+`Vite 77`, `Deno/Bun 77`, `React 76`, `Lua 58`, `Ruby/Rails 68`, `Bash 45`.
+Details in `More` below. Frontend breakdown:
+
+| Dim (max 10) | .ks | TypeScript | React | Vite | Next.js |
+|---|---:|---:|---:|---:|---:|
+| Perf | 4 | 6 | 7 | 8 | 7 |
+| Types | 4 | 9 | 8 | 6 | 8 |
+| Concurrency | 6 | 6 | 5 | 4 | 6 |
+| Stdlib | 4 | 7 | 5 | 4 | 8 |
+| Ecosystem | 3 | 10 | 10 | 9 | 10 |
+| Tooling | 4 | 9 | 9 | 10 | 9 |
+| Simplicity | 9 | 6 | 6 | 8 | 6 |
+| Build/Deploy | 4 | 7 | 7 | 10 | 7 |
+| Frontend | 3 | 10 | 10 | 10 | 10 |
+| Maturity | 3 | 9 | 9 | 8 | 8 |
+| **Total /100** | **44** | **79** | **76** | **77** | **79** |
 
 ## Language-by-language
 
@@ -165,6 +180,69 @@ ks-fusion app = `backend/main.ks + frontend/main.ks` run concurrently in console
 Pick Next.js for SEO sites, dashboards, SaaS UI.
 Pick `.ks` for the logic worker behind it.
 
+### vs TypeScript (language, not runtime)
+
+**Score: ks-fusion 44/100 vs TypeScript 79/100 — TS wins by 35.**
+
+TypeScript = JS + static types (`tsc`, `strict`, generics, unions).
+`.ks` = dynamic only (`nil bool int float string array map func chan`).
+
+```ts
+// TypeScript
+function add(a: number, b: number): number { return a + b; }
+type User = { name: string; age: number };
+```
+
+```python
+# .ks — no annotations, runtime checks only
+func add(a, b) { return a + b }
+let user = {name: "ada", age: 36}
+```
+
+Pick TypeScript for any browser/Node code that must scale past 1k lines.
+Pick `.ks` for non-JS glue where `tsc` + `node_modules` is overkill.
+Interop future: `fusion build --js` subset → import `.ks` logic into TS.
+
+### vs React (UI library)
+
+**Score: ks-fusion 44/100 vs React 76/100 — React wins by 32 (different category).**
+
+React = components, hooks, virtual DOM, concurrent renderer.
+`.ks` `frontend/main.ks` = console `print`, no DOM/state/effects.
+
+```jsx
+// React
+function Hello({name}) { return <h1>Hello {name}</h1>; }
+```
+
+```python
+# .ks frontend today
+let title = "Hello from ks-fusion"
+print title
+```
+
+Pick React (+ Vite/Next.js) for all real UI.
+Pick `.ks` for the worker behind the UI (JSON over stdout/file, later `http_*`).
+Do not reimplement React in `.ks` — explicit non-goal in `futures.md`.
+
+### vs Vite (frontend build tool)
+
+**Score: ks-fusion 44/100 vs Vite 77/100 — Vite wins by 33 (different category).**
+
+Vite = instant HMR dev server + `esbuild`/Rollup bundler + plugin ecosystem.
+`fusion` = `new/run/build` for `.ks` only, no HMR, no bundling, no CSS/DOM.
+
+|  | Vite | `fusion` (v2.0) |
+|---|---|---|
+| Dev | HMR <100ms | `run` rerun, no watch |
+| Build | tree-shaken JS/CSS | source JSON `.kslib` / parse-check |
+| Plugins | 1000s (React, TS, Tailwind) | none yet |
+| Target | browser | console interpreter |
+
+Pick Vite for React/TS/Tailwind frontends.
+Pick `.ks` for logic; future `fusion run --web` will copy the HMR idea, and
+`fusion build --js` is meant to emit a Vite-consumable module.
+
 ### vs PHP Laravel
 
 **Score: ks-fusion 44/100 vs Laravel 67/100 — Laravel wins by 23.**
@@ -177,7 +255,7 @@ Pick `.ks` for sidecar scripts (data munging, checks, bots) next to Laravel.
 
 ### More (short, all scored out of 100)
 
-* **TypeScript/Deno/Bun 77/100 vs .ks 44/100 (-33):** pick for typed Node + secure sandbox; `.ks` is simpler but smaller.
+* **Deno/Bun 77/100 vs .ks 44/100 (-33):** see TypeScript above; pick for secure TS sandbox / fast runtime; `.ks` is simpler but smaller.
 * **Java/Kotlin/Spring 78/100 vs .ks 44/100 (-34):** pick for enterprise monoliths, JPA, strict OOP; `.ks` for glue.
 * **Lua 58/100 vs .ks 44/100 (-14):** closest embed rival — Lua is smaller/faster to embed; `.ks` has Go chans + `fusion` CLI out of box.
 * **Ruby/Rails 68/100 vs .ks 44/100 (-24):** pick for convention CRUD; `.ks` syntax will feel familiar.
@@ -190,19 +268,22 @@ Pick `.ks` for sidecar scripts (data munging, checks, bots) next to Laravel.
 | 1 | Go | 82 | +38, prod servers / single binary |
 | 2 | Rust | 81 | +37, systems / safety |
 | 3 | Next.js | 79 | +35, browser UI (different category) |
-| 4 | Java/Kotlin/Spring | 78 | +34, enterprise |
-| 5 | Node.js | 77 | +33, APIs / npm |
-| 5 | TypeScript/Deno/Bun | 77 | +33, typed runtime |
-| 7 | Python | 74 | +30, data/AI/ecosystem |
-| 8 | C++ | 73 | +29, engines/trading |
-| 9 | Ruby/Rails | 68 | +24, convention CRUD |
-| 10 | PHP Laravel | 67 | +23, monolith CRUD |
-| 11 | C | 62 | +18, kernels/embedded |
-| 12 | Lua | 58 | +14, embedding |
-| 13 | Bash | 45 | +1, tiny pipes |
-| 14 | **ks-fusion v2.0** | **44** | **baseline — wins on simplicity (9/10)** |
+| 3 | TypeScript | 79 | +35, typed UI/logic |
+| 5 | Java/Kotlin/Spring | 78 | +34, enterprise |
+| 6 | Node.js | 77 | +33, APIs / npm |
+| 6 | Vite | 77 | +33, frontend build/HMR (different category) |
+| 6 | Deno/Bun | 77 | +33, typed runtime |
+| 9 | React | 76 | +32, UI components (different category) |
+| 10 | Python | 74 | +30, data/AI/ecosystem |
+| 11 | C++ | 73 | +29, engines/trading |
+| 12 | Ruby/Rails | 68 | +24, convention CRUD |
+| 13 | PHP Laravel | 67 | +23, monolith CRUD |
+| 14 | C | 62 | +18, kernels/embedded |
+| 15 | Lua | 58 | +14, embedding |
+| 16 | Bash | 45 | +1, tiny pipes |
+| 17 | **ks-fusion v2.0** | **44** | **baseline — wins on simplicity (9/10)** |
 
-Grand total (sum of all 14 totals) = `965 / 1400`, average `68.9/100`.
+Grand total (sum of all 17 totals) = `1197 / 1700`, average `70.4/100`.
 `.ks` total `44/100` reflects v2.0 reality: best at learning/scripts,
 behind everywhere else until `futures.md` P0/P1 land.
 
@@ -283,7 +364,7 @@ behind everywhere else until `futures.md` P0/P1 land.
 | 10 | Packages | proxy + `go.sum` | crates.io + lock | local newest-wins | registry + `fusion.lock` + semver + vendor | `futures.md` P0+P2 |
 | 11 | Tooling | `fmt/vet/test/bench/pprof` | `clippy/fmt/bench` | `new/run/build` only | `fmt/vet/test/bench/doc/repl` | `futures.md` P0+P2 DX |
 | 12 | IDE | `gopls` | `rust-analyzer` | none | LSP + VS Code ext + debugger | `futures.md` P2 DX |
-| 13 | Frontend | `html/template`/WASM | WASM pkgs | console `frontend/` | `--web` reload + `--js` subset + Next.js pattern | `futures.md` P2 frontend |
+| 13 | Frontend | `html/template`/WASM | WASM pkgs | console `frontend/` | `--web` reload + `--js` subset + React/Vite/Next.js pattern | `futures.md` P2 frontend |
 | 14 | FFI | `cgo` | `unsafe`/FFI | none | opt-in `ffi_*` + Go plugin API | `futures.md` P2 interop |
 | 15 | Stability | compat promise | editions | v2.0 | RFC process + semver + LTS | `futures.md` §5 |
 
@@ -292,7 +373,7 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
 
 ## Decision guide
 
-1. Browser UI? → Next.js.
+1. Browser UI? → React + Vite + TS, or Next.js for SSR.
 2. CRUD + login + billing next week? → Laravel / Django / Rails / Next.js.
 3. 100k RPS / embedded / game loop? → Go / Rust / C++ / C.
 4. Script, bot, rule engine, teaching `go/chan`, prototype? → `.ks`.
