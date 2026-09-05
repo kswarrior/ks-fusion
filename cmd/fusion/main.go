@@ -8,6 +8,9 @@
 //	lib: parse-check sources and pack test-releases/<name>-<ver>.kslib
 //	     (--release) or target/<name>-<ver>.kslib (debug, like cargo)
 //
+// fusion compile <file.ks> [--out file.ksb] [--dis] [--run]
+// compile the .ks subset to bytecode (.ksb-1); run with `fusion file.ksb`
+//
 // fusion help
 package main
 
@@ -19,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/kswarrior/ks-fusion/internal/backend"
+	"github.com/kswarrior/ks-fusion/internal/compiler"
 	"github.com/kswarrior/ks-fusion/internal/config"
 	"github.com/kswarrior/ks-fusion/internal/frontend"
 	"github.com/kswarrior/ks-fusion/internal/lib"
@@ -31,6 +35,14 @@ func main() {
 	}
 	// Direct file mode: `fusion prog.ks` or `fusion lib.kslib`
 	// (also what the `#!/usr/bin/env fusion` shebang invokes).
+	// Bytecode mode: `fusion prog.ksb` runs a `fusion compile` bundle.
+	if a := os.Args[1]; !strings.HasPrefix(a, "-") && strings.HasSuffix(a, compiler.Ext) {
+		if err := compiler.RunFile(a); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if a := os.Args[1]; !strings.HasPrefix(a, "-") &&
 		(strings.HasSuffix(a, ".ks") || strings.HasSuffix(a, lib.Ext)) {
 		if err := backend.RunFile(a); err != nil {
@@ -74,8 +86,7 @@ func main() {
 			os.Exit(1)
 		}
 	case "build":
-		dir := "."
-		release := false
+		dir := "."		release := false
 		out := ""
 		args := os.Args[2:]
 		for i := 0; i < len(args); i++ {
@@ -104,6 +115,11 @@ func main() {
 			fmt.Println("error:", err)
 			os.Exit(1)
 		}
+	case "compile":
+		if err := cmdCompile(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
 	case "help", "--help", "-h":
 		help()
 	default:
@@ -123,6 +139,10 @@ Commands:
                              app: parse-check entries + verify [dependencies]
                              lib: pack .kslib bundle into test-releases/
                                   (--release) or target/ (debug), like cargo
+  fusion compile <file.ks> [--out file.ksb] [--dis] [--run]
+                             compile the .ks subset to bytecode (.ksb-1);
+                             outside the subset, the compiler says so —
+                             run those files with the interpreter instead
   fusion prog.ks|lib.kslib   run a single file directly.
                              .kslib bundles start with #!/usr/bin/env fusion,
                              so: chmod +x lib.kslib && ./lib.kslib
