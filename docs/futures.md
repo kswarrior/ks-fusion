@@ -73,7 +73,9 @@
 
 ### P1 — language core
 
-* [ ] `select/sleep` timeouts, `chan` iteration `for v in ch`, buffered-chan semantics docs.
+* [x] `chan` iteration `for v in ch` (drains until close, Go `range` semantics)
+  + `recv_timeout/send_timeout/chan_closed` helpers. Done v2.1.
+  Left: `select/sleep` deadline contexts, buffered-chan semantics docs.
 * [ ] Structs / typed maps: `type User = {name: string, age: int}` (optional static check).
   Today v2.1 has primitive `: type` annotations only.
 * [ ] Enums + exhaustive `switch` check.

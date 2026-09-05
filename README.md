@@ -130,15 +130,21 @@ go func() {
   send(c, 42)
   close(c)
 }()
-print recv(c)
+print recv(c)  # 42
 
+let out = chan(1)
 select {
-  case v = recv(c) { print v }  # receive + bind (bind optional)
-  case send(c, 1) { print "sent" }
+  case send(out, 1) { print "sent" }  # receive: case v = recv(c) {...}
   case timeout(100) { print "timed out" }
-  default { print "none ready" }  # no block when present
+  # default {...}  # uncomment: never blocks when present
 }
-for v in c { print v }  # drains until close (ch = nil disables a select case)
+print recv(out)  # 1
+
+let jobs = chan(2)
+send(jobs, "a")
+send(jobs, "b")
+close(jobs)
+for v in jobs { print v }  # a, then b (drains until close)
 
 # imports (app-root relative)
 import "shared/util.ks"

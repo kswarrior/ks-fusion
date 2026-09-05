@@ -1,7 +1,7 @@
 // Package backend is the ks-fusion backend:
 // full tree-walk interpreter with functions, closures, arrays, maps,
 // control flow, a complete builtin standard library and Go-like
-// concurrency (`go` + channels).
+// concurrency (`go` + channels + `select`).
 package backend
 
 import (
