@@ -67,7 +67,13 @@
   like `go build`). Today output is source JSON or parse-check only.
 * [ ] Cross-compile: `--target linux/amd64,arm64,darwin,windows,wasm`.
 * [ ] Profiler hooks: `fusion run --cpuprofile`, opcode counts.
-* [ ] Optimizations: constant folding, local-slot lookup (replace scope-chain
+* [x] Tree-walk opts done v2.1 (Perf 4→5): lock-free single-threaded scopes
+  (`conc` flag, no RWMutex/mutex per lookup/`fail` until first `go`), halved
+  env allocs (func body runs in callEnv; if/while/for/switch/try reuse Block
+  scope), O(1) builtin cache, string+string fast path, O(n log n) `sort`
+  (was insertion O(n²)), O(log n) int `**`/`pow`, window-only `slice`/`bSlice`.
+  Left: constant folding, full local-slot lookup, string-builder concat.
+* [ ] Optimizations (remaining): constant folding, local-slot lookup (replace scope-chain
   scan on hot paths), string-builder concat fast path.
 * [ ] WASM target: run `.ks` in browser / edge workers.
 

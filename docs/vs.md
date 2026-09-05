@@ -283,56 +283,61 @@ Pick `.ks` for sidecar scripts (data munging, checks, bots) next to Laravel.
 
 ### More (short, all scored out of 100)
 
-* **Deno/Bun 77/100 vs .ks 48/100 (-29):** see TypeScript above; pick for secure TS sandbox / fast runtime; `.ks` is simpler but smaller.
-* **Java/Kotlin/Spring 78/100 vs .ks 48/100 (-30):** pick for enterprise monoliths, JPA, strict OOP; `.ks` for glue.
-* **Lua 58/100 vs .ks 48/100 (-10):** closest embed rival — Lua is smaller/faster to embed; `.ks` has Go-style `select` + `fusion` CLI out of box.
-* **Ruby/Rails 68/100 vs .ks 48/100 (-20):** pick for convention CRUD; `.ks` syntax will feel familiar.
-* **Bash 45/100 vs .ks 48/100 (+3):** `.ks` leads — pick Bash for 5-line pipes; `.ks` wins past 50 lines (`try/catch`, maps, JSON, `is`/`?.`/`??`, `select`, Windows portability).
+* **Deno/Bun 77/100 vs .ks 49/100 (-28):** see TypeScript above; pick for secure TS sandbox / fast runtime; `.ks` is simpler but smaller.
+* **Java/Kotlin/Spring 78/100 vs .ks 49/100 (-29):** pick for enterprise monoliths, JPA, strict OOP; `.ks` for glue.
+* **Lua 58/100 vs .ks 49/100 (-9):** closest embed rival — Lua is smaller/faster to embed; `.ks` has Go-style `select` + `fusion` CLI out of box.
+* **Ruby/Rails 68/100 vs .ks 49/100 (-19):** pick for convention CRUD; `.ks` syntax will feel familiar.
+* **Bash 45/100 vs .ks 49/100 (+4):** `.ks` leads — pick Bash for 5-line pipes; `.ks` wins past 50 lines (`try/catch`, maps, JSON, `is`/`?.`/`??`, `select`, Windows portability).
 
 ## Totals & ranking (out of 100)
 
-| Rank | Stack | Total /100 | Verdict vs .ks (48) |
+| Rank | Stack | Total /100 | Verdict vs .ks (49) |
 |---:|---|---:|---|
-| 1 | Go | 82 | +34, prod servers / single binary |
-| 2 | Rust | 81 | +33, systems / safety |
-| 3 | Next.js | 79 | +31, browser UI (different category) |
-| 3 | TypeScript | 79 | +31, typed UI/logic |
-| 5 | Java/Kotlin/Spring | 78 | +30, enterprise |
-| 6 | Node.js | 77 | +29, APIs / npm |
-| 6 | Vite | 77 | +29, frontend build/HMR (different category) |
-| 6 | Deno/Bun | 77 | +29, typed runtime |
-| 9 | React | 76 | +28, UI components (different category) |
-| 10 | Python | 74 | +26, data/AI/ecosystem |
-| 11 | C++ | 73 | +25, engines/trading |
-| 12 | Ruby/Rails | 68 | +20, convention CRUD |
-| 13 | PHP Laravel | 67 | +19, monolith CRUD |
-| 14 | C | 62 | +14, kernels/embedded |
-| 15 | Lua | 58 | +10, embedding |
-| 16 | **ks-fusion v2.1** | **48** | **baseline — wins on simplicity (9/10), leads Bash by 3** |
-| 17 | Bash | 45 | -3, tiny pipes |
+| 1 | Go | 82 | +33, prod servers / single binary |
+| 2 | Rust | 81 | +32, systems / safety |
+| 3 | Next.js | 79 | +30, browser UI (different category) |
+| 3 | TypeScript | 79 | +30, typed UI/logic |
+| 5 | Java/Kotlin/Spring | 78 | +29, enterprise |
+| 6 | Node.js | 77 | +28, APIs / npm |
+| 6 | Vite | 77 | +28, frontend build/HMR (different category) |
+| 6 | Deno/Bun | 77 | +28, typed runtime |
+| 9 | React | 76 | +27, UI components (different category) |
+| 10 | Python | 74 | +25, data/AI/ecosystem |
+| 11 | C++ | 73 | +24, engines/trading |
+| 12 | Ruby/Rails | 68 | +19, convention CRUD |
+| 13 | PHP Laravel | 67 | +18, monolith CRUD |
+| 14 | C | 62 | +13, kernels/embedded |
+| 15 | Lua | 58 | +9, embedding |
+| 16 | **ks-fusion v2.1** | **49** | **baseline — wins on simplicity (9/10), leads Bash by 4; Perf 5/10 after tree-walk opts** |
+| 17 | Bash | 45 | -4, tiny pipes |
 
-Grand total (sum of all 17 totals) = `1201 / 1700`, average `70.6/100`.
-`.ks` total `48/100` reflects v2.1 reality: best at learning/scripts,
-at Python/Node parity on Types (6/10) and Rust parity on Concurrency (8/10);
+Grand total (sum of all 17 totals) = `1202 / 1700`, average `70.7/100`.
+`.ks` total `49/100` reflects v2.1 reality: best at learning/scripts,
+at Python/Node parity on Types (6/10) and Rust parity on Concurrency (8/10),
+at Python parity on Perf (5/10) after tree-walk opts;
 still behind everywhere else until `futures.md` P0/P1 land.
 
 ## Why not Go/Rust-class (v2.1 gaps + what parity needs)
 
-> Score context: `.ks 48/100` vs `Go 82/100` vs `Rust 81/100`.
-> The 33–34 pt gap is the 5 blocks below
-> (Types half-closed and Concurrency at Rust parity in v2.1).
+> Score context: `.ks 49/100` vs `Go 82/100` vs `Rust 81/100`.
+> The 32–33 pt gap is the 5 blocks below
+> (Types half-closed, Concurrency at Rust parity, Perf tree-walk opts done in v2.1).
 > Fix the rest → ~75–80/100.
 
 ### 1. No compiler — interpreted AST, no native/static binary, no LLVM, no JIT
 
 * Today: tree-walk interpreter (`internal/backend`), `.kslib` = source JSON (`kslib-1`),
-  needs `fusion` on PATH. `fib(25)` ~5x slower than Go.
+  needs `fusion` on PATH. `fib(25)` ~100x slower than Go (was ~130x; lock-free
+  single-threaded scopes + halved env allocs give ~10-15% on fib/loops).
+  `sort` is now O(n log n) (was insertion O(n²): 5k reversed 0.45s→0.004s),
+  `**`/`pow` O(log n) (was O(n)), `slice` copies only the window, builtins O(1) cached.
 * Go level needs: `fusion build --bin` single static executable, cross-compile
   `--target linux/amd64,arm64,darwin,windows,wasm`, build cache, `go vet`-style IR check.
 * Rust level needs: LLVM/opt backend or bytecode VM + AOT, LTO, strip/symbol options,
   reproducible builds. Minimum viable: bytecode VM (5–20x speedup) first, then AOT.
 * Planned: `docs/futures.md` P1 runtime (`VM → --bin → --target → --cpuprofile`).
-* Score impact: `Perf 4→8 (+4)`, `Build 4→9 (+5)`.
+* Score impact: `Perf 4→5 done (+1 tree-walk opts, Python parity)`; `Perf 5→8 (+3)` left
+  for VM/AOT, `Build 4→9 (+5)`.
 
 ### 2. Gradual types (v2.1: half-closed) — annotations + `is`/`?.`/`??`/`ok`/`err`, still no structs/enums/generics
 
@@ -408,7 +413,7 @@ still behind everywhere else until `futures.md` P0/P1 land.
 | 14 | FFI | `cgo` | `unsafe`/FFI | none | opt-in `ffi_*` + Go plugin API | `futures.md` P2 interop |
 | 15 | Stability | compat promise | editions | v2.0 | RFC process + semver + LTS | `futures.md` §5 |
 
-Close rows 1–2 + 5 + 10–11 and the rest of rows 3–4 and `.ks` moves `48 → ~75–80/100` (Go/Rust-class for scripts/services).
+Close rows 1–2 + 5 + 10–11 and the rest of rows 3–4 and `.ks` moves `49 → ~75–80/100` (Go/Rust-class for scripts/services).
 Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
 
 ## Decision guide
@@ -421,7 +426,9 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
 
 ## Honest limits of `.ks` v2.1 (do not hide)
 
-* Interpreted, no JIT/native binary, no cross-compile matrix.
+* Interpreted tree-walk, no JIT/native binary, no cross-compile matrix
+  (v2.1 tree-walk opts: lock-free scopes, halved env allocs, O(n log n) sort,
+  O(log n) pow, string+string fast path — fib still ~100x slower than Go).
 * Gradual types only (no structs/enums/generics yet), `==` uses deep equality.
 * Flat lib namespace (prefix functions), newest local bundle wins, no lockfile.
 * No `fusion run --race`, no cancel/`with_timeout` yet, no HTTP/WS/DB/regex/crypto stdlib.
