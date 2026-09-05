@@ -4,14 +4,15 @@
 // Language summary:
 //
 //	types: nil, bool, int, float, string, array, map, func, chan
-//	stmts: let, assign (+= -= *= /= %=), print, sleep, go,
-//	       if/else, while, for-in, for-c-style, func, return,
+//	       (+ number/any/ok/err aliases for annotations and `is`)
+//	stmts: let (with optional `: type`), assign (+= -= *= /= %=), print, sleep, go,
+//	       if/else, while, for-in, for-c-style, func (with optional param/return types), return,
 //	       break, continue, import, try/catch/finally, switch,
 //	       select (recv/send/timeout/default), defer, block { }, expr-statement
-//	exprs: literals, vars, a+b - * / % **, in, == != < <= > >=,
+//	exprs: literals, vars, a+b - * / % **, in, is, ??, == != < <= > >=,
 //	       and/or/not (also && || !), unary - !,
 //	       calls f(...), index a[i], slice a[l:r], field m.key,
-//	       arrays [..], maps {k: v, ..}, func literals
+//	       safe access a?.b / a?.[i], arrays [..], maps {k: v, ..}, func literals
 //	comments: # ..., // ..., /* ... */
 //	strings: "double" and 'single'; numbers: 0xFF 0b11 0o17 1_000 1e3 .5
 package frontend

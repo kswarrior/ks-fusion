@@ -12,6 +12,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -705,6 +706,8 @@ func (in *Interpreter) execStmt(env *Env, st *frontend.Stmt) error {
 		return in.execTry(env, st)
 	case frontend.StmtSwitch:
 		return in.execSwitch(env, st)
+	case frontend.StmtSelect:
+		return in.execSelect(env, st)
 	case frontend.StmtDefer:
 		return in.execDefer(env, st)
 	default:
