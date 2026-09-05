@@ -40,6 +40,8 @@ const (
 	ExprMul
 	ExprDiv
 	ExprMod
+	ExprPow
+	ExprIn
 	ExprEq
 	ExprNe
 	ExprLt
@@ -52,6 +54,7 @@ const (
 	ExprNeg
 	ExprCall
 	ExprIndex
+	ExprSlice
 	ExprArray
 	ExprMap
 	ExprFunc
@@ -67,6 +70,8 @@ type Expr struct {
 	Name       string
 	Left       *Expr
 	Right      *Expr
+	SliceStart *Expr // nil = omitted start
+	SliceEnd   *Expr // nil = omitted end
 	Args       []*Expr
 	Callee     *Expr
 	Elements   []*Expr
@@ -96,24 +101,39 @@ const (
 	StmtBlock
 	StmtExpr
 	StmtImport
+	StmtTry
+	StmtSwitch
+	StmtDefer
 )
+
+// SwitchCase is one `case`/`default` branch of a switch statement.
+type SwitchCase struct {
+	Values    []*Expr // nil for default
+	Body      *Stmt
+	IsDefault bool
+	Line      int
+}
 
 // Stmt is one statement node.
 type Stmt struct {
 	Kind    StmtKind
 	Name    string   // let/assign var, func name
 	Names   []string // for-in vars, func params (def)
-	Expr    *Expr    // let value, assign value, return, while cond, if cond, for iter/cond, sleep value, expr-stmt
+	Expr    *Expr    // let value, assign value, return, while cond, if cond, for iter/cond, sleep value, expr-stmt, switch target, defer call
 	Exprs   []*Expr  // print args
 	Inner   *Stmt    // go inner
 	Body    *Stmt    // func/while/for body (block)
-	Then    *Stmt    // if then (block)
+	Then    *Stmt    // if then (block), try block
 	Else    *Stmt    // if else (block or if)
 	Init    *Stmt    // for-c init (may be nil)
 	Post    *Stmt    // for-c post (may be nil)
 	List    []*Stmt  // block statements
-	StrVal  string   // import path
-	Op      string   // assign op: = += -= *= /= %=
+	Cases   []*SwitchCase
+	StrVal  string // import path
+	Catch   string // try: catch variable ("" = none)
+	CaBody  *Stmt  // try: catch body (nil = no catch)
+	FinBody *Stmt  // try: finally body (nil = none)
+	Op      string // assign op: = += -= *= /= %=
 	Line    int
 	SleepMs int // kept for compat: set when sleep arg is int literal
 }
@@ -198,6 +218,7 @@ const (
 	tBang
 	tAndOp
 	tOrOp
+	tStarStar
 	tDot
 	tComma
 	tColon
@@ -228,6 +249,13 @@ const (
 	tAnd
 	tOr
 	tNot
+	tTry
+	tCatch
+	tFinally
+	tSwitch
+	tCase
+	tDefault
+	tDefer
 )
 
 type token struct {
@@ -257,6 +285,13 @@ var keywords = map[string]tokKind{
 	"and":      tAnd,
 	"or":       tOr,
 	"not":      tNot,
+	"try":      tTry,
+	"catch":    tCatch,
+	"finally":  tFinally,
+	"switch":   tSwitch,
+	"case":     tCase,
+	"default":  tDefault,
+	"defer":    tDefer,
 }
 
 func lex(src, path string) ([]token, error) {
@@ -284,6 +319,27 @@ func lex(src, path string) ([]token, error) {
 		if c == '#' {
 			for i < n && src[i] != '\n' {
 				i++
+			}
+			continue
+		}
+		// /* block comment */
+		if c == '/' && i+1 < n && src[i+1] == '*' {
+			startLine := line
+			i += 2
+			closed := false
+			for i < n {
+				if src[i] == '*' && i+1 < n && src[i+1] == '/' {
+					closed = true
+					i += 2
+					break
+				}
+				if src[i] == '\n' {
+					line++
+				}
+				i++
+			}
+			if !closed {
+				return nil, fmt.Errorf("%s:%d: unterminated block comment", path, startLine)
 			}
 			continue
 		}
