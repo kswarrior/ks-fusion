@@ -1,10 +1,15 @@
-// Package backend is the ks-fusion backend v1.0:
+// Package backend is the ks-fusion backend:
 // full tree-walk interpreter with functions, closures, arrays, maps,
-// control flow, builtins and Go-like concurrency (`go` + channels).
+// control flow, a complete builtin standard library and Go-like
+// concurrency (`go` + channels).
 package backend
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
+	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1507,20 +1512,87 @@ func allBuiltins() []*BuiltinObj {
 		{Name: "str", Fn: bStr},
 		{Name: "int", Fn: bInt},
 		{Name: "float", Fn: bFloat},
+		{Name: "bool", Fn: bBool},
 		{Name: "type", Fn: bType},
+		{Name: "chr", Fn: bChr},
+		{Name: "ord", Fn: bOrd},
+		{Name: "hex", Fn: bHex},
 		{Name: "range", Fn: bRange},
 		{Name: "push", Fn: bPush},
 		{Name: "pop", Fn: bPop},
+		{Name: "insert", Fn: bInsert},
+		{Name: "remove", Fn: bRemove},
+		{Name: "clear", Fn: bClear},
+		{Name: "reverse", Fn: bReverse},
+		{Name: "sort", Fn: bSort},
+		{Name: "slice", Fn: bSlice},
 		{Name: "keys", Fn: bKeys},
 		{Name: "values", Fn: bValues},
 		{Name: "has", Fn: bHas},
+		{Name: "delete", Fn: bDelete},
+		{Name: "merge", Fn: bMerge},
+		{Name: "get", Fn: bGet},
+		{Name: "contains", Fn: bContains},
+		{Name: "index_of", Fn: bIndexOf},
+		{Name: "split", Fn: bSplit},
+		{Name: "join", Fn: bJoin},
+		{Name: "upper", Fn: bUpper},
+		{Name: "lower", Fn: bLower},
+		{Name: "trim", Fn: bTrim},
+		{Name: "starts_with", Fn: bStartsWith},
+		{Name: "ends_with", Fn: bEndsWith},
+		{Name: "replace", Fn: bReplace},
+		{Name: "substr", Fn: bSubstr},
+		{Name: "repeat", Fn: bRepeat},
+		{Name: "abs", Fn: bAbs},
+		{Name: "min", Fn: bMin},
+		{Name: "max", Fn: bMax},
+		{Name: "floor", Fn: bFloor},
+		{Name: "ceil", Fn: bCeil},
+		{Name: "round", Fn: bRound},
+		{Name: "sqrt", Fn: bSqrt},
+		{Name: "pow", Fn: bPow},
+		{Name: "pi", Fn: bPi},
+		{Name: "now", Fn: bNow},
+		{Name: "rand", Fn: bRand},
+		{Name: "randint", Fn: bRandint},
+		{Name: "seed", Fn: bSeed},
+		{Name: "bit_and", Fn: bBitAnd},
+		{Name: "bit_or", Fn: bBitOr},
+		{Name: "bit_xor", Fn: bBitXor},
+		{Name: "bit_shl", Fn: bBitShl},
+		{Name: "bit_shr", Fn: bBitShr},
+		{Name: "bit_not", Fn: bBitNot},
+		{Name: "map", Fn: bMapFn},
+		{Name: "filter", Fn: bFilter},
+		{Name: "each", Fn: bEach},
+		{Name: "reduce", Fn: bReduce},
+		{Name: "apply", Fn: bApply},
+		{Name: "json_stringify", Fn: bJsonStringify},
+		{Name: "json_parse", Fn: bJsonParse},
+		{Name: "input", Fn: bInput},
+		{Name: "read_file", Fn: bReadFile},
+		{Name: "write_file", Fn: bWriteFile},
+		{Name: "append_file", Fn: bAppendFile},
+		{Name: "exists", Fn: bExists},
+		{Name: "list_dir", Fn: bListDir},
+		{Name: "mkdir", Fn: bMkdir},
+		{Name: "remove", Fn: bRemovePath},
+		{Name: "exit", Fn: bExit},
+		{Name: "argv", Fn: bArgv},
+		{Name: "env", Fn: bEnv},
 		{Name: "chan", Fn: bChan},
 		{Name: "send", Fn: bSend},
 		{Name: "recv", Fn: bRecv},
+		{Name: "try_send", Fn: bTrySend},
+		{Name: "try_recv", Fn: bTryRecv},
+		{Name: "chan_len", Fn: bChanLen},
+		{Name: "chan_cap", Fn: bChanCap},
 		{Name: "close", Fn: bClose},
 		{Name: "sleep", Fn: bSleep},
 		{Name: "assert", Fn: bAssert},
 		{Name: "error", Fn: bError},
+		{Name: "panic", Fn: bError},
 	}
 }
 
