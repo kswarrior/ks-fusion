@@ -202,7 +202,7 @@ Pick `.ks` for sidecar scripts (data munging, checks, bots) next to Laravel.
 | 13 | Bash | 45 | +1, tiny pipes |
 | 14 | **ks-fusion v2.0** | **44** | **baseline — wins on simplicity (9/10)** |
 
-Grand total (sum of all 14 totals) = `954 / 1400`, average `68.1/100`.
+Grand total (sum of all 14 totals) = `965 / 1400`, average `68.9/100`.
 `.ks` total `44/100` reflects v2.0 reality: best at learning/scripts,
 behind everywhere else until `futures.md` P0/P1 land.
 
