@@ -1773,6 +1773,39 @@ func (p *parser) parsePostfix() (*Expr, error) {
 			p.next()
 			base = &Expr{Kind: ExprIndex, Left: base,
 				Right: &Expr{Kind: ExprString, StrVal: ft.Lit}}
+		case tQuestionDot:
+			p.next()
+			if p.peek().K == tLBracket {
+				p.next()
+				for p.peek().K == tNewline {
+					p.next()
+				}
+				if p.peek().K == tColon {
+					return nil, p.errf(p.peek(), "slice with `?.` not supported, use `(a ?? [])[i:j]`")
+				}
+				idx, err := p.parseExpr()
+				if err != nil {
+					return nil, err
+				}
+				for p.peek().K == tNewline {
+					p.next()
+				}
+				if p.peek().K == tColon {
+					return nil, p.errf(p.peek(), "slice with `?.` not supported, use `(a ?? [])[i:j]`")
+				}
+				if _, err := p.expect(tRBracket, "`]`"); err != nil {
+					return nil, err
+				}
+				base = &Expr{Kind: ExprIndex, Left: base, Right: idx, Safe: true}
+				continue
+			}
+			ft := p.peek()
+			if ft.K != tIdent {
+				return nil, p.errf(ft, "want field name after `?.`, got %q", ft.Lit)
+			}
+			p.next()
+			base = &Expr{Kind: ExprIndex, Left: base, Safe: true,
+				Right: &Expr{Kind: ExprString, StrVal: ft.Lit}}
 		default:
 			return base, nil
 		}

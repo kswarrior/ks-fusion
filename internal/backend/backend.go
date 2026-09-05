@@ -73,10 +73,12 @@ type MapObj struct {
 
 // FuncObj is a user function with closure.
 type FuncObj struct {
-	Name    string
-	Params  []string
-	Body    *frontend.Stmt
-	Closure *Env
+	Name       string
+	Params     []string
+	ParamTypes []string
+	ReturnType string
+	Body       *frontend.Stmt
+	Closure    *Env
 }
 
 // BuiltinObj wraps a Go builtin.
