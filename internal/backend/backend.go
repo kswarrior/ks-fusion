@@ -1034,12 +1034,24 @@ func (in *Interpreter) execSwitch(env *Env, st *frontend.Stmt) error {
 				return err
 			}
 			if deepEqual(target, cv) {
-				return in.execStmt(newEnv(env), c.Body)
+				// Like Go, `break` inside a case ends the switch.
+				if err := in.execStmt(newEnv(env), c.Body); err != nil {
+					if ce, ok := err.(*ctrlError); ok && ce.kind == ctrlBreak {
+						return nil
+					}
+					return err
+				}
+				return nil
 			}
 		}
 	}
 	if def != nil {
-		return in.execStmt(newEnv(env), def.Body)
+		if err := in.execStmt(newEnv(env), def.Body); err != nil {
+			if ce, ok := err.(*ctrlError); ok && ce.kind == ctrlBreak {
+				return nil
+			}
+			return err
+		}
 	}
 	return nil
 }
