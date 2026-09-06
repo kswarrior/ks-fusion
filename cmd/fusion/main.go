@@ -138,6 +138,36 @@ func main() {
 			fmt.Println("error:", err)
 			os.Exit(1)
 		}
+	case "fmt":
+		if err := cmdFmt(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
+	case "vet":
+		if err := cmdVet(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
+	case "doc":
+		if err := cmdDoc(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
+	case "check":
+		if err := cmdCheck(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
+	case "repl":
+		if err := cmdRepl(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
+	case "bench":
+		if err := cmdBench(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
 	case "version", "--version", "-V":
 		fmt.Println("ks-fusion", toolVersion)
 	case "help", "--help", "-h":
