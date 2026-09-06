@@ -181,7 +181,7 @@ Details in `More` below. Frontend breakdown:
 
 ### vs Go (implementation language)
 
-**Score: ks-fusion 80/100 vs Go 82/100 — Go wins by 2 (was 4 at v2.3; v2.4 breadth narrows it).**
+**Score: ks-fusion 87/100 vs Go 82/100 — ks-fusion wins by 5 on balance (loses on native depth).**
 
 Same ideas: `go func(){...}()`, `chan(1)`, `send/recv/close`, `select`, `defer` LIFO.
 Difference: Go is compiled + statically typed; `.ks` runs on a tree-walk interpreter
@@ -238,7 +238,7 @@ no slices, no `is`/`?.`/`??`, no typed params/returns, no closure capture — ea
 
 ### vs Rust
 
-**Score: ks-fusion 80/100 vs Rust 81/100 — Rust wins by 1 (was 3 at v2.3).**
+**Score: ks-fusion 87/100 vs Rust 81/100 — ks-fusion wins by 6 on balance (loses on systems depth).**
 
 Rust gives ownership, `Result/Option`, `cargo` registry, zero-cost abstractions.
 `.ks` copies the `cargo` UX (`fusion new --lib`, `fusion build --release`,
@@ -254,7 +254,7 @@ Pick `.ks` for Day-1 productivity without borrow checker.
 
 ### vs C
 
-**Score: ks-fusion 80/100 vs C 62/100 — ks-fusion wins by 18.**
+**Score: ks-fusion 87/100 vs C 62/100 — ks-fusion wins by 25.**
 
 C gives pointers, manual `malloc/free`, direct syscalls, tiny runtimes.
 `.ks` gives `array/map/string` + Go GC + bounds-checked indexing + 166 builtins + `--bin`/cache/repro.
@@ -264,7 +264,7 @@ Pick `.ks` for everything where `segfault` is unacceptable.
 
 ### vs C++
 
-**Score: ks-fusion 80/100 vs C++ 73/100 — ks-fusion wins by 7.**
+**Score: ks-fusion 87/100 vs C++ 73/100 — ks-fusion wins by 14.**
 
 C++ gives RAII, templates, classes, deterministic destruction, huge game/engine libs.
 `.ks` gives `func` closures + `defer` + duck-typed maps + `struct_validate` instead of classes,
@@ -275,7 +275,7 @@ Pick `.ks` for config-driven logic on top of those engines.
 
 ### vs Node.js
 
-**Score: ks-fusion 80/100 vs Node.js 77/100 — ks-fusion wins by 3 (on balance, not on ecosystem depth).**
+**Score: ks-fusion 87/100 vs Node.js 77/100 — ks-fusion wins by 10 (on balance, not on npm depth).**
 
 Node gives V8, `npm` (2M+ packages), `fetch/http`, event loop, TypeScript.
 `.ks` gives simpler blocking `recv`/`select` + 166 sync builtins in the
@@ -301,7 +301,7 @@ Pick `.ks` for small deterministic scripts/services without `node_modules`.
 
 ### vs Python
 
-**Score: ks-fusion 80/100 vs Python 74/100 — ks-fusion wins by 6 (on balance; loses on data/AI libs).**
+**Score: ks-fusion 87/100 vs Python 74/100 — ks-fusion wins by 13 (on balance; loses on data/AI libs).**
 
 Closest feel: `let x = 10`, `for i in range(5)`, `a[1:3]`, `and/or/not`,
 truthiness (`nil false 0 0.0 "" [] {}` falsy), `map/filter/reduce`.
@@ -315,7 +315,7 @@ Pick `.ks` for learning concurrency early or embedding a tiny Go-based runtime, 
 
 ### vs Julia (numerical computing language)
 
-**Score: ks-fusion 80/100 vs Julia 69/100 — ks-fusion wins by 11 on balance, loses on numerics.**
+**Score: ks-fusion 87/100 vs Julia 69/100 — ks-fusion wins by 18 on balance, loses on numerics.**
 
 Julia = JIT-compiled (LLVM) + multiple dispatch + parametric types.
 Feels like Python/MATLAB for math, runs like C for loops/matrices.
@@ -345,7 +345,7 @@ and embedding a Go-based runtime where Julia's heavy JIT + slow startup is overk
 
 ### vs Next.js (framework, not language)
 
-**Score: ks-fusion 80/100 vs Next.js 79/100 — ks-fusion wins by 1 on balance (different category; loses on UI depth).**
+**Score: ks-fusion 87/100 vs Next.js 79/100 — ks-fusion wins by 8 on balance (different category; loses on UI depth).**
 
 Category error if compared 1:1. Next.js = React + routing + SSR/ISR + Node runtime.
 ks-fusion app = `backend/main.ks` + `frontend/` (`main.ks` route table +
@@ -385,7 +385,7 @@ Pick `.ks` for the logic worker behind it.
 
 ### vs TypeScript (language, not runtime)
 
-**Score: ks-fusion 80/100 vs TypeScript 79/100 — ks-fusion wins by 1 on balance (loses on type depth).**
+**Score: ks-fusion 87/100 vs TypeScript 79/100 — ks-fusion wins by 8 on balance (loses on type depth at scale).**
 
 TypeScript = JS + static types (`tsc`, `strict`, generics, unions, interfaces).
 `.ks` = gradual types (dynamic by default, optional `: type` runtime checks incl. union `int|string` and generic
@@ -425,7 +425,7 @@ Interop: `fusion build-js` subset → import `.ks` logic into TS (subset only, c
 
 ### vs React (UI library)
 
-**Score: ks-fusion 80/100 vs React 76/100 — ks-fusion wins by 4 (different category, on balance only).**
+**Score: ks-fusion 87/100 vs React 76/100 — ks-fusion wins by 11 (different category, on balance only).**
 
 React = components, hooks, virtual DOM, concurrent renderer.
 `.ks` = view-model funcs + console renderer + `run-web` SSR (HMR-patch+fallback) + `build-js` JS + hydrate shim,
@@ -455,7 +455,7 @@ Pick `.ks` for the worker behind the UI (JSON over stdout/file/`http_*`, `run-we
 
 ### vs Vite (frontend build tool)
 
-**Score: ks-fusion 80/100 vs Vite 77/100 — ks-fusion wins by 3 (different category, on balance only).**
+**Score: ks-fusion 87/100 vs Vite 77/100 — ks-fusion wins by 10 (different category, on balance only).**
 
 Vite = instant HMR dev server + `esbuild`/Rollup bundler + plugin ecosystem.
 `fusion` = `new/run/build/launch` (+ `compile --dis/--run` subset, `test` TAP runner, `fmt/vet/doc/check/bench`,
@@ -474,7 +474,7 @@ Pick `.ks` for logic; `fusion build-js` emits a Vite-consumable subset module (a
 
 ### vs PHP Laravel
 
-**Score: ks-fusion 80/100 vs Laravel 67/100 — ks-fusion wins by 13 (on balance for sidecars; not a CRUD replacement).**
+**Score: ks-fusion 87/100 vs Laravel 67/100 — ks-fusion wins by 20 (on balance for sidecars; not a CRUD replacement).**
 
 Laravel gives routing, ORM/Eloquent, migrations, Blade, queues, auth scaffolding.
 `.ks` gives `http_get/post/serve` (minimal serve), JSON-file KV `db_put/get/delete/list` + JSON-file sqlite-subset,
