@@ -1,19 +1,19 @@
 # Frontend Plan (.ks app frontend) — TS / React / Vite / Next.js parity
 
-> Status: planning. `frontend/main.ks` is console logic today (Frontend 3/10), not browser UI.
-> Target: Frontend 3→10, Tooling 4→9, Types 6→8 for frontend code. `.ks` owns logic +
-> view-model, JS owns DOM. Non-goal: reimplementing React/Vite/Next.js in `.ks` —
-> copy their contracts, reuse their runtimes where possible.
+> Executive summary: upgrade Frontend 3→10, Tooling 4→9, Types 6→8.
+> Core idea: `.ks` drives logic + view-models, plain JS handles the DOM.
+> Copy React/Vite/Next contracts, don't reimplement them.
+> Pipeline: `.ks` page → view-model map → JS runtime diff → DOM.
 > Stack: ks-fusion v2.1 (97 builtins, tree-walk) + compiler v0.1 (`.ksb-1` subset).
 
-## 0. Parity bar (what "level" means)
+## 0. System contracts (what we copy)
 
-| System | What we copy | .ks equivalent | Score move |
+| System | Contract to copy | .ks equivalent | Priority |
 |---|---|---|---|
-| TypeScript | `tsc --strict`, generics/unions, LSP hover/goto/rename | `fusion check` (parse + arity + `: type` + `is` narrowing), structs/enums, LSP | Types 6→8, Tooling 4→9 |
-| React | components/props/state/hooks, keyed reconciliation, memo/context/error boundaries | view-model protocol + `key` diff runtime, `use_state`/`on_mount` store helpers, `memo`, error slots | Frontend 3→10 (logic side) |
-| Vite | HMR <100ms, esbuild transpile cache, code-split, tree-shake, plugins | `fusion run --web` watch + incremental `--js` cache, per-route bundles, Go plugin builtins | Build 4→9 |
-| Next.js | file routing, layouts, SSR/SSG/ISR, `/api` routes | `pages/` routing, `layout.ks`, SSR JSON → hydrate, `build --js --ssg`, `backend/api/*.ks` → JSON | Frontend 3→10 |
+| React | Functional components + props/state/hooks (`useState`, `useEffect`); keyed reconciliation with `key`; context; error boundaries | Pages/components return `{type, props, children}` maps; `use_state(key, init)`; `on_mount`/`on_props`; runtime diff by `key`; `memo` (props-JSON cache); single state as context; `{type:"error"}` slots | High |
+| Vite | Dev server HMR (<50ms), esbuild transpile, per-file modules; Rollup bundle + tree-shake + code-split + minify | `fusion run --web`: watch + incremental re-parse/re-render + WebSocket diff push (aim <100ms); `fusion build --js`: per-route bundle, split, shake, minify analogue; content-hash cache; plugin hooks (e.g. Markdown) | High |
+| Next.js | File routing, static/dynamic pages, SSR/SSG/ISR, layouts, `/api` JSON routes | `frontend/pages/` routing (`[param]` dynamic); `layouts/` wrappers; SSR `.ks`→JSON→HTML + hydrate; SSG pre-render; `revalidate` for ISR; `backend/api/*.ks` → `/api/*` | High |
+| TypeScript | `tsc --strict`, interfaces/unions, LSP | `fusion check` (parse + arity + `: type` + `is` narrowing) + structs/enums + exhaustive `switch`; LSP hover/goto/rename | High |
 
 ## 1. Structure (Next.js-level routing)
 
@@ -24,96 +24,83 @@ myapp/
     main.ks                    # entry: route table + layout only
     pages/home.ks              # "/"       -> func home_page(props): map
     pages/hi.ks                # "/hi"     -> func hi_page(props): map
-    pages/user_[id].ks         # "/user/7" -> dynamic segment (plan; manual if first)
+    pages/user_[id].ks         # "/user/7" -> dynamic segment (manual if first)
     components/header.ks       # func header_render(props): map
-    layouts/app.ks             # func app_layout(page): map (header/footer once)
+    layouts/app.ks             # func app_layout(page): map
     store/app.ks               # state + fetch/decode, no view code
   backend/
     main.ks
-    api/user.ks                # "/api/user" -> print json_stringify(...) (plan)
+    api/user.ks                # "/api/user" -> print json_stringify(...)
 ```
 
-Conventions (review-enforced until `fusion vet` lands):
 - 1 file = 1 page/component/layout/store. `main.ks` routes + composes only.
-- Route table lives in `main.ks`: `if route == "/" { home_page() }`. File name = route name.
-- Component returns `{key, type, props, children}`. No `print` inside components/pages.
+- Component returns `{key, type, props, children}`. No `print` inside components.
 - Flat globals today: prefix (`header_render`, `hi_page`). Migrate to
   `import "x" as h` / `h.render(p)` when namespaced imports land.
+- Route table in `main.ks`: `if route == "/" { home_page() }`. File name = route name.
 
-## 2. TypeScript level (`fusion check` + structs)
+## 2. Minimal viable pipeline (.ks → view-model → DOM)
 
-- `fusion check` = `tsc --noEmit` for `.ks`: parse + unused-var + arity +
-  `: type` param/return checks + `is`/`is not` narrowing warnings. Runs in CI.
-- Types needed for frontend props (P1 core, in order): `type Props = {title: string}`,
-  enums for route/variant, exhaustive `switch` on variant (error when a case missing).
-- Until structs land: `func f(p: map): map` + `assert_type(p.title, "string")` on every
-  page/component boundary + `?.`/`??` on all optional props.
-- LSP (P2 DX): hover/goto-def/rename/format-on-save for `frontend/`; `check` powers diagnostics.
+1. Render: `home_page(props)` returns `{type:"div", key:"...", props:{...}, children:[...]}`.
+2. SSR/hydrate: backend renders page → HTML+JSON; browser loads HTML, JS runtime
+   hydrates by diffing view-model JSON into DOM + attaching listeners.
+3. Updates (CSR): state/props change → re-render new view-model → JS diffs vs old,
+   patches only changed nodes. Stable `key`s make list reorder/insert cheap.
+4. State/effects: `use_state` instance persists across updates (props/children change,
+   instance stays — React rule). `on_mount` + `select/recv_timeout` fetch after render.
 
-## 3. React level (component runtime contract)
+## 3. Phased roadmap P0–P10 (exit = concrete check)
 
-- Props/state: `props: map` in, view-model map out. Local state via
-  `store/app.ks` `use_state(key, init)` helper (map + `merge()` + one `render(state)` per tick).
-- Effects: `on_mount(fn)` / `on_props(fn)` store helpers backed by
-  `go` + `select { case v = recv(ch) / case timeout(ms) }`. Never bare `recv` on render path.
-- Reconciliation: runtime diffs by stable `key`, patches only changed `props`/text.
-  Keys explicit and stable (`key: "user-" + str(id)`); index-keys banned by `vet`.
-- `memo(fn)`: cache by `json_stringify(props)` for pure components (lists, headers).
-- Context: single `state` map threaded as first arg; no globals except component funcs.
-- Error boundaries: every fetch returns `ok()/err()`; `is_err(r)` renders `{type: "error"}`
-  slot. `try/catch` at page root maps to error slot, never blank screen.
+- P0 Conventions: layout above + naming rules. Exit: review OK on hello-app.
+- P1 Type-check & vet: `fusion check` strict + `as` imports + `vet` bans
+  (non-literal `set_html`, index keys) + structs/enums for props. Exit: CI green.
+- P2 SSR + HMR dev server: `fusion run --web` SSR on change + WebSocket patch, no full reload.
+  Exit: edit `hi.ks` → browser patches in <100ms.
+- P3 Hydrate + state: client runtime hydrate + `use_state`/`on_mount` + `fetch_json`.
+  Exit: SSR page becomes interactive, fetches data.
+- P4 Bundler: `fusion build --js` per-route transpile/split/shake/minify.
+  Exit: `/` + `/hi` load as static HTML+JS without `fusion`.
+- P5 SSG: `build --ssg` pre-renders JSON+HTML to `target/`. Exit: cached serve works.
+- P6 API routes: `backend/api/*.ks` → `/api/*` JSON. Exit: `fetch("/api/user")` returns map.
+- P7 Budgets: warn >100KB, fail >250KB per route; log sizes. Exit: warnings in build output.
+- P8 Optimizations: content-hash incremental cache, debounce 1 render/tick,
+  virtualize lists >100 rows. Exit: `fusion bench` render times OK.
+- P9 Testing/CI: `fusion test` TAP unit + `/api` contract tests + `vet` in CI.
+  Exit: all green, vet catches regressions.
+- P10 Release polish: ISR `revalidate`, extra hooks, LSP, risk fixes. Exit: prod-ready demo.
 
-## 4. Vite level (`run --web` DX + `build --js` bundles)
+## 4. Build/tooling (Vite-like)
 
-- `fusion run --web`: Go `net/http` serves `frontend/`, watches files, re-parses only
-  changed file + dependents, re-renders, pushes patch over WebSocket. Budget: <100ms reload.
-- `fusion build --js`: transpile safe subset per route (maps/arrays/strings/json,
-  `ok/err`, `is`/`?.`/`??`, control flow, funcs). Reject `go/chan/select/sleep/files`
-  with file:line + interpreter fallback note (same UX as compiler v0.1 subset errors).
-- Per-route code-split + tree-shake: only imported funcs + used builtins per bundle.
-  Shared `store/` chunked once. Bundle budget per page (e.g. warn over 100KB, fail over 250KB).
-- Plugins: Go `backend.Value` API for custom builtins (charts, markdown) without forking;
-  CSS/Tailwind classes pass through as strings — no CSS-in-`.ks`.
-- Cache: content-hash incremental builds (`target/web/`), `--dis`-style bundle inspect.
+- Dev skips bundling: serve route modules + HMR over native ESM-style patches.
+  `check` runs async (`check --watch` / LSP), never blocks HMR.
+- Prod transpiles safe `.ks` subset to JS, splits by route, includes only used
+  funcs/builtins (Rollup-style), minifies (esbuild analogue), hashes assets.
+- No CSS-in-`.ks`: Tailwind/classes pass through as strings, styles linked externally.
 
-## 5. Next.js level (rendering modes + API)
+## 5. Types + LSP (TS-like)
 
-- Routing: static (`pages/hi.ks` → `/hi`) first, dynamic (`user_[id].ks`) second.
-  `layouts/app.ks` wraps every page (header/footer fetched once).
-- SSR: backend renders view-model JSON (`json_stringify(page(props))`), server HTML-shells it,
-  browser hydrates + takes over diffing. SSG: `build --js --ssg` pre-renders JSON at build time.
-  ISR: `revalidate: N` field in page map re-renders on interval (later).
-- API routes: `backend/api/*.ks` → `/api/*` JSON. Frontend `store/` fetches via thin
-  `fetch_json(path)` helper (today: file/stdout stub, after P1 `http_*`: real fetch).
-  Contract test: `*_test.ks` asserts `json_parse(fetch("/api/user")) is map`.
-- SEO/meta: `head: {title, desc}` map in page model rendered to `<head>` by runtime.
+- `fusion check` = `tsc --noEmit`: arity + `: type` + `is`/`is not` narrowing +
+  exhaustive `switch`. Structs/enums model props; `?.`/`??` on all externals.
+- Without generics: maps + `assert_type()` at boundaries.
+- LSP: hover/goto/rename/format; diagnostics = `check` rules (undef refs, bad props).
 
-## 6. Budgets (speed / response)
+## 6. Safety
 
-- Load: TTFR <1s local, per-route JS <100KB warn / <250KB fail, shared chunk cached.
-- Response: optimistic render from cached `state`, reconcile on `recv_timeout` data;
-  debounce store events to 1 render/tick; lists virtualized past ~100 rows (runtime-owned).
-- Measure: `fusion bench` page-render case + bundle-bytes report in `build --js` output.
+- React rule: escape all text by default. Raw HTML only via allowlisted
+  `js_call("set_html", ...)` + `vet` + sanitizer for Markdown/CMS HTML. No `eval`, no remote import.
+- Next.js rule: secrets server-only. Only `backend/` may call `env()`;
+  `env(` in `frontend/` is a `check` error. `fetch_json(path)` validates JSON shape.
 
-## 7. Safety
+## 7. Testing + budgets
 
-- Boundary checks: `assert_type` + `is` on all API/store data; `?.`/`??` on externals.
-- XSS: text escaped by default; raw HTML only via `js_call("set_html", ...)` allowlist,
-  never with user input. `vet` bans `set_html` with non-literal unless sanitized helper used.
-- No `eval`, no remote dynamic `import`. Secrets via backend `env()` only — `build --js`
-  fails if `env(` appears in `frontend/`.
-- Gates: `fusion fmt` + `fusion vet` + `fusion test` (`*_test.ks`, assert + TAP) required per page.
+- `fusion test` TAP: page unit tests (`assert(... is ok)`), `/api` contract tests
+  (`json_parse(fetch(...)) is map`), HMR smoke (edit → partial DOM patch).
+- Budgets: TTFR <1s local, HMR <100ms, route JS <100KB warn / <250KB fail.
+  Bench render + memory; audit with devtools/Lighthouse.
 
-## 8. Phases (exit criteria)
+## 8. Open issues
 
-1. Conventions (no toolchain): `tests/hello-app/frontend/` matches §1 + route table. Exit: review passes.
-2. `fusion check` + namespaced `import as` + `vet` (prefix/arity/`set_html`/index-key rules). Exit: CI runs `check`.
-3. `run --web` SSR-hydrate + watch <100ms on hello-app. Exit: edit `hi.ks` → browser patches, no full reload.
-4. `build --js` per-route bundles + `js_call` sync bridge + SSG JSON. Exit: `/` + `/hi` load without `fusion` running.
-5. Budgets + API routes + dynamic segments + ISR field. Exit: bench + bundle report in build output.
-
-## 9. Non-goals / open decisions
-
-- Non-goals: vDOM in `.ks`, CSS-in-`.ks`, reimplementing React/Vite/Next.js, remote imports.
-- Open: explicit `key` vs auto file+func key (lean explicit); sync-only `js_call` v1;
-  Tailwind pass-through vs runtime class map; `[id]` syntax (`user_[id].ks` vs `user/:id`).
+- `key`: explicit required (no index keys); auto file+func key later?
+- `js_call`: sync-only v1; promises later.
+- State across navigations/ISR: full reload v1.
+- Nested layouts (`_app.ks`): spec TBD. Tests lag features: phase gates enforce.
