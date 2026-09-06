@@ -311,6 +311,11 @@ func main() {
 			fmt.Println("error:", err)
 			os.Exit(1)
 		}
+	case "debug":
+		if err := cmdDebug(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
 	case "version", "--version", "-V":
 		fmt.Println("ks-fusion", toolVersion)
 	case "help", "--help", "-h":
@@ -370,7 +375,8 @@ Commands:
    fusion build-js [appdir] [--out DIR]  transpile pages to JS per-route + hashes
    fusion build-ssg [appdir] [--out DIR]  pre-render routes to HTML+JSON (ISR)
    fusion audit [appdir]      check lock vs registry (yanked/updates/checksums)
-   fusion lsp                 minimal LSP (hover/goto-def/format) for VS Code
+   fusion lsp                 LSP (hover/goto-def/rename/diagnostics/format) for VS Code
+   fusion debug <file.ks> [--break LINE] [--trace]  breakpoints + trace + globals
    fusion prog.ks|lib.kslib|lib.ksx   run a single file directly.
                               .kslib bundles start with #!/usr/bin/env fusion,
                               so: chmod +x lib.kslib && ./lib.kslib

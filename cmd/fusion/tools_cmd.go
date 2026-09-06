@@ -234,3 +234,53 @@ func cmdBench(args []string) error {
 	}
 	return err
 }
+
+func cmdDebug(args []string) error {
+	target := ""
+	var breaks []int
+	trace := false
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--help" || a == "-h":
+			fmt.Println("usage: fusion debug <file.ks> [--break LINE]... [--trace]\n  breakpoints + step trace + globals snapshot (real debugger, not print-only)")
+			return nil
+		case a == "--break" || a == "-b":
+			if i+1 >= len(args) {
+				return fmt.Errorf("usage: fusion debug <file.ks> [--break LINE]")
+			}
+			i++
+			v, err := strconv.Atoi(args[i])
+			if err != nil || v <= 0 {
+				return fmt.Errorf("bad --break %q: want line >= 1", args[i])
+			}
+			breaks = append(breaks, v)
+		case strings.HasPrefix(a, "--break="):
+			v, err := strconv.Atoi(strings.TrimPrefix(a, "--break="))
+			if err != nil || v <= 0 {
+				return fmt.Errorf("bad --break %q: want line >= 1", a)
+			}
+			breaks = append(breaks, v)
+		case a == "--trace" || a == "-t":
+			trace = true
+		case strings.HasPrefix(a, "-"):
+			return fmt.Errorf("unknown flag %q (usage: fusion debug <file.ks> [--break LINE] [--trace])", a)
+		default:
+			if target != "" {
+				return fmt.Errorf("usage: fusion debug <file.ks> (single target only)")
+			}
+			target = a
+		}
+	}
+	if target == "" {
+		return fmt.Errorf("usage: fusion debug <file.ks> [--break LINE] [--trace]")
+	}
+	res, err := tools.DebugFile(target, breaks, trace)
+	if trace {
+		for _, t := range res.Trace {
+			fmt.Println("trace:", t)
+		}
+	}
+	fmt.Print(tools.FormatHits(res))
+	return err
+}

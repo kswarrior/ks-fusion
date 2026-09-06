@@ -1,10 +1,10 @@
 {
   "name": "ks-fusion",
   "displayName": "ks-fusion",
-  "description": "Language support for ks-fusion (.ks): LSP hover/goto-def/rename/format-on-save via `fusion lsp`.",
-  "version": "0.1.0",
+  "description": "Language support for ks-fusion (.ks): full LSP (hover/goto-def/rename/diagnostics/format-on-save) via `fusion lsp` + `fusion debug` breakpoints.",
+  "version": "0.2.0",
   "engines": { "vscode": "^1.80.0" },
-  "categories": ["Programming Languages"],
+  "categories": ["Programming Languages", "Debuggers"],
   "activationEvents": ["onLanguage:ks"],
   "main": "./extension.js",
   "contributes": {
@@ -23,13 +23,50 @@
         "path": "./syntaxes/ks.tmLanguage.json"
       }
     ],
+    "breakpoints": [{ "language": "ks" }],
+    "debuggers": [
+      {
+        "type": "ks-fusion",
+        "label": "ks-fusion Debug",
+        "program": "./extension.js",
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": { "type": "string", "description": "Path to .ks file to debug" },
+              "stopOnEntry": { "type": "boolean", "default": false },
+              "trace": { "type": "boolean", "default": false }
+            }
+          }
+        },
+        "configurationSnippets": [
+          {
+            "label": "ks-fusion: Launch .ks",
+            "description": "Debug a .ks file with fusion debug",
+            "body": {
+              "type": "ks-fusion",
+              "request": "launch",
+              "name": "Debug .ks",
+              "program": "${file}",
+              "trace": false
+            }
+          }
+        ]
+      }
+    ],
     "configuration": {
       "title": "ks-fusion",
       "properties": {
         "ks-fusion.serverPath": {
           "type": "string",
           "default": "fusion",
-          "description": "Path to the fusion binary (used as `fusion lsp`)."
+          "description": "Path to the fusion binary (used as `fusion lsp` + `fusion debug`)."
+        },
+        "ks-fusion.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Trace LSP communication."
         }
       }
     }
