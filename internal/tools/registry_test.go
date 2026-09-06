@@ -25,6 +25,9 @@ func TestRegistryPublishPull(t *testing.T) {
 	tmpReg := t.TempDir()
 	tmpOut := t.TempDir()
 	root := findRoot(t)
+	old := os.Getenv("FUSION_REGISTRY")
+	os.Setenv("FUSION_REGISTRY", tmpReg)
+	defer os.Setenv("FUSION_REGISTRY", old)
 	// publish hello-lib
 	if _, err := Publish(filepath.Join(root, "tests/hello-lib"), tmpReg); err != nil {
 		t.Fatalf("publish failed: %v", err)
@@ -39,10 +42,6 @@ func TestRegistryPublishPull(t *testing.T) {
 		t.Fatalf("pulled file missing: %v", err)
 	}
 	// yank
-	// set env to use tmpReg
-	old := os.Getenv("FUSION_REGISTRY")
-	os.Setenv("FUSION_REGISTRY", tmpReg)
-	defer os.Setenv("FUSION_REGISTRY", old)
 	if err := Yank("hello-lib", "0.1.0", false); err != nil {
 		t.Fatalf("yank failed: %v", err)
 	}
