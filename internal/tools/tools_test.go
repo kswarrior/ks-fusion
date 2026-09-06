@@ -65,6 +65,70 @@ func TestVetDetects(t *testing.T) {
 	}
 }
 
+func TestVetExhaustiveEnum(t *testing.T) {
+	dir := t.TempDir()
+	// exhaustive: all variants covered, no default needed
+	okSrc := "enum Color { Red, Green, Blue }\nlet c: Color = \"Red\"\nswitch c {\n case \"Red\" { print 1 }\n case \"Green\" { print 2 }\n case \"Blue\" { print 3 }\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "ok.ks"), []byte(okSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := VetTarget(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, is := range issues {
+		if is.Rule == "exhaustive-switch" {
+			t.Fatalf("want exhaustive ok, got %v", issues)
+		}
+	}
+	// non-exhaustive: missing Blue, no default
+	os.Remove(filepath.Join(dir, "ok.ks"))
+	badSrc := "enum Color { Red, Green, Blue }\nlet c: Color = \"Red\"\nswitch c {\n case \"Red\" { print 1 }\n case \"Green\" { print 2 }\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "bad.ks"), []byte(badSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, _ = VetTarget(dir, false)
+	found := false
+	for _, is := range issues {
+		if is.Rule == "exhaustive-switch" && contains(is.Msg, "Blue") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want exhaustive-switch missing Blue, got %v", issues)
+	}
+	// default rescues non-exhaustive
+	os.Remove(filepath.Join(dir, "bad.ks"))
+	defSrc := "enum Color { Red, Green }\nlet c: Color = \"Red\"\nswitch c {\n case \"Red\" { print 1 }\n default { print 9 }\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "def.ks"), []byte(defSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, _ = VetTarget(dir, false)
+	for _, is := range issues {
+		if is.Rule == "exhaustive-switch" {
+			t.Fatalf("default must satisfy exhaustiveness, got %v", issues)
+		}
+	}
+}
+
+func TestVetExhaustiveBool(t *testing.T) {
+	dir := t.TempDir()
+	src := "let b: bool = true\nswitch b {\n case true { print 1 }\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "b.ks"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	issues, _ := VetTarget(dir, false)
+	found := false
+	for _, is := range issues {
+		if is.Rule == "exhaustive-switch" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want bool exhaustiveness error, got %v", issues)
+	}
+}
+
 func TestSemver(t *testing.T) {
 	cases := []struct {
 		ver, spec string

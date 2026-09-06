@@ -702,8 +702,7 @@ func (v *vetter) walkStmt(st *frontend.Stmt) {
 	case frontend.StmtDefer:
 		v.walkExpr(st.Expr)
 	case frontend.StmtBreak, frontend.StmtContinue:
-	case frontend.StmtStruct, frontend.StmtEnum:
-		// handled in pre-pass above (no runtime vars to walk)
+		// StmtStruct/StmtEnum handled at top of walkStmt (no body to walk)
 	}
 }
 
