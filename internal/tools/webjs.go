@@ -34,7 +34,7 @@ func RunWebWithWatch(appDir string, port int, watch bool) error {
 	}
 	mux := http.NewServeMux()
 	isr := newISRCache()
-	attachWebRoutes(mux, cfg, watcher, isr, watch)
+	_ = attachWebRoutes(mux, cfg, watcher, isr, watch)
 	addr := fmt.Sprintf(":%d", port)
 	extra := "SSR + /api/*, ?format=json"
 	if watch {
@@ -63,8 +63,6 @@ func attachWebRoutes(mux *http.ServeMux, cfg *config.Config, watcher *webWatcher
 		}
 		return vmToHTMLWithWatch(vmJSON, route, watch), "text/html; charset=utf-8", vmJSON, true
 	}
-	// background ISR regen (v2.5): refresh entries expiring within 10s, every 5s
-	go isr.startBackground(5*time.Second, 10*time.Second)()
 	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
 		route := r.URL.Query().Get("route")
 		if route == "" {
