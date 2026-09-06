@@ -14,20 +14,21 @@
 | Kernel, drivers, games, hard realtime | C / C++ / Rust | No manual memory, no pointers, no SIMD |
 | Browser UI / React / SSR | Next.js (TS) | `frontend/main.ks` is console logic today, not DOM |
 | CRUD + auth + admin panel tomorrow | PHP Laravel / Python Django | No ORM, migrations, HTTP server stdlib yet |
+| Numerical / scientific / matrices | Julia | `.ks` has no vectorized ops, no DataFrames/plots, ~100x slower loop math |
 | Quick scripts, rules, gluing, learning | ks-fusion | — this is the sweet spot |
 | npm / PyPI ecosystem | Node.js / Python | `.ks` has 97 builtins (interpreter; 7 in VM subset) + local `.kslib`/`.ksb` only |
 
 ## Big table
 
-|  | ks-fusion (.ks) | Go | Rust | C | C++ | Node.js (JS/TS) | Python | Next.js | PHP Laravel |
-|---|---|---|---|---|---|---|---|---|---|
-| Model | tree-walk interpreter (full language) + bytecode VM subset v0.1 (`.ksb-1` JSON, `fusion compile`) | compiled, GC | compiled, no GC (borrowck) | compiled, manual | compiled, RAII | V8 JIT | interpreted (+C ext) | React framework on Node | interpreted + framework |
-| Typing | gradual: dynamic + `: type` annotations, `is`, `?.`/`??`, `ok`/`err` results | static, interfaces, generics | static, traits, enums, `Result/Option` | weak static, pointers | static, templates, classes | dynamic + optional TS | dynamic + hints | TS-typed components | dynamic |
-| Perf | medium (scripts, bots, CLIs; interpreter O(n log n) sort, O(log n) pow, lock-free scopes; VM v0.1 subset claims no speedup yet) | high (servers) | highest (systems) | highest | highest | medium-high (I/O) | medium (glue/AI) | medium (SSR) | medium (CRUD) |
-| Concurrency | `go` + `chan`/`select` (`recv`/`send`/`timeout`/`default`, `for v in chan`, goroutines underneath; interpreter only, VM v0.1 has no `go`/`chan`) | goroutines + `select` | `async/tokio`, threads | threads, manual | threads/`async` | event loop + workers | threads/GIL + `asyncio` | server/client components | processes + queues |
-| Packaging | `fusion.toml` + `.kslib` JSON (`kslib-1`), local `test-releases/`/`target/`; bytecode sidecar `.ksb` JSON (`ksb-1`, subset only) | `go.mod` + proxy | `cargo` + crates.io | make/cmake | cmake/vcpkg/conan | npm/pnpm | pip/poetry | npm + Vercel | composer + artisan |
-| Binary | needs `fusion` on PATH (shebang), no `--bin` yet (`fusion compile` emits portable `.ksb`, still run by `fusion`) | single static binary | single binary | binary | binary | needs node/runtime | needs python | needs node | needs php+server |
-| Best for | learning, automation, rules engines, small backends | APIs, DevOps, cloud | systems, WASM, games | OS, embedded | engines, trading, desktop | APIs, realtime, SSR | scripts, data, AI | fullstack React apps | monolith CRUD apps |
+|  | ks-fusion (.ks) | Go | Rust | C | C++ | Node.js (JS/TS) | Python | Julia | Next.js | PHP Laravel |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Model | tree-walk interpreter (full language) + bytecode VM subset v0.1 (`.ksb-1` JSON, `fusion compile`) | compiled, GC | compiled, no GC (borrowck) | compiled, manual | compiled, RAII | V8 JIT | interpreted (+C ext) | JIT (LLVM), GC, multiple dispatch | React framework on Node | interpreted + framework |
+| Typing | gradual: dynamic + `: type` annotations, `is`, `?.`/`??`, `ok`/`err` results | static, interfaces, generics | static, traits, enums, `Result/Option` | weak static, pointers | static, templates, classes | dynamic + optional TS | dynamic + hints | dynamic + parametric types, multiple dispatch | TS-typed components | dynamic |
+| Perf | medium (scripts, bots, CLIs; interpreter O(n log n) sort, O(log n) pow, lock-free scopes; VM v0.1 subset claims no speedup yet) | high (servers) | highest (systems) | highest | highest | medium-high (I/O) | medium (glue/AI) | highest (numeric; C-speed loops via JIT) | medium (SSR) | medium (CRUD) |
+| Concurrency | `go` + `chan`/`select` (`recv`/`send`/`timeout`/`default`, `for v in chan`, goroutines underneath; interpreter only, VM v0.1 has no `go`/`chan`) | goroutines + `select` | `async/tokio`, threads | threads, manual | threads/`async` | event loop + workers | threads/GIL + `asyncio` | threads + distributed + `async` | server/client components | processes + queues |
+| Packaging | `fusion.toml` + `.kslib` JSON (`kslib-1`), local `test-releases/`/`target/`; bytecode sidecar `.ksb` JSON (`ksb-1`, subset only) | `go.mod` + proxy | `cargo` + crates.io | make/cmake | cmake/vcpkg/conan | npm/pnpm | pip/poetry | `Pkg` + General registry | npm + Vercel | composer + artisan |
+| Binary | needs `fusion` on PATH (shebang), no `--bin` yet (`fusion compile` emits portable `.ksb`, still run by `fusion`) | single static binary | single binary | binary | binary | needs node/runtime | needs python | needs julia runtime (PackageCompiler possible, heavy) | needs node | needs php+server |
+| Best for | learning, automation, rules engines, small backends | APIs, DevOps, cloud | systems, WASM, games | OS, embedded | engines, trading, desktop | APIs, realtime, SSR | scripts, data, AI | numerics, science, matrices | fullstack React apps | monolith CRUD apps |
 
 See `docs/futures.md` for what closes each gap (`--bin`, `http_*`, registry, `--js`).
 `fusion compile` (`internal/compiler`, `.ksb-1` + `fusion prog.ksb` + `--dis`/`--run`)
@@ -45,19 +46,19 @@ Simplicity + Build/Deploy + Frontend + Maturity = 100`.
 
 ## Scores — total out of 100
 
-| Dim (max 10) | .ks | Go | Rust | C | C++ | Node | Python | Next.js | Laravel |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Perf | 5 | 8 | 10 | 10 | 10 | 7 | 5 | 7 | 5 |
-| Types | 6 | 8 | 10 | 5 | 8 | 6 | 6 | 8 | 5 |
-| Concurrency | 8 | 9 | 8 | 5 | 7 | 7 | 5 | 6 | 4 |
-| Stdlib | 4 | 9 | 8 | 6 | 8 | 8 | 10 | 8 | 8 |
-| Ecosystem | 3 | 8 | 8 | 6 | 7 | 10 | 10 | 10 | 8 |
-| Tooling | 4 | 9 | 9 | 7 | 8 | 9 | 8 | 9 | 8 |
-| Simplicity | 9 | 7 | 5 | 4 | 4 | 7 | 10 | 6 | 8 |
-| Build/Deploy | 4 | 10 | 9 | 8 | 8 | 6 | 5 | 7 | 6 |
-| Frontend | 3 | 5 | 6 | 2 | 4 | 8 | 5 | 10 | 7 |
-| Maturity | 3 | 9 | 8 | 9 | 9 | 9 | 10 | 8 | 8 |
-| **Total /100** | **49** | **82** | **81** | **62** | **73** | **77** | **74** | **79** | **67** |
+| Dim (max 10) | .ks | Go | Rust | C | C++ | Node | Python | Julia | Next.js | Laravel |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Perf | 5 | 8 | 10 | 10 | 10 | 7 | 5 | 9 | 7 | 5 |
+| Types | 6 | 8 | 10 | 5 | 8 | 6 | 6 | 8 | 8 | 5 |
+| Concurrency | 8 | 9 | 8 | 5 | 7 | 7 | 5 | 7 | 6 | 4 |
+| Stdlib | 4 | 9 | 8 | 6 | 8 | 8 | 10 | 8 | 8 | 8 |
+| Ecosystem | 3 | 8 | 8 | 6 | 7 | 10 | 10 | 7 | 10 | 8 |
+| Tooling | 4 | 9 | 9 | 7 | 8 | 9 | 8 | 7 | 9 | 8 |
+| Simplicity | 9 | 7 | 5 | 4 | 4 | 7 | 10 | 7 | 6 | 8 |
+| Build/Deploy | 4 | 10 | 9 | 8 | 8 | 6 | 5 | 5 | 7 | 6 |
+| Frontend | 3 | 5 | 6 | 2 | 4 | 8 | 5 | 4 | 10 | 7 |
+| Maturity | 3 | 9 | 8 | 9 | 9 | 9 | 10 | 7 | 8 | 8 |
+| **Total /100** | **49** | **82** | **81** | **62** | **73** | **77** | **74** | **69** | **79** | **67** |
 
 Extra stacks (same rubric): `TypeScript 79`, `Java/Kotlin/Spring 78`,
 `Vite 77`, `Deno/Bun 77`, `React 76`, `Lua 58`, `Ruby/Rails 68`, `Bash 45`.
