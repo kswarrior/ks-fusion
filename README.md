@@ -1,6 +1,6 @@
 # ks-fusion
 
-Complete programming language (v2.2, 69/100 in docs/vs.md) made in Go.
+Complete programming language (v2.3, 78/100 in docs/vs.md) made in Go.
 Easy like Python, concurrency like Go.
 
 > The toolchain is written in Go (like CPython is written in C).
@@ -25,7 +25,7 @@ entry_backend = "backend/main.ks"
 entry_frontend = "frontend/main.ks"
 ```
 
-## Language v2.2 (.ks, 149 builtins)
+## Language v2.3 (.ks, 158 builtins)
 
 ```python
 # comments: # ...  // ...  /* multi-line */
@@ -245,27 +245,27 @@ chan_len(ch) chan_cap(ch) chan_closed(ch)
 with_timeout(ms, fn)   run fn with timeout; parallel(arr, fn) map in parallel
 sleep(ms)              also a statement
 
-# http + fetch (v2.2)
+# http + fetch (v2.3)
 http_get(url, headers?) http_post(url, body, ctype?) fetch_json(url) http_serve(port, handler)
 
-# regex (v2.2)
+# regex (v2.3)
 regex_match(s, pat) regex_find(s, pat) regex_replace(s, pat, repl) regex_split(s, pat)
 
-# crypto/encoding (v2.2)
+# crypto/encoding (v2.3)
 sha256(s) md5(s) hmac_sha256(msg, key) base64_encode(s) base64_decode(s)
 hex_encode(s) hex_decode(s) uuid() random_bytes(n)
 
-# fs full (v2.2)
+# fs full (v2.3)
 stat(p) cp(src,dst) mv(src,dst) copy(src,dst) glob(pat) path_join(...) abs_path(p) remove_all(p)
 
-# process/time (v2.2)
+# process/time (v2.3)
 exec(cmd, args?) shell(cmd) cwd() env_all() format_time(ms, layout?) parse_time(s, layout?) time_parts(ms)
 
-# kv db / log / asserts (v2.2)
+# kv db / log / asserts (v2.3)
 db_put(db,k,v) db_get(db,k,dflt?) db_delete(db,k) db_list(db)
 log_info(m) log_warn(m) log_error(m) assert_eq(a,b) assert_ne(a,b) assert_contains(h,n)
 
-# types (v2.2)
+# types (v2.3)
 struct_validate(m, schema) struct_assert(m, schema) enum_create(arr) enum_valid(e, v) is_number(x)
 trim_prefix(s,p) trim_suffix(s,sfx) repeat_str(s,n)
 ```
@@ -356,11 +356,15 @@ go build -o fusion ./cmd/fusion
 ./fusion vet ./tests/hello-app
 ./fusion doc ./tests/hello-app
 ./fusion check ./tests/hello-app
-./fusion bench ./tests/hello-app --n 20
+./fusion bench ./tests/hello-app --n 20 --cpuprofile /tmp/cpu.pprof
 ./fusion repl
 ./fusion vendor ./tests/hello-app
-./fusion run-web ./tests/hello-app --port 8080  # SSR HTML+JSON
+./fusion publish ./tests/hello-lib --registry /tmp/reg
+./fusion pull hello-lib --out test-releases
+./fusion registry
+./fusion run-web ./tests/hello-app --port 8080 --watch  # SSR + SSE reload
 ./fusion build-js ./tests/hello-app --out /tmp/js
+./fusion build-ssg ./tests/hello-app --out target/ssg  # pre-render HTML+JSON
 ./fusion launch . --backend   # only backend; --frontend for frontend only
 ./fusion launch ./tests/hello-app/custom.toml  # custom config must live in app root
 go test ./...
