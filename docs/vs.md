@@ -201,6 +201,35 @@ Difference: `.ks` adds `go/chan/select/defer/switch`, gradual `: type` annotatio
 Pick Python for data/AI/science/ops (ecosystem wins).
 Pick `.ks` for learning concurrency early or embedding a tiny Go-based runtime.
 
+### vs Julia (numerical computing language)
+
+**Score: ks-fusion 49/100 vs Julia 69/100 — Julia wins by 20.**
+
+Julia = JIT-compiled (LLVM) + multiple dispatch + parametric types.
+Feels like Python/MATLAB for math, runs like C for loops/matrices.
+`.ks` = tree-walk interpreted + gradual `: type` checks at runtime, no
+vectorized ops, no DataFrames/plots.
+
+```julia
+# Julia: vectorized + fast loops, multiple dispatch
+f(x::Number) = x * 2
+A = [1, 2, 3] .* 2
+s = sum(i * i for i in 1:10_000)
+```
+
+```python
+# .ks v2.1: scalar loops only, no broadcasting
+let total = 0
+for i in range(10000) {
+  total += i * i
+}
+print total
+```
+
+Pick Julia for numerics, science, matrices, simulations (that's its sweet spot).
+Pick `.ks` for Go-style `go/chan/select` concurrency teaching, tiny CLIs,
+and embedding a Go-based runtime where Julia's heavy JIT + slow startup is overkill.
+
 ### vs Next.js (framework, not language)
 
 **Score: ks-fusion 49/100 vs Next.js 79/100 — Next.js wins by 30 (different category).**
@@ -316,14 +345,15 @@ Pick `.ks` for sidecar scripts (data munging, checks, bots) next to Laravel.
 | 9 | React | 76 | +27, UI components (different category) |
 | 10 | Python | 74 | +25, data/AI/ecosystem |
 | 11 | C++ | 73 | +24, engines/trading |
-| 12 | Ruby/Rails | 68 | +19, convention CRUD |
-| 13 | PHP Laravel | 67 | +18, monolith CRUD |
-| 14 | C | 62 | +13, kernels/embedded |
-| 15 | Lua | 58 | +9, embedding |
-| 16 | **ks-fusion v2.1 + compiler v0.1** | **49** | **baseline — wins on simplicity (9/10), leads Bash by 4; Perf 5/10 after tree-walk opts (VM subset unrated)** |
-| 17 | Bash | 45 | -4, tiny pipes |
+| 12 | Julia | 69 | +20, numerics/science |
+| 13 | Ruby/Rails | 68 | +19, convention CRUD |
+| 14 | PHP Laravel | 67 | +18, monolith CRUD |
+| 15 | C | 62 | +13, kernels/embedded |
+| 16 | Lua | 58 | +9, embedding |
+| 17 | **ks-fusion v2.1 + compiler v0.1** | **49** | **baseline — wins on simplicity (9/10), leads Bash by 4; Perf 5/10 after tree-walk opts (VM subset unrated)** |
+| 18 | Bash | 45 | -4, tiny pipes |
 
-Grand total (sum of all 17 totals) = `1202 / 1700`, average `70.7/100`.
+Grand total (sum of all 18 totals) = `1271 / 1800`, average `70.6/100`.
 `.ks` total `49/100` reflects v2.1 + compiler v0.1 reality: best at learning/scripts,
 at Python/Node parity on Types (6/10) and Rust parity on Concurrency (8/10),
 at Python parity on Perf (5/10) after tree-walk opts;
@@ -456,9 +486,10 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
 1. Browser UI? → React + Vite + TS, or Next.js for SSR.
 2. CRUD + login + billing next week? → Laravel / Django / Rails / Next.js.
 3. 100k RPS / embedded / game loop? → Go / Rust / C++ / C.
-4. Script, bot, rule engine, teaching `go/chan/select`, prototype? → `.ks` (interpreter).
+4. Matrices / science / simulations? → Julia (or Python + numpy if ecosystem matters more).
+5. Script, bot, rule engine, teaching `go/chan/select`, prototype? → `.ks` (interpreter).
    Pure arithmetic/control-flow/funcs with no concurrency? → try `fusion compile --run` (VM subset).
-5. Need `http/DB` in `.ks` today? → shell out or wait — see `docs/futures.md` P1 stdlib.
+6. Need `http/DB` in `.ks` today? → shell out or wait — see `docs/futures.md` P1 stdlib.
 
 ## Honest limits of `.ks` v2.1 + compiler v0.1 (do not hide)
 
