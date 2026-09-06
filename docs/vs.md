@@ -155,7 +155,7 @@ What the `.ks` 87 does and does not mean (read before citing 87; v2.5 evidence f
   `release/fusion` rebuilt (`ks-fusion v2.5`), per-file `fusion test --timeout`
   (`main.go:1093` `runTestFileTimeout`), repeat-safe TCP
   (`stdlib_ext2_test.go:32` port 0 + `tcp_shutdown`; `-count=3` green),
-  CI gate (`.github/workflows/ci.yml`: vet + `go test` + repeat + fmt + vet/check).
+  CI gate (`ci.sh`: vet + `go test` + repeat + fmt + vet/check).
   Still: TLS/WS-server/`--bin`/`--target` E2E gaps remain. 8 holds.
 - 87 is breadth-for-scripts/services on this rubric, not Go/Rust depth parity. See “Why not Go/Rust-class” + “Honest limits”.
 
@@ -626,7 +626,7 @@ proves the pipeline with a real 2.3x fib win (see `docs/bench.md`).
   default 30s; hung file → error, not hang).
 - Repeat-safe: `stdlib_ext2_test.go:32` port 0 + `tcp_shutdown`;
   `go test ./internal/backend/ -run TestV23TCP -count=3` green.
-- CI: `.github/workflows/ci.yml` (vet + `go test ./...` + repeat-safe +
+- CI: `ci.sh` (vet + `go test ./...` + repeat-safe +
   `fmt --check` + `vet`/`check` apps) — repo gate, not `workflow_dispatch`-only.
 
 ## Why not Go/Rust-class (v2.5 gaps + what parity needs)
@@ -838,7 +838,7 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
   (incl. new v0.2/audit/LSP/debug/diff/ISR/SQL tests) + `go test -bench`
   artifact (`docs/bench.md`); TLS-server/`--bin`/`--target` E2E gaps remain.
   `retest.log` is a leftover (`retest.sh` does not exist). CI gate is
-  `.github/workflows/ci.yml` (`go vet` + `go test` + repeat-safe + fmt + vet/check).
+  `ci.sh` (`go vet` + `go test` + repeat-safe + fmt + vet/check).
   Repeat-safe verified: `go test ./internal/backend/ -run TestV23TCP -count=3`
   green (port 0 + `tcp_shutdown`).
 
@@ -902,5 +902,5 @@ grep -n "innerJoin\|groupCount\|postgres_open" internal/backend/stdlib_ext3.go |
 grep -n "VerifyRegistry\|checkTransitive" internal/tools/audit.go | head
 grep -n "DiffViewModels\|startBackground" internal/tools/diff.go internal/tools/webjs.go | head
 grep -n "runTestFileTimeout" cmd/fusion/main.go | head
-ls .github/workflows/ci.yml release/fusion && ./release/fusion version
+ls ci.sh release/fusion && ./release/fusion version
 ```
