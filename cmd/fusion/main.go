@@ -85,6 +85,11 @@ func main() {
 			fmt.Println("error:", err)
 			os.Exit(1)
 		}
+	case "launch":
+		if err := cmdLaunch(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
 	case "build":
 		dir := "."
 		release := false
@@ -136,6 +141,11 @@ Commands:
   fusion new [--lib] <dir>   create app (backend/ frontend/ fusion.toml)
                              or library with --lib (src/lib.ks, type="lib")
   fusion run [appdir]        run backend + frontend together
+  fusion launch [target] [--backend] [--frontend]
+                             like package.json scripts: target is app dir (default ".")
+                             or explicit config file (fusion.toml / custom.toml);
+                             no flag = both, --backend = backend only,
+                             --frontend = frontend only
   fusion build [dir] [--release] [--out DIR]
                              app: parse-check entries + verify [dependencies]
                              lib: pack .kslib bundle into test-releases/
@@ -358,35 +368,125 @@ func cmdRun(dir string) error {
 	if err != nil {
 		return err
 	}
-	bp, err := frontend.ParseFile(cfg.BackendPath())
+	return runWithConfig(cfg, true, true)
+}
+
+// cmdLaunch is the package.json-scripts style entry:
+// `fusion launch .` runs backend+frontend from ./fusion.toml,
+// `fusion launch <configfile>` uses that file (custom name allowed),
+// `fusion launch --backend .` / `--frontend .` runs only one side.
+func cmdLaunch(args []string) error {
+	target := "."
+	wantBackend := false
+	wantFrontend := false
+	seenBackend := false
+	seenFrontend := false
+	for _, a := range args {
+		switch a {
+		case "--backend", "-b", "--only-backend", "--backend-only":
+			wantBackend = true
+			seenBackend = true
+		case "--frontend", "-f", "--only-frontend", "--frontend-only":
+			wantFrontend = true
+			seenFrontend = true
+		case "--both", "--all":
+			wantBackend = true
+			wantFrontend = true
+			seenBackend = true
+			seenFrontend = true
+		case "--help", "-h":
+			fmt.Println(`usage: fusion launch [target] [--backend] [--frontend]
+  target: app dir (default ".") or config file (fusion.toml, custom.toml)
+  no flag: run backend + frontend together`)
+			return nil
+		default:
+			if strings.HasPrefix(a, "-") {
+				return fmt.Errorf("unknown flag %q (usage: fusion launch [target] [--backend] [--frontend])", a)
+			}
+			if target != "." {
+				return fmt.Errorf("usage: fusion launch [target] [--backend] [--frontend] (single target only)")
+			}
+			target = a
+		}
+	}
+	if !seenBackend && !seenFrontend {
+		wantBackend = true
+		wantFrontend = true
+	}
+	cfg, err := resolveLaunchConfig(target)
 	if err != nil {
 		return err
 	}
-	fp, err := frontend.ParseFile(cfg.FrontendPath())
+	return runWithConfig(cfg, wantBackend, wantFrontend)
+}
+
+// resolveLaunchConfig loads either an app dir (with fusion.toml inside)
+// or an explicit config file path.
+func resolveLaunchConfig(target string) (*config.Config, error) {
+	fi, err := os.Stat(target)
+	if err != nil {
+		return nil, err
+	}
+	if fi.IsDir() {
+		return config.Load(target)
+	}
+	return config.LoadFile(target)
+}
+
+func runWithConfig(cfg *config.Config, runBackend, runFrontend bool) error {
+	dir := cfg.Dir
+	if !runBackend && !runFrontend {
+		return fmt.Errorf("nothing to run (need --backend and/or --frontend)")
+	}
+	if runBackend && runFrontend {
+		bp, err := frontend.ParseFile(cfg.BackendPath())
+		if err != nil {
+			return err
+		}
+		fp, err := frontend.ParseFile(cfg.FrontendPath())
+		if err != nil {
+			return err
+		}
+		fmt.Printf("== %s v%s ==\n", cfg.Name, cfg.Version)
+		// Fusion: backend + frontend run together (concurrently).
+		// Imports resolve relative to the app dir.
+		var wg sync.WaitGroup
+		var bErr, fErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			fmt.Println("[backend]")
+			bErr = backend.RunWithDir(bp, dir)
+		}()
+		go func() {
+			defer wg.Done()
+			fmt.Println("[frontend]")
+			fErr = backend.RunWithDir(fp, dir)
+		}()
+		wg.Wait()
+		if bErr != nil {
+			return bErr
+		}
+		return fErr
+	}
+	var prog *frontend.Program
+	var label string
+	var path string
+	if runBackend {
+		label = "[backend]"
+		path = cfg.BackendPath()
+	} else {
+		label = "[frontend]"
+		path = cfg.FrontendPath()
+	}
+	var err error
+	prog, err = frontend.ParseFile(path)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("== %s v%s ==\n", cfg.Name, cfg.Version)
-	// Fusion: backend + frontend run together (concurrently).
-	// Imports resolve relative to the app dir.
-	var wg sync.WaitGroup
-	var bErr, fErr error
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		fmt.Println("[backend]")
-		bErr = backend.RunWithDir(bp, dir)
-	}()
-	go func() {
-		defer wg.Done()
-		fmt.Println("[frontend]")
-		fErr = backend.RunWithDir(fp, dir)
-	}()
-	wg.Wait()
-	if bErr != nil {
-		return bErr
-	}
-	return fErr
+	fmt.Printf("== %s v%s (%s only) ==\n", cfg.Name, cfg.Version, label)
+	fmt.Println(label)
+	return backend.RunWithDir(prog, dir)
 }
 
 func cmdCompile(args []string) error {
