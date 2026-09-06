@@ -485,34 +485,11 @@ Pick `.ks` for sidecar scripts/services (data munging, checks, bots, `--bin` wor
 
 ### More (short, all scored out of 100)
 
-* **Deno/Bun 77/100 vs .ks 80/100 (+3):** pick for secure TS sandbox / fast runtime; `.ks` is simpler but far smaller.
-* **Java/Kotlin/Spring 78/100 vs .ks 80/100 (+2):** pick for enterprise monoliths, JPA, strict OOP; `.ks` for glue/services.
-* **Lua 58/100 vs .ks 80/100 (+22):** Lua is smaller/faster to embed; `.ks` has Go-style `select` + `fusion` CLI + `--bin`/file-registry/narrow-audit + 166 builtins out of box.
-* **Ruby/Rails 68/100 vs .ks 80/100 (+12):** pick Rails for convention CRUD; `.ks` syntax will feel familiar, plus `--bin`/concurrency.
-* **Bash 45/100 vs .ks 80/100 (+35):** pick Bash for 5-line pipes; `.ks` wins past 50 lines (`try/catch`, maps, JSON, `is`/`?.`/`??`, `select`, `http/regex/crypto`, `--bin`, Windows portability via `--target`).
-
-## Totals & ranking (out of 100)
-
-| Rank | Stack | Total /100 | Verdict vs .ks (80) |
-|---:|---|---:|---|
-| 1 | Go | 82 | +2, prod servers / single binary depth (ahead on speed/types/maturity) |
-| 2 | Rust | 81 | +1, systems / safety depth |
-| 3 | **ks-fusion v2.4 source (166 builtins = 96+52+10+8; union/generic annotations; sqlite-subset + cancel; lock/semver/vendor + file-registry + narrow audit; minimal LSP; --bin/-trimpath/cache; run-web HMR-patch/ISR/layouts + build-js/hash + build-ssg; use_state; TCP/TLS-min; range/sorted opts; literal folding)** | **80** | **baseline — leads on simplicity (9/10) + script breadth; every +1 above v2.3-78 is breadth with minimal depth (see “What 80 does/does not mean” + “Honest limits”). Strict depth-parity would be lower.** |
-| 4 | Next.js | 79 | -1, browser UI depth (different category) |
-| 4 | TypeScript | 79 | -1, typed UI/logic depth |
-| 6 | Java/Kotlin/Spring | 78 | -2, enterprise depth |
-| 7 | Node.js | 77 | -3, APIs / npm depth |
-| 7 | Vite | 77 | -3, frontend build/HMR depth (different category) |
-| 7 | Deno/Bun | 77 | -3, typed runtime |
-| 10 | React | 76 | -4, UI components (different category) |
-| 11 | Python | 74 | -6, data/AI/ecosystem depth |
-| 12 | C++ | 73 | -7, engines/trading |
-| 13 | Julia | 69 | -11, numerics/science depth |
-| 14 | Ruby/Rails | 68 | -12, convention CRUD |
-| 15 | PHP Laravel | 67 | -13, monolith CRUD |
-| 16 | C | 62 | -18, kernels/embedded |
-| 17 | Lua | 58 | -22, embedding |
-| 18 | Bash | 45 | -35, tiny pipes |
+* **Deno/Bun 77/100 vs .ks 87/100 (+10):** pick for secure TS sandbox / fast runtime; `.ks` is simpler but far smaller.
+* **Java/Kotlin/Spring 78/100 vs .ks 87/100 (+9):** pick for enterprise monoliths, JPA, strict OOP; `.ks` for glue/services.
+* **Lua 58/100 vs .ks 87/100 (+29):** Lua is smaller/faster to embed; `.ks` has Go-style `select` + `fusion` CLI + `--bin`/file-registry/real-audit + 177 builtins out of box.
+* **Ruby/Rails 68/100 vs .ks 87/100 (+19):** pick Rails for convention CRUD; `.ks` syntax will feel familiar, plus `--bin`/concurrency.
+* **Bash 45/100 vs .ks 87/100 (+42):** pick Bash for 5-line pipes; `.ks` wins past 50 lines (`try/catch`, maps, JSON, `is`/`?.`/`??`, `select`, `http/regex/crypto`, `--bin`, Windows portability via `--target`).
 
 ## Totals & ranking (out of 100)
 

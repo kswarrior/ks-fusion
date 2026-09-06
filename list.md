@@ -1,4 +1,4 @@
-# Missing List — v2.4 done (score 87/100 → 78–82 next)
+# Missing List — v2.5 done (score 87/100 honest, see docs/vs.md v2.5 evidence)
 
 > Source: `docs/vs.md` gaps + `docs/futures.md` roadmap + `plan/frontend.md` + `plan/tooling.md`.
 > Checked = exists today. Unchecked = missing. Score impact in brackets.
