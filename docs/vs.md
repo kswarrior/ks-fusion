@@ -3,7 +3,7 @@
 > ks-fusion `v2.1` + compiler `v0.1`: gradual-typed `.ks` language, toolchain written in Go.
 > Easy like Python, concurrency like Go, packaging like Rust.
 > Interpreter runs the full language (97 builtins); `fusion compile` adds a
-> portable bytecode subset (`.ksb-1` JSON + stack VM) for straight-line logic.
+> portable bytecode subset (`.ksb-1` JSON + stack VM: arithmetic, control flow, funcs).
 > This doc is honest about where `.ks` wins and where it loses.
 
 ## TL;DR
