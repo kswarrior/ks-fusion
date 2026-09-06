@@ -69,6 +69,17 @@ const (
 	OpIndex
 	OpSetIndex
 	OpSleep // reserved: emitted never in v0.1 (sleep is a compile error)
+	// v0.2 (full-language roadmap): slices, type tests, nil-coalescing,
+	// safe access, typed params, switch/try/defer desugar targets.
+	OpSlice
+	OpIs
+	OpCoalesce
+	OpSafeIndex
+	OpCheckType
+	OpSetupTry
+	OpPopTry
+	OpDefer
+	OpJumpIfNotNil
 )
 
 func (o Op) String() string {
@@ -141,6 +152,24 @@ func (o Op) String() string {
 		return "SetIndex"
 	case OpSleep:
 		return "Sleep"
+	case OpSlice:
+		return "Slice"
+	case OpIs:
+		return "Is"
+	case OpCoalesce:
+		return "Coalesce"
+	case OpSafeIndex:
+		return "SafeIndex"
+	case OpCheckType:
+		return "CheckType"
+	case OpSetupTry:
+		return "SetupTry"
+	case OpPopTry:
+		return "PopTry"
+	case OpDefer:
+		return "Defer"
+	case OpJumpIfNotNil:
+		return "JumpIfNotNil"
 	}
 	return "Unknown"
 }
@@ -898,6 +927,18 @@ func (c *compiler) compileFuncDef(name string, params []string, body *frontend.S
 	return nil
 }
 
+// isTypeName extracts the type name from an `is` right operand:
+// `x is int` (var) or `x is "int"` (string literal).
+func isTypeName(e *frontend.Expr) (string, error) {
+	switch e.Kind {
+	case frontend.ExprVar:
+		return e.Name, nil
+	case frontend.ExprString:
+		return e.StrVal, nil
+	}
+	return "", fmt.Errorf("`is` type must be a name or string literal (compiler v0.2)")
+}
+
 // ---------------------------------------------------------------------------
 // Expressions
 // ---------------------------------------------------------------------------
@@ -997,22 +1038,57 @@ func (c *compiler) compileExpr(e *frontend.Expr) error {
 		}
 		c.emit(OpCall, len(e.Args), 0)
 	case frontend.ExprIndex:
-		if e.Safe {
-			return fmt.Errorf("`?.` not yet supported by compiler v0.1 (use the interpreter)")
-		}
 		if err := c.compileExpr(e.Left); err != nil {
 			return err
 		}
 		if err := c.compileExpr(e.Right); err != nil {
 			return err
 		}
-		c.emit(OpIndex, 0, 0)
+		if e.Safe {
+			c.emit(OpSafeIndex, 0, 0)
+		} else {
+			c.emit(OpIndex, 0, 0)
+		}
 	case frontend.ExprIs:
-		return fmt.Errorf("`is` not yet supported by compiler v0.1 (use the interpreter)")
+		if err := c.compileExpr(e.Left); err != nil {
+			return err
+		}
+		typeName, err := isTypeName(e.Right)
+		if err != nil {
+			return err
+		}
+		c.emitNamed(OpIs, 0, typeName, 0)
 	case frontend.ExprCoalesce:
-		return fmt.Errorf("`??` not yet supported by compiler v0.1 (use the interpreter)")
+		if err := c.compileExpr(e.Left); err != nil {
+			return err
+		}
+		// short-circuit nil-only: if left != nil, skip right.
+		jEnd := c.emit(OpJumpIfNotNil, -1, 0)
+		c.emit(OpPop, 0, 0)
+		if err := c.compileExpr(e.Right); err != nil {
+			return err
+		}
+		c.patch(jEnd, len(c.cur().fn.Chunk.Code))
 	case frontend.ExprSlice:
-		return fmt.Errorf("slices not yet supported by compiler v0.1 (use the interpreter)")
+		if err := c.compileExpr(e.Left); err != nil {
+			return err
+		}
+		// start: nil sentinel when omitted
+		if e.SliceStart != nil {
+			if err := c.compileExpr(e.SliceStart); err != nil {
+				return err
+			}
+		} else {
+			c.emit(OpConst, c.addConst(Const{Kind: CKNil}), 0)
+		}
+		if e.SliceEnd != nil {
+			if err := c.compileExpr(e.SliceEnd); err != nil {
+				return err
+			}
+		} else {
+			c.emit(OpConst, c.addConst(Const{Kind: CKNil}), 0)
+		}
+		c.emit(OpSlice, 0, 0)
 	case frontend.ExprArray:
 		for _, el := range e.Elements {
 			if err := c.compileExpr(el); err != nil {

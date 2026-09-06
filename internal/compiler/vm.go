@@ -811,9 +811,14 @@ func arith(op Op, l, r Val) (Val, error) {
 			return Nil(), fmt.Errorf("cannot raise %s to %s (need numbers)", typeName(l), typeName(r))
 		}
 		if l.Kind == VInt && r.Kind == VInt && r.Int >= 0 {
-			res := 1
-			for i := 0; i < r.Int; i++ {
-				res *= l.Int
+			// O(log n) exponentiation by squaring (matches interpreter).
+			res, base, exp := 1, l.Int, r.Int
+			for exp > 0 {
+				if exp&1 == 1 {
+					res *= base
+				}
+				base *= base
+				exp >>= 1
 			}
 			return IntV(res), nil
 		}
