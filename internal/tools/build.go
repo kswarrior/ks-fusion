@@ -482,6 +482,8 @@ func BuildBin(appDir, out, target string) error {
 	if lockData, err := os.ReadFile(filepath.Join(cfg.Dir, "fusion.lock")); err == nil {
 		embeds = append(embeds, binEmbedded{Rel: "fusion.lock", Data: string(lockData)})
 	}
+	// reproducible builds (v2.4): deterministic order
+	sort.Slice(embeds, func(i, j int) bool { return embeds[i].Rel < embeds[j].Rel })
 	// generate main.go inside module (internal/ import rule: must build within module)
 	modRoot := findModuleRoot()
 	tmpName := fmt.Sprintf("tmp-fusion-bin-%d", time.Now().UnixNano())
@@ -504,9 +506,11 @@ func BuildBin(appDir, out, target string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command("go", "build", "-o", absOut, "./"+tmpName)
+	cmd := exec.Command("go", "build", "-trimpath", "-o", absOut, "./"+tmpName)
 	cmd.Dir = modRoot
+	// reproducible (v2.4): -trimpath + CGO off + no VCS stamping
 	env := os.Environ()
+	env = append(env, "GOFLAGS=-trimpath", "CGO_ENABLED=0")
 	if target != "" && target != "host" {
 		goos, goarch := parseTarget(target)
 		if goos == "" {

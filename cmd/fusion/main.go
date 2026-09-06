@@ -263,6 +263,16 @@ func main() {
 			fmt.Println("error:", err)
 			os.Exit(1)
 		}
+	case "audit":
+		if err := cmdAudit(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
+	case "lsp":
+		if err := cmdLSP(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
 	case "version", "--version", "-V":
 		fmt.Println("ks-fusion", toolVersion)
 	case "help", "--help", "-h":
@@ -276,10 +286,10 @@ func main() {
 
 // toolVersion is the toolchain/language version printed by help/version.
 // Keep in sync with docs (README, docs/vs.md, docs/futures.md).
-const toolVersion = "v2.3"
+const toolVersion = "v2.4"
 
 func help() {
-	fmt.Println(`ks-fusion v2.3 (Go)
+	fmt.Println(`ks-fusion v2.4 (Go)
 Commands:
   fusion new [--lib] <dir>   create app (backend/ frontend/ fusion.toml)
                              or library with --lib (src/lib.ks, type="lib")

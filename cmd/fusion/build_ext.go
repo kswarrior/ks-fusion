@@ -243,7 +243,51 @@ func cmdRegistry(args []string) error {
 		if e.Yanked {
 			flag = " [yanked]"
 		}
-		fmt.Printf("%s %s %s%s\n", e.Name, e.Version, e.SHA256[:12], flag)
+		sha := e.SHA256
+		if len(sha) > 12 {
+			sha = sha[:12]
+		}
+		fmt.Printf("%s %s %s%s\n", e.Name, e.Version, sha, flag)
 	}
 	return nil
+}
+
+func cmdAudit(args []string) error {
+	dir := "."
+	for _, a := range args {
+		switch {
+		case a == "--help" || a == "-h":
+			fmt.Println("usage: fusion audit [appdir]\n  check lock vs registry: yanked, missing, updates, checksums")
+			return nil
+		case len(a) > 0 && a[0] == '-':
+			return fmt.Errorf("unknown flag %q", a)
+		default:
+			if dir != "." {
+				return fmt.Errorf("single target only")
+			}
+			dir = a
+		}
+	}
+	issues, err := tools.Audit(dir)
+	if err != nil {
+		return err
+	}
+	if len(issues) == 0 {
+		fmt.Println("audit ok: no issues")
+		return nil
+	}
+	for _, is := range issues {
+		fmt.Println("audit:", is)
+	}
+	return fmt.Errorf("audit: %d issues", len(issues))
+}
+
+func cmdLSP(args []string) error {
+	for _, a := range args {
+		if a == "--help" || a == "-h" {
+			fmt.Println("usage: fusion lsp\n  minimal LSP over stdio (hover, goto-def, format). VS Code: set command to `fusion lsp`.")
+			return nil
+		}
+	}
+	return tools.RunLSP()
 }
