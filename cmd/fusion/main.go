@@ -103,24 +103,40 @@ func main() {
 		dir := "."
 		release := false
 		out := ""
+		bin := false
+		binOut := ""
+		target := ""
 		args := os.Args[2:]
 		for i := 0; i < len(args); i++ {
 			a := args[i]
 			switch {
 			case a == "--release":
 				release = true
+			case a == "--bin":
+				bin = true
 			case a == "--help" || a == "-h":
-				fmt.Println("usage: fusion build [dir] [--release] [--out DIR]")
+				fmt.Println("usage: fusion build [dir] [--release] [--out DIR] [--bin [--target OS/ARCH] [-o FILE]]")
 				return
 			case a == "--out" || a == "-o":
 				if i+1 >= len(args) {
-					fmt.Println("usage: fusion build [dir] [--release] [--out DIR]")
+					fmt.Println("usage: fusion build [dir] [--release] [--out DIR] [--bin [--target OS/ARCH] [-o FILE]]")
 					os.Exit(1)
 				}
 				i++
 				out = args[i]
 			case strings.HasPrefix(a, "--out="):
 				out = strings.TrimPrefix(a, "--out=")
+			case a == "--target":
+				if i+1 >= len(args) {
+					fmt.Println("usage: fusion build --bin [--target OS/ARCH]")
+					os.Exit(1)
+				}
+				i++
+				target = args[i]
+				bin = true
+			case strings.HasPrefix(a, "--target="):
+				target = strings.TrimPrefix(a, "--target=")
+				bin = true
 			case strings.HasPrefix(a, "-"):
 				fmt.Printf("unknown flag %q\n", a)
 				help()
@@ -128,6 +144,16 @@ func main() {
 			default:
 				dir = a
 			}
+		}
+		if bin {
+			if out != "" {
+				binOut = out
+			}
+			if err := cmdBuildBin(dir, binOut, target); err != nil {
+				fmt.Println("error:", err)
+				os.Exit(1)
+			}
+			break
 		}
 		if err := cmdBuild(dir, release, out); err != nil {
 			fmt.Println("error:", err)
@@ -165,6 +191,21 @@ func main() {
 		}
 	case "bench":
 		if err := cmdBench(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
+	case "vendor":
+		if err := cmdVendor(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
+	case "run-web", "web", "serve":
+		if err := cmdWeb(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
+	case "build-js", "js":
+		if err := cmdBuildJS(os.Args[2:]); err != nil {
 			fmt.Println("error:", err)
 			os.Exit(1)
 		}
