@@ -39,7 +39,7 @@
 
 ## Stdlib P1 (Stdlib 4→8 done)
 
-- [x] 170+ builtins (v2.1 97 + v2.4 52: http/regex/crypto/fs/process/time/db/log/concurrency/types)
+- [x] 166 builtins (v2.1 97 + v2.4 52: http/regex/crypto/fs/process/time/db/log/concurrency/types)
 - [x] `http` (`http_get/post/serve`, headers, JSON codec) [+2 Stdlib done]
 - [ ] `net/ws` TCP + WebSocket [+1 Stdlib left]
 - [x] `fs` full (`stat/cp/mv/glob`, path joins) (done; `watch` left)

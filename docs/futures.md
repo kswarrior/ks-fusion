@@ -1,7 +1,7 @@
 # ks-fusion Futures / Roadmap
 
 > Current: `v2.4` (87/100 in docs/vs.md) — tree-walk interpreter in Go, gradual-typed `.ks` language
-> (`: type` annotations, `is`, `?.`/`??`, `ok`/`err` results, 170+ builtins, --bin, fmt/vet/doc/check/repl/bench).
+> (`: type` annotations, `is`, `?.`/`??`, `ok`/`err` results, 166 builtins, --bin, fmt/vet/doc/check/repl/bench).
 > This doc lists what exists, what is planned, and what is explicitly non-goals.
 
 ## 1. Where we are (v2.4, real today)
@@ -21,7 +21,7 @@
   + `for v in ch` drain-until-close + `recv_timeout/send_timeout/chan_closed`,
   + `with_timeout/parallel` + `fusion run --race`,
   backed by Go goroutines.
-* Stdlib (170+ builtins): all v2.1 plus `http_get/post/fetch_json/http_serve`,
+* Stdlib (166 builtins): all v2.1 plus `http_get/post/fetch_json/http_serve`,
   `regex_match/find/replace/split`, `sha256/md5/hmac_sha256/base64_encode/decode/hex_encode/decode/uuid/random_bytes`,
   `stat/cp/mv/glob/path_join/abs_path/remove_all`, `exec/shell/cwd/env_all`,
   `format_time/parse_time/time_parts`, `db_put/get/delete/list`, `log_info/warn/error`,

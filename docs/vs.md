@@ -2,7 +2,7 @@
 
 > ks-fusion `v2.4` (source, `toolVersion` in `cmd/fusion/main.go:279`): gradual-typed `.ks` language, toolchain written in Go.
 > Easy like Python, concurrency like Go, packaging like Rust (UX copy, not parity).
-> Interpreter runs the full language (170+ builtins, union/generic types, extended folding); `fusion compile` adds a
+> Interpreter runs the full language (166 builtins, union/generic types, extended folding); `fusion compile` adds a
 > portable bytecode subset (`.ksb-1` JSON + stack VM: arithmetic, control flow, funcs).
 > `fusion build --bin` embeds `.ks`+`.kslib` into a single executable via `go build` (needs a Go toolchain);
 > `fusion fmt/vet/doc/check/repl/bench/test`, `fusion.lock` + semver + `vendor/` + file-local registry
@@ -32,7 +32,7 @@
 | CRUD + auth + admin panel tomorrow | PHP Laravel / Python Django | No ORM/migrations/templates. Has `http_*`, JSON-file KV `db_*`, `exec/shell`, minimal `tcp/tls`, `ws_connect` (header-only, **no frame encode/decode**), `run-web` `/api/*` funcs. Full framework still ahead. |
 | Numerical / scientific / matrices | Julia | No vectorized ops/DataFrames/plots. Scalar loops only. Folding helps constants, not loop speed. |
 | Quick scripts, rules, gluing, learning | ks-fusion | — this is the sweet spot (plus small `--bin` services where a Go toolchain is acceptable). |
-| npm / PyPI ecosystem | Node.js / Python | `.ks` has 170+ builtins + `.kslib` source-JSON bundles + `fusion.lock` semver + `vendor/` + **file-local** registry (`publish/pull/yank`, sha256, namespaces, `FUSION_REGISTRY` dir override). No central server, no audit, private-token check is a skip-stub (see §5). |
+| npm / PyPI ecosystem | Node.js / Python | `.ks` has 166 builtins + `.kslib` source-JSON bundles + `fusion.lock` semver + `vendor/` + **file-local** registry (`publish/pull/yank`, sha256, namespaces, `FUSION_REGISTRY` dir override). No central server, no audit, private-token check is a skip-stub (see §5). |
 
 ## Big table (minimal/stub labels included)
 
@@ -58,7 +58,7 @@ Compiler v0.1 still moves no Perf score (subset only).
 ## How scoring works (out of 100)
 
 Each language / stack is scored `0-10` on 10 dimensions = `100` max.
-Snapshot for ks-fusion `v2.4` (170+ builtins, fmt/vet/doc/check/repl/bench/test, --bin/--target,
+Snapshot for ks-fusion `v2.4` (166 builtins, fmt/vet/doc/check/repl/bench/test, --bin/--target,
 lock/semver/vendor + file-local registry, --race(print+vet)/--debug(print)/host---cpuprofile,
 run-web/build-js/build-ssg minimal, use_state-minimal, TCP/TLS-minimal, hash-skip cache, literal folding).
 Higher = better, except simplicity where easier = higher. Scores are opinionated but rubric-based, not benchmarks.
@@ -89,7 +89,7 @@ What the `.ks` 87 does and does not mean (read before citing 87):
 - Perf 7 = “fast enough for scripts/services; len/range/sort opts + extended folding”. Not JIT/LLVM-class; tree-walk still ~70x slower than Go on fib; no benchmark artifact beyond `bench`.
 - Types 9 = “unions (`int|string`) + generics (`array<int>`, `map<string,int>`) + `is "T"` + exhaustive-switch vet + struct/enum helpers”. No `struct`/`enum` syntax, no variadics/named params, `==` deep equality.
 - Concurrency 9 = “interpreter `select`/`for-in`/`with_timeout`/`parallel`/`with_cancel` at Go spelling parity”. VM has none; no deterministic scheduler; `--race` is vet + env, not instrumentation.
-- Stdlib 10 = “170+ builtins breadth incl. sqlite subset, TCP/TLS/WS-min, `use_state`”. Depth minimal: sqlite is JSON-file subset (CREATE/INSERT/SELECT/DELETE), WS is handshake+TCP, `http_serve` basic, no pipes/signals/watch/ticker.
+- Stdlib 10 = “166 builtins breadth incl. sqlite subset, TCP/TLS/WS-min, `use_state`”. Depth minimal: sqlite is JSON-file subset (CREATE/INSERT/SELECT/DELETE), WS is handshake+TCP, `http_serve` basic, no pipes/signals/watch/ticker.
 - Ecosystem 8 = “lock/semver/vendor + file registry (`publish/pull/yank`, sha256, namespaces) + `audit` + private-token env”. No central server, no docs.rs, no git deps, no remote audit DB.
 - Tooling 10 = “fmt/vet/test/doc/check/repl/bench + `--cpuprofile`/`--debug` + cache + minimal LSP (hover/goto-def/format)”. No VS Code ext bundled, no breakpoints/debugger, LSP is stdio-minimal.
 - Build 9 = “`--bin` + `--target` + hash-skip cache + `-trimpath` reproducibles”. Requires Go toolchain; cache is whole-app (any `.ks` change invalidates); no remote cache, no strip/symbol opts.
@@ -194,7 +194,7 @@ Pick `.ks` for Day-1 productivity without borrow checker.
 **Score: ks-fusion 87/100 vs C 62/100 — ks-fusion wins by 25.**
 
 C gives pointers, manual `malloc/free`, direct syscalls, tiny runtimes.
-`.ks` gives `array/map/string` + Go GC + bounds-checked indexing + 170+ builtins + `--bin`/cache/repro.
+`.ks` gives `array/map/string` + Go GC + bounds-checked indexing + 166 builtins + `--bin`/cache/repro.
 
 Pick C for kernels, drivers, microcontrollers.
 Pick `.ks` for everything where `segfault` is unacceptable.
@@ -245,7 +245,7 @@ truthiness (`nil false 0 0.0 "" [] {}` falsy), `map/filter/reduce`.
 Difference: `.ks` adds `go/chan/select/defer/switch`, gradual `: type` annotations,
 `is`/`?.`/`??`, `struct/enum` helpers and braces; Python still has huge stdlib
 (`requests`, `numpy`, `django`) while `.ks` has `http/regex/crypto/fs/process/time/db/log/tcp/tls-minimal`
-(170+ builtins) but no `numpy`/`django`; sqlite subset instead of native, `CombinedOutput`-only `exec/shell`.
+(166 builtins) but no `numpy`/`django`; sqlite subset instead of native, `CombinedOutput`-only `exec/shell`.
 
 Pick Python for data/AI/science/ops (ecosystem still wins).
 Pick `.ks` for learning concurrency early or embedding a tiny Go-based runtime, plus `--bin` services.
@@ -405,7 +405,7 @@ Pick `.ks` for sidecar scripts/services (data munging, checks, bots, `--bin` wor
 
 * **Deno/Bun 77/100 vs .ks 87/100 (+10):** pick for secure TS sandbox / fast runtime; `.ks` is simpler but far smaller.
 * **Java/Kotlin/Spring 78/100 vs .ks 87/100 (+9):** pick for enterprise monoliths, JPA, strict OOP; `.ks` for glue/services.
-* **Lua 58/100 vs .ks 87/100 (+29):** Lua is smaller/faster to embed; `.ks` has Go-style `select` + `fusion` CLI + `--bin`/registry/audit + 170+ builtins out of box.
+* **Lua 58/100 vs .ks 87/100 (+29):** Lua is smaller/faster to embed; `.ks` has Go-style `select` + `fusion` CLI + `--bin`/registry/audit + 166 builtins out of box.
 * **Ruby/Rails 68/100 vs .ks 87/100 (+19):** pick Rails for convention CRUD; `.ks` syntax will feel familiar, plus `--bin`/concurrency.
 * **Bash 45/100 vs .ks 87/100 (+42):** pick Bash for 5-line pipes; `.ks` wins past 50 lines (`try/catch`, maps, JSON, `is`/`?.`/`??`, `select`, `http/regex/crypto`, `--bin`, Windows portability via `--target`).
 
@@ -413,7 +413,7 @@ Pick `.ks` for sidecar scripts/services (data munging, checks, bots, `--bin` wor
 
 | Rank | Stack | Total /100 | Verdict vs .ks (87) |
 |---:|---|---:|---|
-| 1 | **ks-fusion v2.4 (170+ builtins, union/generic types, sqlite subset, registry+audit, LSP, --bin/cache/repro, run-web --watch/ISR/layouts/HMR-patch/virtualize/hash, use_state, TCP/TLS, len/range/sort opts)** | **87** | **baseline — leads on balance (simplicity 9 + breadth); several areas minimal depth (see “What 87 does/does not mean” + “Honest limits”). Strict depth-parity would be lower; 87 is breadth-for-scripts/services, not Go/Rust depth parity.** |
+| 1 | **ks-fusion v2.4 (166 builtins, union/generic types, sqlite subset, registry+audit, LSP, --bin/cache/repro, run-web --watch/ISR/layouts/HMR-patch/virtualize/hash, use_state, TCP/TLS, len/range/sort opts)** | **87** | **baseline — leads on balance (simplicity 9 + breadth); several areas minimal depth (see “What 87 does/does not mean” + “Honest limits”). Strict depth-parity would be lower; 87 is breadth-for-scripts/services, not Go/Rust depth parity.** |
 | 2 | Go | 82 | -5, prod servers / single binary depth (ahead on speed/types/maturity) |
 | 3 | Rust | 81 | -6, systems / safety depth |
 | 4 | Next.js | 79 | -8, browser UI depth (different category) |
@@ -448,7 +448,7 @@ Still behind on full VM/AOT, LSP/debugger, DOM/HMR parity, native DB/WS-frames u
 
 ### 1. Compiler still subset — full language tree-walk + `--bin` embed via `go build`, no LLVM/JIT
 
-* Today: tree-walk interpreter (`internal/backend`, full language, 170+ builtins, union/generic types, extended folding) +
+* Today: tree-walk interpreter (`internal/backend`, full language, 166 builtins, union/generic types, extended folding) +
   bytecode subset (`internal/compiler`, `.ksb-1` JSON + stack VM):
   `fusion compile prog.ks [--out prog.ksb] [--dis] [--run]`, `fusion prog.ksb`.
   Compiled subset: literals/arrays/maps, `let`/`=`/`+=`-family, `+ - * / % **`/`== != < <= > >=`/`in`/`and/or/not`,
@@ -514,7 +514,7 @@ Still behind on full VM/AOT, LSP/debugger, DOM/HMR parity, native DB/WS-frames u
 
 ### 4. Stdlib breadth 170+, depth growing — `http/regex/crypto/fs/process/time/db/log/tcp/tls/sqlite/cancel` landed, WS-frames/pipes left
 
-* Today: 170+ builtins (`96` base + `52` ext + `10` ext2 + `12` ext3 incl. sqlite/cancel; `BuiltinCount()`; tests assert `>=166`):
+* Today: 166 builtins (`96` base + `52` ext + `10` ext2 + `12` ext3 incl. sqlite/cancel; `BuiltinCount()`; tests assert `>=166`):
   strings/arrays/maps/JSON/files/math/time/rand, `map/filter/each/reduce/apply`, `ok/err` results, `chan_*`,
   `read_file/write_file/append_file/exists/list_dir/mkdir/remove[_file]/input/argv/env/exit`,
   plus `http_get/post/fetch_json/http_serve`, `regex_match/find/replace/split` (Go `regexp`, no literals),
@@ -556,7 +556,7 @@ Still behind on full VM/AOT, LSP/debugger, DOM/HMR parity, native DB/WS-frames u
 
 | # | Area | Go bar | Rust bar | .ks v2.4 (honest) | Needed to close | Closes in |
 |---|---|---|---|---|---|---|
-| 1 | Compiler | `go build` static bin | `rustc` LLVM + LTO | tree-walk (full, union/generic types, extended folding, 170+ builtins) + VM subset (`.ksb-1`, no `go`/`sleep`/`import`/`try`/`switch`/`select`/`defer`/slices/`is`/`?.`/`??`/typed params/closure-capture) + `--bin` embed via `go build` | full VM → native AOT + real benchmarks | `futures.md` P1 runtime |
+| 1 | Compiler | `go build` static bin | `rustc` LLVM + LTO | tree-walk (full, union/generic types, extended folding, 166 builtins) + VM subset (`.ksb-1`, no `go`/`sleep`/`import`/`try`/`switch`/`select`/`defer`/slices/`is`/`?.`/`??`/typed params/closure-capture) + `--bin` embed via `go build` | full VM → native AOT + real benchmarks | `futures.md` P1 runtime |
 | 2 | Targets | `GOOS/GOARCH` | tiers + WASM | `--target` GOOS/GOARCH passthrough + hash-skip cache + host `--cpuprofile` (needs Go toolchain) | WASM run polish, remote/incremental cache, reproducibles | `futures.md` P1 runtime |
 | 3 | Types | structs/interfaces/generics | traits/enums/`Result` | gradual `: type` + `is`/`?.`/`??` + `struct_validate/enum_create` + `vet`/`check` (no syntax structs/enums/generics) | structs/enums syntax/generics | `futures.md` P1 core |
 | 4 | Errors | multi-return | `Result/Option/?` | `ok/err` values + `error()`+`try/catch` + `assert_eq/ne/contains` | exhaustive `Result` checks | `futures.md` P0 done, P1 polish |
