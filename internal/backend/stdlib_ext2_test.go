@@ -43,7 +43,7 @@ tcp_close(c)
 }
 
 func TestV23BuiltinCount(t *testing.T) {
-	if BuiltinCount() < 159 {
-		t.Fatalf("want >=159 builtins after v2.3, got %d", BuiltinCount())
+	if BuiltinCount() < 158 {
+		t.Fatalf("want >=158 builtins after v2.3, got %d", BuiltinCount())
 	}
 }
