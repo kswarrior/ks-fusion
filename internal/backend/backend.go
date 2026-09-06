@@ -518,7 +518,9 @@ func (in *Interpreter) Call(fn Value, args []Value) (Value, error) {
 func ValueToJSONable(v Value) (any, error) { return valueToJSON(v) }
 
 // ExecProgram runs program statements in globals (exported for imports/embedding).
+// Applies constant folding (v2.2 perf) once per program (idempotent).
 func (in *Interpreter) ExecProgram(p *frontend.Program) error {
+	frontend.FoldProgram(p)
 	for _, st := range p.Statements {
 		if err := in.execStmt(in.globals, st); err != nil {
 			if isControl(err) {

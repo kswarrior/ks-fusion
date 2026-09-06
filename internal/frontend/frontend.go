@@ -185,6 +185,8 @@ func ParseFile(path string) (*Program, error) {
 }
 
 // ParseSource parses .ks source text.
+// Note: no constant folding here (keeps AST shape for tests/vet);
+// call FoldProgram explicitly for runtime perf.
 func ParseSource(src, path string) (*Program, error) {
 	toks, err := lex(src, path)
 	if err != nil {
@@ -195,9 +197,7 @@ func ParseSource(src, path string) (*Program, error) {
 	if err != nil {
 		return nil, err
 	}
-	prog := &Program{Statements: stmts, Path: path}
-	FoldProgram(prog)
-	return prog, nil
+	return &Program{Statements: stmts, Path: path}, nil
 }
 
 // ParseExpr parses a single expression string (kept for compat/tests).
