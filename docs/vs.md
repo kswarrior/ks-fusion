@@ -757,5 +757,5 @@ grep -n "HMR patch\|data: reload\|location.reload\|__renderVM" internal/tools/we
 grep -n "exhaustive-switch" internal/tools/tools.go
 grep -n "no cgo\|reCreate\|reDrop\|reInsert\|reDelete\|reSelect" internal/backend/stdlib_ext3.go | head
 sed -n '234,237p;121,122p' internal/tools/lsp.go   # goto line-stub + format-noop
-go test ./...   # all ok; note uncovered areas listed in Maturity footnote above
+go test ./...   # all ok single run; -count=2+ fails on TestV23TCP hardcoded port (see Hygiene)
 ```
