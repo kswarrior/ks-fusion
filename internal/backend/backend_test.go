@@ -304,3 +304,17 @@ func TestRunTypesV21(t *testing.T) {
 		t.Fatal("want parse error for unknown type")
 	}
 }
+
+func TestRunUnionGenericTypes(t *testing.T) {
+	mustRun(t, "let x: int|string = 5\nassert(x is \"int|string\")\n")
+	mustRun(t, "let y: int|string = \"hi\"\nassert(y is \"int|string\")\n")
+	mustRun(t, "let a: array<int> = [1, 2]\nassert(a is \"array<int>\")\n")
+	mustFail(t, "let b: array<int> = [1, \"x\"]\n")
+	mustRun(t, "func f(v: int|string): int|string { return v }\nassert(f(1) == 1)\nassert(f(\"a\") == \"a\")\n")
+}
+
+func TestRunSqliteSubset(t *testing.T) {
+	dir := t.TempDir()
+	db := dir + "/s.db"
+	mustRun(t, "let db = sqlite_open(\"" + db + "\")\n" + "sqlite_exec(db, \"CREATE TABLE t (a)\")\n" + "sqlite_exec(db, \"INSERT INTO t (a) VALUES (1)\")\n" + "let r = sqlite_query(db, \"SELECT * FROM t\")\nassert(len(r) == 1)\nsqlite_close(db)\n")
+}

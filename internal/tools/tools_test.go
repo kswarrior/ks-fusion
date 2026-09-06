@@ -109,3 +109,15 @@ func contains(s, sub string) bool {
 		return false
 	})()
 }
+
+func TestAuditMissingLock(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(dir+"/fusion.toml", []byte("[package]\nname=\"x\"\nversion=\"0.1.0\"\n"), 0o644)
+	issues, err := Audit(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) == 0 {
+		t.Fatalf("want missing lock issue")
+	}
+}

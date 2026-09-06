@@ -346,3 +346,16 @@ func TestParseTypesV21(t *testing.T) {
 		}
 	}
 }
+
+func TestParseUnionGenericType(t *testing.T) {
+	p, err := ParseSource("let x: int|string = 1\nlet a: array<int> = [1]\nfunc f(v: map<string,int>): int { return 1 }\n", "t.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Statements[0].TypeAnn != "int|string" {
+		t.Fatalf("want int|string, got %q", p.Statements[0].TypeAnn)
+	}
+	if p.Statements[1].TypeAnn != "array<int>" {
+		t.Fatalf("want array<int>, got %q", p.Statements[1].TypeAnn)
+	}
+}
