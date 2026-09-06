@@ -34,6 +34,24 @@ func RunWebWithWatch(appDir string, port int, watch bool) error {
 	}
 	mux := http.NewServeMux()
 	isr := newISRCache()
+	isr.regen = func(route, format string) (string, string, string, bool) {
+		vmJSON, err := renderRoute(cfg, route)
+		if err != nil {
+			return "", "", "", false
+		}
+		if format == "json" {
+			return vmJSON, "application/json", vmJSON, true
+		}
+		return vmToHTMLWithWatch(vmJSON, route, watch), "text/html; charset=utf-8", vmJSON, true
+	}
+	// background ISR regen (v2.5): refresh entries expiring within 10s, every 5s
+	go func() {
+		tick := time.NewTicker(5 * time.Second)
+		defer tick.Stop()
+		for range tick.C {
+			isr.refreshSoon(10 * time.Second)
+		}
+	}()
 	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
 		route := r.URL.Query().Get("route")
 		if route == "" {
@@ -101,17 +119,33 @@ func RunWebWithWatch(appDir string, port int, watch bool) error {
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		// ISR (v2.4): serve cached HTML/JSON when revalidate TTL fresh
-		if hit, body, ctype := isr.get(r.URL.Path, r.URL.Query().Get("format")); hit {
+		format := r.URL.Query().Get("format")
+		// ISR (v2.4 TTL, v2.5 background regen): fresh HIT, else revalidate in
+		// background and serve stale while it refreshes.
+		if hit, body, ctype := isr.get(r.URL.Path, format); hit {
 			w.Header().Set("X-Cache", "HIT")
 			w.Header().Set("Content-Type", ctype)
 			_, _ = w.Write([]byte(body))
+			return
+		}
+		if staleBody, staleType, ok := isr.getStale(r.URL.Path, format); ok {
+			isr.kickRefresh(r.URL.Path, format)
+			w.Header().Set("X-Cache", "STALE")
+			w.Header().Set("Content-Type", staleType)
+			_, _ = w.Write([]byte(staleBody))
 			return
 		}
 		vmJSON, err := renderRoute(cfg, r.URL.Path)
 		el := time.Since(start)
 		w.Header().Set("X-Render-Time", el.String())
 		if err != nil {
+			// serve stale on render failure when available (no error page flip)
+			if staleBody, staleType, ok := isr.getStale(r.URL.Path, format); ok {
+				w.Header().Set("X-Cache", "STALE")
+				w.Header().Set("Content-Type", staleType)
+				_, _ = w.Write([]byte(staleBody))
+				return
+			}
 			http.Error(w, err.Error(), 500)
 			return
 		}
