@@ -784,6 +784,26 @@ func RunFile(path string) error {
 // SetBaseDir sets import base dir (for embedding/web).
 func (in *Interpreter) SetBaseDir(dir string) { in.baseDir = dir }
 
+// WgWait waits for `go` routines (debugger/test helper).
+func (in *Interpreter) WgWait() { in.wg.Wait() }
+
+// Globals returns sorted global variable names (debugger snapshot).
+func (in *Interpreter) Globals() []string {
+	var out []string
+	if !in.conc.Load() {
+		for k := range in.globals.Vars {
+			out = append(out, k)
+		}
+		return out
+	}
+	in.mu.RLock()
+	defer in.mu.RUnlock()
+	for k := range in.globals.Vars {
+		out = append(out, k)
+	}
+	return out
+}
+
 // Lookup finds a global (or builtin) by name.
 func (in *Interpreter) Lookup(name string) (Value, bool) {
 	// search globals chain
@@ -995,6 +1015,57 @@ func (in *Interpreter) lookupTypeAnn(env *Env, name string) (string, bool) {
 }
 
 // ---------------------------------------------------------------------------
+// stmtKindName returns a short name for a statement kind (debugger trace).
+func stmtKindName(k frontend.StmtKind) string {
+	switch k {
+	case frontend.StmtLet:
+		return "let"
+	case frontend.StmtAssign:
+		return "assign"
+	case frontend.StmtPrint:
+		return "print"
+	case frontend.StmtGo:
+		return "go"
+	case frontend.StmtSleep:
+		return "sleep"
+	case frontend.StmtIf:
+		return "if"
+	case frontend.StmtWhile:
+		return "while"
+	case frontend.StmtForIn:
+		return "for-in"
+	case frontend.StmtForC:
+		return "for-c"
+	case frontend.StmtFunc:
+		return "func"
+	case frontend.StmtReturn:
+		return "return"
+	case frontend.StmtBreak:
+		return "break"
+	case frontend.StmtContinue:
+		return "continue"
+	case frontend.StmtBlock:
+		return "block"
+	case frontend.StmtExpr:
+		return "expr"
+	case frontend.StmtImport:
+		return "import"
+	case frontend.StmtTry:
+		return "try"
+	case frontend.StmtSwitch:
+		return "switch"
+	case frontend.StmtSelect:
+		return "select"
+	case frontend.StmtDefer:
+		return "defer"
+	case frontend.StmtStruct:
+		return "struct"
+	case frontend.StmtEnum:
+		return "enum"
+	}
+	return "stmt"
+}
+
 // Statement execution
 // ---------------------------------------------------------------------------
 
