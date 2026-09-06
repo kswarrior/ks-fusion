@@ -6,15 +6,28 @@ import (
 	"testing"
 )
 
+func findRoot(t *testing.T) string {
+	t.Helper()
+	dir, _ := os.Getwd()
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Skip("no module root")
+		}
+		dir = parent
+	}
+}
+
 func TestRegistryPublishPull(t *testing.T) {
 	tmpReg := t.TempDir()
 	tmpOut := t.TempDir()
+	root := findRoot(t)
 	// publish hello-lib
-	if _, err := Publish("tests/hello-lib", tmpReg); err != nil {
-		// try absolute path fallback
-		cwd, _ := os.Getwd()
-		_ = cwd
-		t.Skipf("publish needs tests/hello-lib from module root: %v", err)
+	if _, err := Publish(filepath.Join(root, "tests/hello-lib"), tmpReg); err != nil {
+		t.Fatalf("publish failed: %v", err)
 	}
 	// pull
 	dst, err := Pull("hello-lib", "0.1.0", tmpOut)
@@ -40,12 +53,10 @@ func TestRegistryPublishPull(t *testing.T) {
 }
 
 func TestSSG(t *testing.T) {
-	// needs tests/hello-app from module root
-	if _, err := os.Stat("tests/hello-app/fusion.toml"); err != nil {
-		t.Skip("needs module root")
-	}
+	root := findRoot(t)
+	app := filepath.Join(root, "tests/hello-app")
 	out := t.TempDir()
-	if err := BuildSSG("tests/hello-app", out); err != nil {
+	if err := BuildSSG(app, out); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(out, "index.html")); err != nil {
