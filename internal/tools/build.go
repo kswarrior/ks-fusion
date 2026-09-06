@@ -179,9 +179,17 @@ func listBundles(name string, dirs []string) []struct {
 		if err != nil {
 			continue
 		}
+		stripBundleVer := func(fn string) (string, bool) {
+			for _, ext := range []string{".ksx", ".kslib"} {
+				if strings.HasSuffix(fn, ext) {
+					return strings.TrimSuffix(fn, ext), true
+				}
+			}
+			return "", false
+		}
 		for _, e := range ents {
 			if e.IsDir() {
-				// registry namespaced layout: <dir>/<name>/<ver>.kslib
+				// registry namespaced layout: <dir>/<name>/<ver>.kslib|.ksx
 				// check if subdir matches name (flat or scoped)
 				sub := filepath.Join(dir, e.Name())
 				if e.Name() == name || e.Name() == base {
@@ -190,10 +198,13 @@ func listBundles(name string, dirs []string) []struct {
 						continue
 					}
 					for _, se := range subEnts {
-						if se.IsDir() || !strings.HasSuffix(se.Name(), ".kslib") {
+						if se.IsDir() {
 							continue
 						}
-						ver := strings.TrimSuffix(se.Name(), ".kslib")
+						ver, ok := stripBundleVer(se.Name())
+						if !ok {
+							continue
+						}
 						if _, ok := parseVer(ver); !ok {
 							continue
 						}
@@ -213,12 +224,19 @@ func listBundles(name string, dirs []string) []struct {
 			}
 			fn := e.Name()
 			var ver string
-			switch {
-			case fn == base+".kslib":
-				ver = ""
-			case strings.HasPrefix(fn, base+"-") && strings.HasSuffix(fn, ".kslib"):
-				ver = strings.TrimSuffix(strings.TrimPrefix(fn, base+"-"), ".kslib")
-			default:
+			matched := false
+			for _, ext := range []string{".ksx", ".kslib"} {
+				switch {
+				case fn == base+ext:
+					ver, matched = "", true
+				case strings.HasPrefix(fn, base+"-") && strings.HasSuffix(fn, ext):
+					ver, matched = strings.TrimSuffix(strings.TrimPrefix(fn, base+"-"), ext), true
+				}
+				if matched {
+					break
+				}
+			}
+			if !matched {
 				continue
 			}
 			out = append(out, struct {
@@ -226,16 +244,19 @@ func listBundles(name string, dirs []string) []struct {
 				Ver  string
 			}{Path: filepath.Join(dir, fn), Ver: ver})
 		}
-		// also try scoped registry subdir directly: <dir>/<name>/<ver>.kslib
+		// also try scoped registry subdir directly: <dir>/<name>/<ver>.kslib|.ksx
 		safeName := strings.ReplaceAll(name, ":", "/")
 		subDir := filepath.Join(dir, filepath.FromSlash(safeName))
 		if subDir != dir {
 			if subEnts, err := os.ReadDir(subDir); err == nil {
 				for _, se := range subEnts {
-					if se.IsDir() || !strings.HasSuffix(se.Name(), ".kslib") {
+					if se.IsDir() {
 						continue
 					}
-					ver := strings.TrimSuffix(se.Name(), ".kslib")
+					ver, ok := stripBundleVer(se.Name())
+					if !ok {
+						continue
+					}
 					if _, ok := parseVer(ver); !ok {
 						continue
 					}

@@ -597,13 +597,13 @@ func RunWithDir(p *frontend.Program, dir string) error {
 	return in.fail()
 }
 
-// RunFile executes a single .ks source file or .kslib bundle directly.
-// This is what makes shebang executables work:
+// RunFile executes a single .ks source file, .kslib bundle or secure .ksx
+// bundle directly. This is what makes shebang executables work:
 //
 //	#!/usr/bin/env fusion        (.ks files: `#` is already a comment)
 //	chmod +x app.kslib && ./app.kslib
 func RunFile(path string) error {
-	if strings.HasSuffix(path, lib.Ext) {
+	if strings.HasSuffix(path, lib.Ext) || strings.HasSuffix(path, lib.SecureExt) {
 		in := New()
 		if abs, err := filepath.Abs(path); err == nil {
 			in.baseDir = filepath.Dir(abs)
@@ -1741,12 +1741,12 @@ func (in *Interpreter) execImport(env *Env, path string) error {
 		return fmt.Errorf("bad import: empty path")
 	}
 	// Library import: `import "name"` (no .ks suffix) resolves a built
-	// .kslib bundle, e.g. test-releases/hello-lib-0.1.0.kslib.
-	// Make with `fusion new --lib` + `fusion build --release`.
-	if !strings.HasSuffix(path, ".ks") && !strings.HasSuffix(path, lib.Ext) {
+	// .kslib bundle or secure .ksx, e.g. test-releases/hello-lib-0.1.0.ksx.
+	// Make with `fusion new --lib` + `fusion build --release` (or --secure).
+	if !strings.HasSuffix(path, ".ks") && !strings.HasSuffix(path, lib.Ext) && !strings.HasSuffix(path, lib.SecureExt) {
 		return in.execLibImport(env, path)
 	}
-	if strings.HasSuffix(path, lib.Ext) {
+	if strings.HasSuffix(path, lib.Ext) || strings.HasSuffix(path, lib.SecureExt) {
 		return in.execBundleFile(env, path)
 	}
 	// Resolve relative to baseDir (app dir), its parent (for legacy
@@ -1827,8 +1827,10 @@ func (in *Interpreter) execLibImport(env *Env, name string) error {
 	return in.execBundleFile(env, found)
 }
 
-// execBundleFile loads a .kslib bundle file (by path) and executes its
-// sources once, in bundle order, in the importing scope.
+// execBundleFile loads a .kslib bundle or secure .ksx bundle file (by
+// path) and executes its sources once, in bundle order, in the importing
+// scope. Secure bundles are decrypted strictly in memory (FUSION_KEY env
+// or default-secret mode); nothing decrypted touches disk.
 func (in *Interpreter) execBundleFile(env *Env, path string) error {
 	candidates := []string{path}
 	if in.baseDir != "" && !filepath.IsAbs(path) {
@@ -1854,8 +1856,10 @@ func (in *Interpreter) execBundleFile(env *Env, path string) error {
 		}
 	}
 	if full == "" {
-		// Maybe a bare "name.kslib" resolvable via search dirs.
-		if found, err := lib.Find(strings.TrimSuffix(filepath.Base(path), lib.Ext), in.libSearchDirs()); err == nil {
+		// Maybe a bare "name.kslib"/"name.ksx" resolvable via search dirs.
+		base := filepath.Base(path)
+		base = strings.TrimSuffix(strings.TrimSuffix(base, lib.Ext), lib.SecureExt)
+		if found, err := lib.Find(base, in.libSearchDirs()); err == nil {
 			full = found
 		} else if lastErr != nil {
 			return fmt.Errorf("import %q failed: %v", path, lastErr)
@@ -1876,7 +1880,7 @@ func (in *Interpreter) execBundleFile(env *Env, path string) error {
 	}
 	in.imported[abs] = true
 	in.impMu.Unlock()
-	b, err := lib.Load(full)
+	b, err := lib.LoadAny(full, "")
 	if err != nil {
 		return err
 	}

@@ -167,12 +167,26 @@ func Load(path string) (*Bundle, error) {
 }
 
 // Find locates the newest bundle for a library name across search dirs.
-// It matches "<name>.kslib" and "<name>-<version>.kslib".
+// It matches "<name>.kslib|.ksx" and "<name>-<version>.kslib|.ksx".
+// Secure (.ksx) bundles win ties on the same version.
 func Find(name string, searchDirs []string) (string, error) {
 	var best string
 	var bestVer []int
+	bestSecure := false
 	found := false
 	seen := map[string]bool{}
+	matchVer := func(fn string) (string, bool, bool) {
+		for _, ext := range []string{SecureExt, Ext} {
+			if fn == name+ext {
+				return "", true, ext == SecureExt
+			}
+			if strings.HasPrefix(fn, name+"-") && strings.HasSuffix(fn, ext) {
+				ver := strings.TrimSuffix(strings.TrimPrefix(fn, name+"-"), ext)
+				return ver, true, ext == SecureExt
+			}
+		}
+		return "", false, false
+	}
 	for _, dir := range searchDirs {
 		if dir == "" || seen[dir] {
 			continue
@@ -187,20 +201,16 @@ func Find(name string, searchDirs []string) (string, error) {
 				continue
 			}
 			fn := e.Name()
-			var ver string
-			switch {
-			case fn == name+Ext:
-				ver = ""
-			case strings.HasPrefix(fn, name+"-") && strings.HasSuffix(fn, Ext):
-				ver = strings.TrimSuffix(strings.TrimPrefix(fn, name+"-"), Ext)
-			default:
+			ver, ok, secure := matchVer(fn)
+			if !ok {
 				continue
 			}
 			v := parseVersion(ver)
-			if !found || compareVersion(v, bestVer) > 0 {
+			if !found || compareVersion(v, bestVer) > 0 || (compareVersion(v, bestVer) == 0 && secure && !bestSecure) {
 				found = true
 				best = filepath.Join(dir, fn)
 				bestVer = v
+				bestSecure = secure
 			}
 		}
 	}
