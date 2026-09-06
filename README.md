@@ -322,10 +322,20 @@ test-releases/       built lib bundles (like Rust's target/release)
 go build -o fusion ./cmd/fusion
 ./fusion new myapp
 ./fusion new --lib mylib
-./fusion build ./tests/hello-app
+./fusion build ./tests/hello-app            # + fusion.lock (semver) 
+./fusion build ./tests/hello-app --bin -o myapp  # single static binary
 ./fusion build --release ./tests/hello-lib
-./fusion run ./tests/hello-app
+./fusion run ./tests/hello-app --race
 ./fusion test ./tests/hello-app   # *_test.ks with assert, TAP output
+./fusion fmt ./tests/hello-app --check
+./fusion vet ./tests/hello-app
+./fusion doc ./tests/hello-app
+./fusion check ./tests/hello-app
+./fusion bench ./tests/hello-app --n 20
+./fusion repl
+./fusion vendor ./tests/hello-app
+./fusion run-web ./tests/hello-app --port 8080  # SSR HTML+JSON
+./fusion build-js ./tests/hello-app --out /tmp/js
 ./fusion launch . --backend   # only backend; --frontend for frontend only
 ./fusion launch ./tests/hello-app/custom.toml  # custom config must live in app root
 go test ./...
