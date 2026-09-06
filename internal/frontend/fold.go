@@ -198,8 +198,94 @@ func foldBinary(kind ExprKind, l, r *Expr) (*Expr, bool) {
 		if l.Kind == ExprBool && r.Kind == ExprBool {
 			return &Expr{Kind: ExprBool, BoolVal: l.BoolVal || r.BoolVal}, true
 		}
+	case ExprPow:
+		// 2**10 -> 1024 (int only, small exponent to avoid overflow)
+		if l.Kind == ExprInt && r.Kind == ExprInt && r.IntVal >= 0 && r.IntVal <= 30 {
+			res := 1
+			for i := 0; i < r.IntVal; i++ {
+				res *= l.IntVal
+			}
+			return &Expr{Kind: ExprInt, IntVal: res}, true
+		}
+	case ExprCoalesce:
+		// "a" ?? "b" -> "a" (non-nil left); nil ?? x -> x
+		if l.Kind != ExprNil && l.Kind != ExprBool {
+			// non-nil literals (string/int/float/array/map) fold to left
+			// bool needs care (false is falsy but not nil) — still folds to left for ??
+			return l, true
+		}
+		if l.Kind == ExprNil {
+			return r, true
+		}
+	case ExprIs:
+		// 1 is int -> true (literal type tests)
+		if r.Kind == ExprString {
+			if ok, known := foldIsLit(l, r.StrVal); known {
+				return &Expr{Kind: ExprBool, BoolVal: ok}, true
+			}
+		}
+	case ExprIn:
+		// 2 in [1,2,3] -> true (literal haystacks)
+		if r.Kind == ExprArray {
+			for _, el := range r.Elements {
+				if litEqual(l, el) {
+					return &Expr{Kind: ExprBool, BoolVal: true}, true
+				}
+			}
+			// only fold true; false needs all elements literal (they are, since isLit? Elements may be non-lit)
+			allLit := true
+			for _, el := range r.Elements {
+				if !isLit(el) && el.Kind != ExprInt && el.Kind != ExprString && el.Kind != ExprFloat && el.Kind != ExprBool && el.Kind != ExprNil {
+					allLit = false
+					break
+				}
+			}
+			if allLit {
+				return &Expr{Kind: ExprBool, BoolVal: false}, true
+			}
+		}
+		if l.Kind == ExprString && r.Kind == ExprString {
+			return &Expr{Kind: ExprBool, BoolVal: containsStr(r.StrVal, l.StrVal)}, true
+		}
 	}
 	return nil, false
+}
+
+func containsStr(hay, needle string) bool {
+	if len(needle) == 0 {
+		return true
+	}
+	if len(needle) > len(hay) {
+		return false
+	}
+	for i := 0; i+len(needle) <= len(hay); i++ {
+		if hay[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func foldIsLit(l *Expr, typ string) (bool, bool) {
+	switch typ {
+	case "int":
+		return l.Kind == ExprInt, true
+	case "float":
+		return l.Kind == ExprFloat, true
+	case "number":
+		return l.Kind == ExprInt || l.Kind == ExprFloat, true
+	case "string":
+		return l.Kind == ExprString, true
+	case "bool":
+		return l.Kind == ExprBool, true
+	case "nil":
+		return l.Kind == ExprNil, true
+	case "array":
+		return l.Kind == ExprArray, true
+	case "map":
+		return l.Kind == ExprMap, true
+	}
+	return false, false
 }
 
 func foldUnary(kind ExprKind, e *Expr) (*Expr, bool) {
