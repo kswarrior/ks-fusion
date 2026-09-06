@@ -72,7 +72,7 @@ Simplicity + Build/Deploy + Frontend + Maturity = 100`.
 
 | Dim (max 10) | .ks | Go | Rust | C | C++ | Node | Python | Julia | Next.js | Laravel |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Perf | 8 | 8 | 10 | 10 | 10 | 7 | 5 | 9 | 7 | 5 |
+| Perf | 7 | 8 | 10 | 10 | 10 | 7 | 5 | 9 | 7 | 5 |
 | Types | 9 | 8 | 10 | 5 | 8 | 6 | 6 | 8 | 8 | 5 |
 | Concurrency | 9 | 9 | 8 | 5 | 7 | 7 | 5 | 7 | 6 | 4 |
 | Stdlib | 10 | 9 | 8 | 6 | 8 | 8 | 10 | 8 | 8 | 8 |
@@ -81,7 +81,7 @@ Simplicity + Build/Deploy + Frontend + Maturity = 100`.
 | Simplicity | 9 | 7 | 5 | 4 | 4 | 7 | 10 | 7 | 6 | 8 |
 | Build/Deploy | 9 | 10 | 9 | 8 | 8 | 6 | 5 | 5 | 7 | 6 |
 | Frontend | 8 | 5 | 6 | 2 | 4 | 8 | 5 | 4 | 10 | 7 |
-| Maturity | 7 | 9 | 8 | 9 | 9 | 9 | 10 | 7 | 8 | 8 |
+| Maturity | 8 | 9 | 8 | 9 | 9 | 9 | 10 | 7 | 8 | 8 |
 | **Total /100** | **87** | **82** | **81** | **62** | **73** | **77** | **74** | **69** | **79** | **67** |
 
 What the `.ks` 78 does and does not mean:
@@ -102,7 +102,7 @@ Details in `More` below. Frontend breakdown:
 
 | Dim (max 10) | .ks | TypeScript | React | Vite | Next.js |
 |---|---:|---:|---:|---:|---:|
-| Perf | 8 | 6 | 7 | 8 | 7 |
+| Perf | 7 | 6 | 7 | 8 | 7 |
 | Types | 9 | 9 | 8 | 6 | 8 |
 | Concurrency | 9 | 6 | 5 | 4 | 6 |
 | Stdlib | 10 | 7 | 5 | 4 | 8 |
@@ -111,7 +111,7 @@ Details in `More` below. Frontend breakdown:
 | Simplicity | 9 | 6 | 6 | 8 | 6 |
 | Build/Deploy | 9 | 7 | 7 | 10 | 7 |
 | Frontend | 8 | 10 | 10 | 10 | 10 |
-| Maturity | 7 | 9 | 9 | 8 | 8 |
+| Maturity | 8 | 9 | 9 | 8 | 8 |
 | **Total /100** | **87** | **79** | **76** | **77** | **79** |
 
 ## Language-by-language
