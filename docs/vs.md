@@ -235,11 +235,15 @@ and embedding a Go-based runtime where Julia's heavy JIT + slow startup is overk
 **Score: ks-fusion 49/100 vs Next.js 79/100 — Next.js wins by 30 (different category).**
 
 Category error if compared 1:1. Next.js = React + routing + SSR/ISR + Node runtime.
-ks-fusion app = `backend/main.ks + frontend/main.ks` run concurrently in console.
+ks-fusion app = `backend/main.ks` + `frontend/` (P0: `main.ks` route table +
+`pages/home.ks` + `pages/hi.ks` + `components/header.ks` + `layouts/app.ks` +
+`store/app.ks`) run concurrently in console via `render_console` (no DOM yet).
 
 * Today: use Next.js for real browser UI. Use `.ks` backend as JSON worker
   (`read_file` → `json_stringify` → stdout) called from an API route.
-* Future (`docs/futures.md`): `fusion build --js` subset + `fusion run --web` hot reload.
+* Future (`docs/futures.md`, `plan/frontend.md` P1–P10): `fusion build --js` subset +
+  `fusion run --web` hot reload + SSR/hydrate. P0 (conventions + view-model
+  `{key,type,props,children}` + `ROUTE` switch) is done; scores unchanged.
 
 Pick Next.js for SEO sites, dashboards, SaaS UI.
 Pick `.ks` for the logic worker behind it.
@@ -277,7 +281,8 @@ Interop future: `fusion build --js` subset → import `.ks` logic into TS.
 **Score: ks-fusion 49/100 vs React 76/100 — React wins by 27 (different category).**
 
 React = components, hooks, virtual DOM, concurrent renderer.
-`.ks` `frontend/main.ks` = console `print`, no DOM/state/effects.
+`.ks` P0 = view-model funcs + console renderer, no DOM/state/effects yet
+(`home_page`/`header_render` return `{key,type,props,children}`, `main.ks` routes + prints).
 
 ```jsx
 // React
@@ -285,9 +290,15 @@ function Hello({name}) { return <h1>Hello {name}</h1>; }
 ```
 
 ```python
-# .ks frontend today
-let title = "Hello from ks-fusion"
-print title
+# .ks frontend P0 (console; --web/--js runtime does the DOM patching later)
+# frontend/pages/home.ks
+func home_page(props) {
+  let head = header_render({title: props?.title ?? app_title})
+  return {key: "home", type: "page", props: {...}, children: [head]}
+}
+# frontend/main.ks
+let route = env("ROUTE", "/")
+if route == "/" { render_console(home_page(app_state())) }
 ```
 
 Pick React (+ Vite/Next.js) for all real UI.
@@ -299,14 +310,16 @@ Do not reimplement React in `.ks` — explicit non-goal in `futures.md`.
 **Score: ks-fusion 49/100 vs Vite 77/100 — Vite wins by 28 (different category).**
 
 Vite = instant HMR dev server + `esbuild`/Rollup bundler + plugin ecosystem.
-`fusion` = `new/run/build` (+ `compile --dis/--run` subset) for `.ks` only, no HMR, no bundling, no CSS/DOM.
+`fusion` = `new/run/build/launch` (+ `compile --dis/--run` subset) for `.ks` only,
+no HMR, no bundling, no CSS/DOM. P0 adds the file layout (`pages/components/layouts/store`)
+and `fusion new` scaffolds it, but no watcher/bundler yet.
 
-|  | Vite | `fusion` (v2.1 + compiler v0.1) |
+|  | Vite | `fusion` (v2.1 + compiler v0.1 + frontend P0) |
 |---|---|---|
-| Dev | HMR <100ms | `run` rerun, no watch |
+| Dev | HMR <100ms | `run`/`launch` rerun, `ROUTE` switch, no watch |
 | Build | tree-shaken JS/CSS | source JSON `.kslib` / parse-check + subset `.ksb` bytecode |
 | Plugins | 1000s (React, TS, Tailwind) | none yet |
-| Target | browser | console interpreter + subset VM |
+| Target | browser | console interpreter + subset VM (view-models printed, not patched) |
 
 Pick Vite for React/TS/Tailwind frontends.
 Pick `.ks` for logic; future `fusion run --web` will copy the HMR idea, and
@@ -350,17 +363,20 @@ Pick `.ks` for sidecar scripts (data munging, checks, bots) next to Laravel.
 | 14 | PHP Laravel | 67 | +18, monolith CRUD |
 | 15 | C | 62 | +13, kernels/embedded |
 | 16 | Lua | 58 | +9, embedding |
-| 17 | **ks-fusion v2.1 + compiler v0.1** | **49** | **baseline — wins on simplicity (9/10), leads Bash by 4; Perf 5/10 after tree-walk opts (VM subset unrated)** |
+| 17 | **ks-fusion v2.1 + compiler v0.1 + frontend P0** | **49** | **baseline — wins on simplicity (9/10), leads Bash by 4; Perf 5/10 after tree-walk opts (VM subset unrated, P0 moves no score)** |
 | 18 | Bash | 45 | -4, tiny pipes |
 
 Grand total (sum of all 18 totals) = `1271 / 1800`, average `70.6/100`.
-`.ks` total `49/100` reflects v2.1 + compiler v0.1 reality: best at learning/scripts,
+`.ks` total `49/100` reflects v2.1 + compiler v0.1 + frontend P0 reality: best at learning/scripts,
 at Python/Node parity on Types (6/10) and Rust parity on Concurrency (8/10),
 at Python parity on Perf (5/10) after tree-walk opts;
 compiler v0.1 (`.ksb-1` subset: arithmetic/control-flow/funcs, no `go`/`chan`/`select`,
 no `import`/`try`/`switch`/`defer`/`sleep`/slices/`is`/`?.`/`??`/typed params, 7 builtins)
 proves the parse→compile→run pipeline but moves no score yet;
-still behind everywhere else until `futures.md` P0/P1 land.
+frontend P0 (route table + `pages/components/layouts/store` + view-model
+`{key,type,props,children}` + `render_console`, `fusion new` scaffolds it) is
+conventions only — still console, no DOM/HMR/bundler, so Frontend stays 3/10;
+still behind everywhere else until `futures.md` P0/P1 + `plan/frontend.md` P1–P10 land.
 
 ## Why not Go/Rust-class (v2.1 + compiler v0.1 gaps + what parity needs)
 
@@ -491,7 +507,7 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
    Pure arithmetic/control-flow/funcs with no concurrency? → try `fusion compile --run` (VM subset).
 6. Need `http/DB` in `.ks` today? → shell out or wait — see `docs/futures.md` P1 stdlib.
 
-## Honest limits of `.ks` v2.1 + compiler v0.1 (do not hide)
+## Honest limits of `.ks` v2.1 + compiler v0.1 + frontend P0 (do not hide)
 
 * Full language is tree-walk interpreted, no JIT/native binary, no cross-compile matrix
   (v2.1 tree-walk opts: lock-free scopes, halved env allocs, O(n log n) sort,
@@ -504,7 +520,8 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
   `.ksb` is per-file bytecode, not a package format (that stays `.kslib`).
 * No `fusion run --race`, no cancel/`with_timeout` yet, no HTTP/WS/DB/regex/crypto stdlib.
   No `go/chan/select/sleep` in compiled output yet.
-* `frontend/` is not web — no DOM, no CSS, no SSR.
+* `frontend/` is not web yet — P0 gives route table + view-models + console renderer,
+  no DOM, no CSS, no SSR/HMR. See `plan/frontend.md` P1–P10 for what moves Frontend 3→10.
 * Version skew to know: language/docs say `v2.1`, `fusion help` in `cmd/fusion/main.go`
   still prints `v2.0`, and `release/fusion` may predate `compile` — rebuild from source
   (`go build -o fusion ./cmd/fusion`) before using `fusion compile`.
