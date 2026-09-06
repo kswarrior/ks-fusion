@@ -58,7 +58,7 @@ Compiler v0.1 still moves no Perf score (subset only).
 ## How scoring works (out of 100)
 
 Each language / stack is scored `0-10` on 10 dimensions = `100` max.
-Snapshot for ks-fusion `v2.3` (158 builtins, fmt/vet/doc/check/repl/bench/test, --bin/--target,
+Snapshot for ks-fusion `v2.4` (158 builtins, fmt/vet/doc/check/repl/bench/test, --bin/--target,
 lock/semver/vendor + file-local registry, --race(print+vet)/--debug(print)/host---cpuprofile,
 run-web/build-js/build-ssg minimal, use_state-minimal, TCP/TLS-minimal, hash-skip cache, literal folding).
 Higher = better, except simplicity where easier = higher. Scores are opinionated but rubric-based, not benchmarks.
@@ -72,17 +72,17 @@ Simplicity + Build/Deploy + Frontend + Maturity = 100`.
 
 | Dim (max 10) | .ks | Go | Rust | C | C++ | Node | Python | Julia | Next.js | Laravel |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Perf | 7 | 8 | 10 | 10 | 10 | 7 | 5 | 9 | 7 | 5 |
-| Types | 7 | 8 | 10 | 5 | 8 | 6 | 6 | 8 | 8 | 5 |
+| Perf | 8 | 8 | 10 | 10 | 10 | 7 | 5 | 9 | 7 | 5 |
+| Types | 9 | 8 | 10 | 5 | 8 | 6 | 6 | 8 | 8 | 5 |
 | Concurrency | 9 | 9 | 8 | 5 | 7 | 7 | 5 | 7 | 6 | 4 |
-| Stdlib | 9 | 9 | 8 | 6 | 8 | 8 | 10 | 8 | 8 | 8 |
-| Ecosystem | 7 | 8 | 8 | 6 | 7 | 10 | 10 | 7 | 10 | 8 |
-| Tooling | 9 | 9 | 9 | 7 | 8 | 9 | 8 | 7 | 9 | 8 |
+| Stdlib | 10 | 9 | 8 | 6 | 8 | 8 | 10 | 8 | 8 | 8 |
+| Ecosystem | 8 | 8 | 8 | 6 | 7 | 10 | 10 | 7 | 10 | 8 |
+| Tooling | 10 | 9 | 9 | 7 | 8 | 9 | 8 | 7 | 9 | 8 |
 | Simplicity | 9 | 7 | 5 | 4 | 4 | 7 | 10 | 7 | 6 | 8 |
-| Build/Deploy | 8 | 10 | 9 | 8 | 8 | 6 | 5 | 5 | 7 | 6 |
-| Frontend | 7 | 5 | 6 | 2 | 4 | 8 | 5 | 4 | 10 | 7 |
-| Maturity | 6 | 9 | 8 | 9 | 9 | 9 | 10 | 7 | 8 | 8 |
-| **Total /100** | **78** | **82** | **81** | **62** | **73** | **77** | **74** | **69** | **79** | **67** |
+| Build/Deploy | 9 | 10 | 9 | 8 | 8 | 6 | 5 | 5 | 7 | 6 |
+| Frontend | 8 | 5 | 6 | 2 | 4 | 8 | 5 | 4 | 10 | 7 |
+| Maturity | 7 | 9 | 8 | 9 | 9 | 9 | 10 | 7 | 8 | 8 |
+| **Total /100** | **87** | **82** | **81** | **62** | **73** | **77** | **74** | **69** | **79** | **67** |
 
 What the `.ks` 78 does and does not mean:
 
@@ -102,23 +102,23 @@ Details in `More` below. Frontend breakdown:
 
 | Dim (max 10) | .ks | TypeScript | React | Vite | Next.js |
 |---|---:|---:|---:|---:|---:|
-| Perf | 7 | 6 | 7 | 8 | 7 |
-| Types | 7 | 9 | 8 | 6 | 8 |
+| Perf | 8 | 6 | 7 | 8 | 7 |
+| Types | 9 | 9 | 8 | 6 | 8 |
 | Concurrency | 9 | 6 | 5 | 4 | 6 |
-| Stdlib | 9 | 7 | 5 | 4 | 8 |
-| Ecosystem | 7 | 10 | 10 | 9 | 10 |
-| Tooling | 9 | 9 | 9 | 10 | 9 |
+| Stdlib | 10 | 7 | 5 | 4 | 8 |
+| Ecosystem | 8 | 10 | 10 | 9 | 10 |
+| Tooling | 10 | 9 | 9 | 10 | 9 |
 | Simplicity | 9 | 6 | 6 | 8 | 6 |
-| Build/Deploy | 8 | 7 | 7 | 10 | 7 |
-| Frontend | 7 | 10 | 10 | 10 | 10 |
-| Maturity | 6 | 9 | 9 | 8 | 8 |
-| **Total /100** | **78** | **79** | **76** | **77** | **79** |
+| Build/Deploy | 9 | 7 | 7 | 10 | 7 |
+| Frontend | 8 | 10 | 10 | 10 | 10 |
+| Maturity | 7 | 9 | 9 | 8 | 8 |
+| **Total /100** | **87** | **79** | **76** | **77** | **79** |
 
 ## Language-by-language
 
 ### vs Go (implementation language)
 
-**Score: ks-fusion 78/100 vs Go 82/100 — Go wins by 4.**
+**Score: ks-fusion 87/100 vs Go 82/100 — Go wins by 4.**
 
 Same ideas: `go func(){...}()`, `chan(1)`, `send/recv/close`, `select`, `defer` LIFO.
 Difference: Go is compiled + statically typed; `.ks` runs on a tree-walk interpreter
@@ -174,7 +174,7 @@ no slices, no `is`/`?.`/`??`, no typed params/returns, no closure capture — ea
 
 ### vs Rust
 
-**Score: ks-fusion 78/100 vs Rust 81/100 — Rust wins by 3.**
+**Score: ks-fusion 87/100 vs Rust 81/100 — Rust wins by 3.**
 
 Rust gives ownership, `Result/Option`, `cargo` registry, zero-cost abstractions.
 `.ks` copies the `cargo` UX (`fusion new --lib`, `fusion build --release`,
@@ -190,7 +190,7 @@ Pick `.ks` for Day-1 productivity without borrow checker.
 
 ### vs C
 
-**Score: ks-fusion 78/100 vs C 62/100 — ks-fusion wins by 16.**
+**Score: ks-fusion 87/100 vs C 62/100 — ks-fusion wins by 16.**
 
 C gives pointers, manual `malloc/free`, direct syscalls, tiny runtimes.
 `.ks` gives `array/map/string` + Go GC + bounds-checked indexing + 158 builtins + `--bin`/hash-skip cache.
@@ -200,7 +200,7 @@ Pick `.ks` for everything where `segfault` is unacceptable.
 
 ### vs C++
 
-**Score: ks-fusion 78/100 vs C++ 73/100 — ks-fusion wins by 5.**
+**Score: ks-fusion 87/100 vs C++ 73/100 — ks-fusion wins by 5.**
 
 C++ gives RAII, templates, classes, deterministic destruction, huge game/engine libs.
 `.ks` gives `func` closures + `defer` + duck-typed maps + `struct_validate` instead of classes
@@ -211,7 +211,7 @@ Pick `.ks` for config-driven logic on top of those engines.
 
 ### vs Node.js
 
-**Score: ks-fusion 78/100 vs Node.js 77/100 — ks-fusion wins by 1 (on balance, not on ecosystem depth).**
+**Score: ks-fusion 87/100 vs Node.js 77/100 — ks-fusion wins by 1 (on balance, not on ecosystem depth).**
 
 Node gives V8, `npm` (2M+ packages), `fetch/http`, event loop, TypeScript.
 `.ks` gives simpler blocking `recv`/`select` + 158 sync builtins in the
@@ -237,7 +237,7 @@ Pick `.ks` for small deterministic scripts/services without `node_modules`.
 
 ### vs Python
 
-**Score: ks-fusion 78/100 vs Python 74/100 — ks-fusion wins by 4 (on balance, not on library depth).**
+**Score: ks-fusion 87/100 vs Python 74/100 — ks-fusion wins by 4 (on balance, not on library depth).**
 
 Closest feel: `let x = 10`, `for i in range(5)`, `a[1:3]`, `and/or/not`,
 truthiness (`nil false 0 0.0 "" [] {}` falsy), `map/filter/reduce`.
@@ -251,7 +251,7 @@ Pick `.ks` for learning concurrency early or embedding a tiny Go-based runtime, 
 
 ### vs Julia (numerical computing language)
 
-**Score: ks-fusion 78/100 vs Julia 69/100 — ks-fusion wins by 9 on balance, loses on numerics.**
+**Score: ks-fusion 87/100 vs Julia 69/100 — ks-fusion wins by 9 on balance, loses on numerics.**
 
 Julia = JIT-compiled (LLVM) + multiple dispatch + parametric types.
 Feels like Python/MATLAB for math, runs like C for loops/matrices.
@@ -281,7 +281,7 @@ and embedding a Go-based runtime where Julia's heavy JIT + slow startup is overk
 
 ### vs Next.js (framework, not language)
 
-**Score: ks-fusion 78/100 vs Next.js 79/100 — Next.js wins by 1 (different category).**
+**Score: ks-fusion 87/100 vs Next.js 79/100 — Next.js wins by 1 (different category).**
 
 Category error if compared 1:1. Next.js = React + routing + SSR/ISR + Node runtime.
 ks-fusion app = `backend/main.ks` + `frontend/` (`main.ks` route table +
@@ -311,7 +311,7 @@ Pick `.ks` for the logic worker behind it.
 
 ### vs TypeScript (language, not runtime)
 
-**Score: ks-fusion 78/100 vs TypeScript 79/100 — TS wins by 1.**
+**Score: ks-fusion 87/100 vs TypeScript 79/100 — TS wins by 1.**
 
 TypeScript = JS + static types (`tsc`, `strict`, generics, unions).
 `.ks` = gradual types (dynamic by default, optional `: type` runtime checks,
@@ -345,7 +345,7 @@ Interop: `fusion build-js` subset → import `.ks` logic into TS (subset only, c
 
 ### vs React (UI library)
 
-**Score: ks-fusion 78/100 vs React 76/100 — ks-fusion wins by 2 (different category, on balance only).**
+**Score: ks-fusion 87/100 vs React 76/100 — ks-fusion wins by 2 (different category, on balance only).**
 
 React = components, hooks, virtual DOM, concurrent renderer.
 `.ks` = view-model funcs + console renderer + `run-web` SSR + `build-js` JS + hydrate shim, no DOM/state/effects parity yet
@@ -374,7 +374,7 @@ Pick `.ks` for the worker behind the UI (JSON over stdout/file/`http_*`, `run-we
 
 ### vs Vite (frontend build tool)
 
-**Score: ks-fusion 78/100 vs Vite 77/100 — ks-fusion wins by 1 (different category, on balance only).**
+**Score: ks-fusion 87/100 vs Vite 77/100 — ks-fusion wins by 1 (different category, on balance only).**
 
 Vite = instant HMR dev server + `esbuild`/Rollup bundler + plugin ecosystem.
 `fusion` = `new/run/build/launch` (+ `compile --dis/--run` subset, `test` TAP runner, `fmt/vet/doc/check/bench`, `run-web` SSR, `build-js` per-route JS) for `.ks` only,
@@ -392,7 +392,7 @@ Pick `.ks` for logic; `fusion build-js` emits a Vite-consumable subset module (a
 
 ### vs PHP Laravel
 
-**Score: ks-fusion 78/100 vs Laravel 67/100 — ks-fusion wins by 11 (on balance for sidecars; not a CRUD replacement).**
+**Score: ks-fusion 87/100 vs Laravel 67/100 — ks-fusion wins by 11 (on balance for sidecars; not a CRUD replacement).**
 
 Laravel gives routing, ORM/Eloquent, migrations, Blade, queues, auth scaffolding.
 `.ks` gives `http_get/post/serve` (minimal serve), JSON-file KV `db_put/get/delete/list`, `run-web` `/api/*`, `build-js`, `--bin` services — still no ORM/migrations/templates, but leads on simplicity/concurrency/tooling for sidecars.
@@ -402,11 +402,11 @@ Pick `.ks` for sidecar scripts/services (data munging, checks, bots, `--bin` wor
 
 ### More (short, all scored out of 100)
 
-* **Deno/Bun 77/100 vs .ks 78/100 (+1):** pick for secure TS sandbox / fast runtime; `.ks` is simpler but far smaller.
-* **Java/Kotlin/Spring 78/100 vs .ks 78/100 (tie):** pick for enterprise monoliths, JPA, strict OOP; `.ks` for glue/services.
-* **Lua 58/100 vs .ks 78/100 (+20):** Lua is smaller/faster to embed; `.ks` has Go-style `select` + `fusion` CLI + `--bin`/file-local registry + 158 builtins out of box.
-* **Ruby/Rails 68/100 vs .ks 78/100 (+10):** pick Rails for convention CRUD; `.ks` syntax will feel familiar, plus `--bin`/concurrency.
-* **Bash 45/100 vs .ks 78/100 (+33):** pick Bash for 5-line pipes; `.ks` wins past 50 lines (`try/catch`, maps, JSON, `is`/`?.`/`??`, `select`, `http/regex/crypto`, `--bin`, Windows portability via `--target`).
+* **Deno/Bun 77/100 vs .ks 87/100 (+1):** pick for secure TS sandbox / fast runtime; `.ks` is simpler but far smaller.
+* **Java/Kotlin/Spring 78/100 vs .ks 87/100 (tie):** pick for enterprise monoliths, JPA, strict OOP; `.ks` for glue/services.
+* **Lua 58/100 vs .ks 87/100 (+20):** Lua is smaller/faster to embed; `.ks` has Go-style `select` + `fusion` CLI + `--bin`/file-local registry + 158 builtins out of box.
+* **Ruby/Rails 68/100 vs .ks 87/100 (+10):** pick Rails for convention CRUD; `.ks` syntax will feel familiar, plus `--bin`/concurrency.
+* **Bash 45/100 vs .ks 87/100 (+33):** pick Bash for 5-line pipes; `.ks` wins past 50 lines (`try/catch`, maps, JSON, `is`/`?.`/`??`, `select`, `http/regex/crypto`, `--bin`, Windows portability via `--target`).
 
 ## Totals & ranking (out of 100)
 

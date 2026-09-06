@@ -325,9 +325,11 @@ Commands:
    fusion pull <name[@spec]> [--out DIR]  fetch + verify sha256
    fusion yank <name[@ver]> [--remove]  yank registry version
    fusion registry            list registry packages
-   fusion run-web [appdir] [--port N] [--watch]  SSR + /api/* + SSE reload
-   fusion build-js [appdir] [--out DIR]  transpile pages to JS per-route
-   fusion build-ssg [appdir] [--out DIR]  pre-render routes to HTML+JSON
+   fusion run-web [appdir] [--port N] [--watch]  SSR + /api/* + SSE HMR patch
+   fusion build-js [appdir] [--out DIR]  transpile pages to JS per-route + hashes
+   fusion build-ssg [appdir] [--out DIR]  pre-render routes to HTML+JSON (ISR)
+   fusion audit [appdir]      check lock vs registry (yanked/updates/checksums)
+   fusion lsp                 minimal LSP (hover/goto-def/format) for VS Code
    fusion prog.ks|lib.kslib   run a single file directly.
                               .kslib bundles start with #!/usr/bin/env fusion,
                               so: chmod +x lib.kslib && ./lib.kslib
