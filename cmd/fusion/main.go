@@ -26,6 +26,7 @@ import (
 	"github.com/kswarrior/ks-fusion/internal/config"
 	"github.com/kswarrior/ks-fusion/internal/frontend"
 	"github.com/kswarrior/ks-fusion/internal/lib"
+	"github.com/kswarrior/ks-fusion/internal/tools"
 )
 
 func main() {
@@ -515,8 +516,9 @@ func cmdBuild(dir string, release bool, out string) error {
 }
 
 // checkDependencies verifies every [dependencies] entry (cargo-style):
-// `name = "1.0.0"` must match a built .kslib bundle, and
+// `name = "1.0.0"` must match a built .kslib bundle (semver: ^ ~ >= > < * supported),
 // `name = { path = "..." }` must point at a package with fusion.toml.
+// Writes fusion.lock with resolved versions.
 func checkDependencies(cfg *config.Config) error {
 	if len(cfg.Dependencies) == 0 {
 		return nil
@@ -525,15 +527,19 @@ func checkDependencies(cfg *config.Config) error {
 		filepath.Join(cfg.Dir, "test-releases"),
 		filepath.Join(cfg.Dir, "target"),
 		filepath.Join(cfg.Dir, "release"),
+		filepath.Join(cfg.Dir, "vendor"),
 		"test-releases",
 		"target",
 		"release",
+		"vendor",
 	}
 	names := make([]string, 0, len(cfg.Dependencies))
 	for name := range cfg.Dependencies {
 		names = append(names, name)
 	}
 	sortStrings(names)
+	paths := map[string]string{}
+	vers := map[string]string{}
 	for _, name := range names {
 		spec := cfg.Dependencies[name]
 		if strings.HasPrefix(spec, "path:") {
@@ -547,14 +553,29 @@ func checkDependencies(cfg *config.Config) error {
 				return fmt.Errorf("build failed: dependency %q path %q has no fusion.toml: %v", name, p, err)
 			}
 			fmt.Printf("dep ok: %s (path %s)\n", name, p)
+			paths[name] = spec
+			vers[name] = spec
 			continue
 		}
-		found, err := lib.Find(name, dirs)
+		// semver-aware resolver (v2.2): newest satisfying spec, not just newest
+		found, ver, err := tools.ResolveDep(name, spec, dirs)
 		if err != nil {
-			return fmt.Errorf("build failed: dependency %q (%s) not built: %v", name, spec, err)
+			// fallback to legacy newest-wins for exact-match ergonomics
+			found2, err2 := lib.Find(name, dirs)
+			if err2 != nil {
+				return fmt.Errorf("build failed: dependency %q (%s) not built: %v", name, spec, err)
+			}
+			fmt.Printf("dep ok: %s (%s)\n", name, found2)
+			paths[name] = found2
+			vers[name] = spec
+			continue
 		}
-		fmt.Printf("dep ok: %s (%s)\n", name, found)
+		fmt.Printf("dep ok: %s (%s, spec %q)\n", name, found, spec)
+		_ = ver
+		paths[name] = found
+		vers[name] = ver
 	}
+	_ = tools.WriteLock(cfg.Dir, paths, vers)
 	return nil
 }
 
