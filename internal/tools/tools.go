@@ -586,24 +586,20 @@ func (v *vetter) walkStmt(st *frontend.Stmt) {
 	case frontend.StmtSwitch:
 		v.walkExpr(st.Expr)
 		hasDefault := false
-		seen := map[string]bool{}
 		for _, c := range st.Cases {
 			if c.IsDefault {
 				hasDefault = true
 			}
 			for _, val := range c.Values {
 				v.walkExpr(val)
-				// duplicate case literal detection (simple)
-				k := fmt.Sprintf("%p", val)
-				_ = k
-				_ = seen
 			}
 			v.pushScope()
 			v.walkStmt(c.Body)
 			v.popScope()
 		}
-		_ = hasDefault
-		_ = seen
+		if !hasDefault {
+			v.issues = append(v.issues, VetIssue{File: v.file, Line: st.Line, Rule: "exhaustive-switch", Msg: "non-exhaustive switch (add default for enum/union coverage)"})
+		}
 	case frontend.StmtSelect:
 		for _, c := range st.SelectCases {
 			switch c.Kind {
