@@ -17,12 +17,64 @@ import (
 
 // RunWeb serves frontend/ as SSR HTML+JSON (v2.2 P2 step).
 // Routes: / -> frontend/pages/home.ks home_page, /hi -> hi_page, /api/* -> backend/api/*.ks
-func RunWeb(appDir string, port int) error {
+func RunWeb(appDir string, port int) error { return RunWebWithWatch(appDir, port, false) }
+
+// RunWebWithWatch adds --watch polling + SSE reload (v2.3 HMR-lite).
+func RunWebWithWatch(appDir string, port int, watch bool) error {
 	cfg, err := config.Load(appDir)
 	if err != nil {
 		return err
 	}
+	watcher := newWebWatcher(cfg.Dir)
+	if watch {
+		go watcher.loop()
+	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		fl, _ := w.(http.Flusher)
+		last := watcher.version()
+		tick := time.NewTicker(300 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-tick.C:
+				if v := watcher.version(); v != last {
+					fmt.Fprintf(w, "data: reload %d\n\n", v)
+					if fl != nil {
+						fl.Flush()
+					}
+					last = v
+				}
+			}
+		}
+	})
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, "/api/")
+		name = strings.Trim(name, "/")
+		if name == "" {
+			http.Error(w, "missing api name", 404)
+			return
+		}
+		// pass query as map
+		q := map[string]string{}
+		for k, vs := range r.URL.Query() {
+			if len(vs) > 0 {
+				q[k] = vs[0]
+			}
+		}
+		out, err := runAPIRouteWithQuery(cfg, name, q)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(out))
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		vmJSON, err := renderRoute(cfg, r.URL.Path)
@@ -37,27 +89,16 @@ func RunWeb(appDir string, port int) error {
 			_, _ = w.Write([]byte(vmJSON))
 			return
 		}
-		html := vmToHTML(vmJSON, r.URL.Path)
+		html := vmToHTMLWithWatch(vmJSON, r.URL.Path, watch)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(html))
 	})
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
-		name := strings.TrimPrefix(r.URL.Path, "/api/")
-		name = strings.Trim(name, "/")
-		if name == "" {
-			http.Error(w, "missing api name", 404)
-			return
-		}
-		out, err := runAPIRoute(cfg, name)
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(out))
-	})
 	addr := fmt.Sprintf(":%d", port)
-	fmt.Printf("ks-fusion web: serving %s at http://localhost%s (SSR + /api/*, ?format=json for view-model)\n", cfg.Name, addr)
+	extra := "SSR + /api/*, ?format=json"
+	if watch {
+		extra += ", --watch SSE reload"
+	}
+	fmt.Printf("ks-fusion web: serving %s at http://localhost%s (%s)\n", cfg.Name, addr, extra)
 	return http.ListenAndServe(addr, mux)
 }
 
@@ -140,24 +181,53 @@ func renderRoute(cfg *config.Config, route string) (string, error) {
 }
 
 func runAPIRoute(cfg *config.Config, name string) (string, error) {
-	// backend/api/<name>.ks -> run and capture last print? Simpler: run file, expect it prints JSON.
-	// v1: if file exists, run it and return {"ok":true}; if it contains json_stringify, capture via execution.
-	// For now: execute file; return empty JSON if no output capture.
+	return runAPIRouteWithQuery(cfg, name, nil)
+}
+
+func runAPIRouteWithQuery(cfg *config.Config, name string, query map[string]string) (string, error) {
+	// Convention (v2.3): backend/api/<name>.ks defines func api_<name>(req) -> map.
+	// req = {query: {...}}. If func missing, fallback: run file, return {"ok":true}.
 	p := filepath.Join(cfg.Dir, "backend", "api", name+".ks")
 	if _, err := os.Stat(p); err != nil {
 		return "", fmt.Errorf("unknown api %q", name)
 	}
-	prog, err := frontend.ParseFile(p)
+	data, err := os.ReadFile(p)
 	if err != nil {
 		return "", err
 	}
-	if err := backend.RunWithDir(prog, cfg.Dir); err != nil {
+	prog, err := frontend.ParseSource(string(data), p)
+	if err != nil {
 		return "", err
+	}
+	in := backend.New()
+	in.SetBaseDir(cfg.Dir)
+	if err := in.ExecProgram(prog); err != nil {
+		return "", err
+	}
+	fnName := "api_" + strings.ReplaceAll(strings.ReplaceAll(name, "-", "_"), "/", "_")
+	if fn, ok := in.Lookup(fnName); ok {
+		qm := map[string]backend.Value{}
+		for k, v := range query {
+			qm[k] = backend.StrV(v)
+		}
+		req := backend.MapV(map[string]backend.Value{"query": backend.MapV(qm), "path": backend.StrV("/api/" + name)})
+		out, err := in.Call(fn, []backend.Value{req})
+		if err != nil {
+			return "", err
+		}
+		j, err := backend.ValueToJSONable(out)
+		if err != nil {
+			return "", err
+		}
+		b, _ := json.Marshal(j)
+		return string(b), nil
 	}
 	return `{"ok":true}`, nil
 }
 
-func vmToHTML(vmJSON, route string) string {
+func vmToHTML(vmJSON, route string) string { return vmToHTMLWithWatch(vmJSON, route, false) }
+
+func vmToHTMLWithWatch(vmJSON, route string, watch bool) string {
 	var v any
 	_ = json.Unmarshal([]byte(vmJSON), &v)
 	pretty, _ := json.MarshalIndent(v, "", "  ")
