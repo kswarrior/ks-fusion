@@ -313,6 +313,20 @@ func TestRunUnionGenericTypes(t *testing.T) {
 	mustRun(t, "func f(v: int|string): int|string { return v }\nassert(f(1) == 1)\nassert(f(\"a\") == \"a\")\n")
 }
 
+func TestRunStructEnumSyntax(t *testing.T) {
+	// struct declaration + typed let + runtime check
+	mustRun(t, "struct User { name: string, age: int }\nlet u: User = {name: \"ada\", age: 36}\nassert(u.name == \"ada\")\nassert(u is \"User\")\n")
+	// struct rejects unknown fields and bad types
+	mustFail(t, "struct User { name: string }\nlet u: User = {name: \"a\", extra: 1}\n")
+	mustFail(t, "struct User { age: int }\nlet u: User = {age: \"nope\"}\n")
+	// enum declaration + typed let + is check
+	mustRun(t, "enum Color { Red, Green, Blue }\nlet c: Color = \"Red\"\nassert(c is \"Color\")\nassert(c == \"Red\")\n")
+	mustFail(t, "enum Color { Red, Green }\nlet c: Color = \"Blue\"\n")
+	// duplicate declarations fail
+	mustFail(t, "struct S { a: int }\nstruct S { b: int }\n")
+	mustFail(t, "enum E { A }\nenum E { B }\n")
+}
+
 func TestRunSqliteSubset(t *testing.T) {
 	dir := t.TempDir()
 	db := dir + "/s.db"
