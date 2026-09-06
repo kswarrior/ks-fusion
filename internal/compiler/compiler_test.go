@@ -99,10 +99,13 @@ func TestCompileUnsupported(t *testing.T) {
 	mustFailCompile(t, "go print \"hi\"\n")
 	mustFailCompile(t, "import \"lib.ks\"\n")
 	mustFailCompile(t, "try {\n print 1\n} catch e {\n print e\n}\n")
-	mustFailCompile(t, "switch 1 {\n case 1 { print 1 }\n}\n")
 	mustFailCompile(t, "func f() {\n defer print 1\n}\n")
 	mustFailCompile(t, "sleep 10\n")
-	mustFailCompile(t, "let a = [1,2]\nprint a[0:1]\n")
+	// v0.2 covers switch/slices/is/??/?./typed — these must compile now.
+	mustRun(t, "switch 1 {\n case 1 { print 1 }\n}\n")
+	mustRun(t, "let a = [1,2]\nassert(a[0:1] == [1])\n")
+	mustRun(t, "assert(1 is int)\nassert(nil?.x ?? 7 == 7)\n")
+	mustRun(t, "func add(a: int, b: int): int { return a + b }\nassert(add(1, 2) == 3)\n")
 }
 
 func TestCompileSaveLoadRoundtrip(t *testing.T) {

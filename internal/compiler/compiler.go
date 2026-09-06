@@ -428,10 +428,15 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 		return c.compileFuncDefTyped(st.Name, st.Names, st.ParamTypes, st.ReturnType, st.Body, st.Line)
 	case frontend.StmtReturn:
 		if len(c.frames) == 1 {
-			return fmt.Errorf("line %d: return outside function (compiler v0.1)", st.Line)
+			return fmt.Errorf("line %d: return outside function (compiler v0.2)", st.Line)
 		}
 		if err := c.compileExpr(st.Expr); err != nil {
 			return err
+		}
+		if rt := c.cur().returnType; rt != "" && rt != "any" {
+			// runtime return-type check (nil passes): dup via local? CheckType
+			// peeks, so emit check then return (value stays).
+			c.emitNamed(OpCheckType, 0, rt, st.Line)
 		}
 		c.emit(OpReturn, 0, st.Line)
 		return nil
@@ -1202,31 +1207,22 @@ func (c *compiler) compileExpr(e *frontend.Expr) error {
 		}
 		c.emit(OpMap, len(e.MapKeys), 0)
 	case frontend.ExprFunc:
-		if len(e.FuncParamTypes) > 0 {
-			for _, t := range e.FuncParamTypes {
-				if t != "" {
-					return fmt.Errorf("typed func params not yet supported by compiler v0.1 (use the interpreter)")
-				}
-			}
-		}
-		if e.FuncReturnType != "" {
-			return fmt.Errorf("func return types not yet supported by compiler v0.1 (use the interpreter)")
-		}
 		// anonymous literal: compile as a hidden function, then unbind the
 		// hidden name so only the value stays on the stack for the caller
 		// (`let f = func...`, call args, ...) to bind.
+		// v0.2: typed params/returns allowed (runtime-checked, nilable).
 		name := c.hiddenName("fn")
 		if e.FuncBody == nil {
-			return fmt.Errorf("bad func literal (compiler v0.1)")
+			return fmt.Errorf("bad func literal (compiler v0.2)")
 		}
 		topLevel := len(c.frames) == 1 && c.frames[0].depth == 0
-		if err := c.compileFuncDef(name, e.FuncParams, e.FuncBody, 0); err != nil {
+		if err := c.compileFuncDefTyped(name, e.FuncParams, e.FuncParamTypes, e.FuncReturnType, e.FuncBody, 0); err != nil {
 			return err
 		}
 		if topLevel {
 			code := &c.cur().fn.Chunk.Code
 			if len(*code) == 0 || (*code)[len(*code)-1].Op != OpDefineGlobal {
-				return fmt.Errorf("bad func literal (compiler v0.1)")
+				return fmt.Errorf("bad func literal (compiler v0.2)")
 			}
 			*code = (*code)[:len(*code)-1]
 			delete(c.gindex, name)
@@ -1234,12 +1230,12 @@ func (c *compiler) compileExpr(e *frontend.Expr) error {
 		} else {
 			cur := c.cur()
 			if len(cur.locals) == 0 || cur.locals[len(cur.locals)-1].name != name {
-				return fmt.Errorf("bad func literal (compiler v0.1)")
+				return fmt.Errorf("bad func literal (compiler v0.2)")
 			}
 			cur.locals = cur.locals[:len(cur.locals)-1]
 		}
 	default:
-		return fmt.Errorf("bad expression (compiler v0.1)")
+		return fmt.Errorf("bad expression (compiler v0.2)")
 	}
 	return nil
 }
