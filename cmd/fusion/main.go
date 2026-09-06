@@ -141,11 +141,12 @@ Commands:
   fusion new [--lib] <dir>   create app (backend/ frontend/ fusion.toml)
                              or library with --lib (src/lib.ks, type="lib")
   fusion run [appdir]        run backend + frontend together
-  fusion launch [target] [--backend] [--frontend]
-                             like package.json scripts: target is app dir (default ".")
-                             or explicit config file (fusion.toml / custom.toml);
-                             no flag = both, --backend = backend only,
-                             --frontend = frontend only
+  fusion launch [target] [--backend] [--frontend] [--config FILE]
+                             target is app dir (default ".") or config file
+                             (fusion.toml / custom.toml, must live in app root:
+                             entry paths resolve relative to its folder).
+                             No flag = both together; --backend = only backend;
+                             --frontend = only frontend; both flags = both.
   fusion build [dir] [--release] [--out DIR]
                              app: parse-check entries + verify [dependencies]
                              lib: pack .kslib bundle into test-releases/
@@ -373,41 +374,70 @@ func cmdRun(dir string) error {
 
 // cmdLaunch is the package.json-scripts style entry:
 // `fusion launch .` runs backend+frontend from ./fusion.toml,
-// `fusion launch <configfile>` uses that file (custom name allowed),
-// `fusion launch --backend .` / `--frontend .` runs only one side.
+// `fusion launch <configfile>` uses that file (custom name allowed, must live
+// in the app root: entry_backend/entry_frontend are relative to its folder),
+// `fusion launch --backend .` runs only backend, `--frontend` only frontend.
 func cmdLaunch(args []string) error {
 	target := "."
+	configFlag := ""
 	wantBackend := false
 	wantFrontend := false
 	seenBackend := false
 	seenFrontend := false
-	for _, a := range args {
-		switch a {
-		case "--backend", "-b", "--only-backend", "--backend-only":
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--backend" || a == "-b" || a == "--only-backend" || a == "--backend-only":
 			wantBackend = true
 			seenBackend = true
-		case "--frontend", "-f", "--only-frontend", "--frontend-only":
+		case a == "--frontend" || a == "-f" || a == "--only-frontend" || a == "--frontend-only":
 			wantFrontend = true
 			seenFrontend = true
-		case "--both", "--all":
+		case a == "--both" || a == "--all":
 			wantBackend = true
 			wantFrontend = true
 			seenBackend = true
 			seenFrontend = true
-		case "--help", "-h":
-			fmt.Println(`usage: fusion launch [target] [--backend] [--frontend]
-  target: app dir (default ".") or config file (fusion.toml, custom.toml)
-  no flag: run backend + frontend together`)
-			return nil
-		default:
-			if strings.HasPrefix(a, "-") {
-				return fmt.Errorf("unknown flag %q (usage: fusion launch [target] [--backend] [--frontend])", a)
+		case a == "--config" || a == "-c":
+			if i+1 >= len(args) {
+				return fmt.Errorf("usage: fusion launch [target] [--backend] [--frontend] [--config FILE]")
 			}
+			i++
+			if configFlag != "" {
+				return fmt.Errorf("single --config only (got %q and %q)", configFlag, args[i])
+			}
+			configFlag = args[i]
+		case strings.HasPrefix(a, "--config="):
+			v := strings.TrimPrefix(a, "--config=")
+			if v == "" {
+				return fmt.Errorf("usage: fusion launch [target] [--backend] [--frontend] [--config FILE]")
+			}
+			if configFlag != "" {
+				return fmt.Errorf("single --config only (got %q and %q)", configFlag, v)
+			}
+			configFlag = v
+		case a == "--help" || a == "-h":
+			fmt.Println(`usage: fusion launch [target] [--backend] [--frontend] [--config FILE]
+  target: app dir (default ".") or config file (fusion.toml, custom.toml).
+          The config file must live in the app root: entry_backend /
+          entry_frontend are relative to its folder.
+  no flag: both backend + frontend together; --backend: only backend;
+  --frontend: only frontend; --backend --frontend: both.`)
+			return nil
+		case strings.HasPrefix(a, "-"):
+			return fmt.Errorf("unknown flag %q (usage: fusion launch [target] [--backend] [--frontend] [--config FILE])", a)
+		default:
 			if target != "." {
-				return fmt.Errorf("usage: fusion launch [target] [--backend] [--frontend] (single target only)")
+				return fmt.Errorf("usage: fusion launch [target] [--backend] [--frontend] [--config FILE] (single target only)")
 			}
 			target = a
 		}
+	}
+	if configFlag != "" {
+		if target != "." {
+			return fmt.Errorf("pass either a target or --config %q, not both", configFlag)
+		}
+		target = configFlag
 	}
 	if !seenBackend && !seenFrontend {
 		wantBackend = true
@@ -435,17 +465,20 @@ func resolveLaunchConfig(target string) (*config.Config, error) {
 
 func runWithConfig(cfg *config.Config, runBackend, runFrontend bool) error {
 	dir := cfg.Dir
+	if cfg.IsLib() {
+		return fmt.Errorf("%s is a lib (type = \"lib\"), nothing to launch: use `fusion build %s` then `import %q` from an app", cfg.Source, dir, cfg.LibName)
+	}
 	if !runBackend && !runFrontend {
 		return fmt.Errorf("nothing to run (need --backend and/or --frontend)")
 	}
 	if runBackend && runFrontend {
 		bp, err := frontend.ParseFile(cfg.BackendPath())
 		if err != nil {
-			return err
+			return launchEntryError(cfg, "backend", cfg.BackendEntry, cfg.BackendPath(), err)
 		}
 		fp, err := frontend.ParseFile(cfg.FrontendPath())
 		if err != nil {
-			return err
+			return launchEntryError(cfg, "frontend", cfg.FrontendEntry, cfg.FrontendPath(), err)
 		}
 		fmt.Printf("== %s v%s ==\n", cfg.Name, cfg.Version)
 		// Fusion: backend + frontend run together (concurrently).
@@ -472,21 +505,35 @@ func runWithConfig(cfg *config.Config, runBackend, runFrontend bool) error {
 	var prog *frontend.Program
 	var label string
 	var path string
+	var entry string
 	if runBackend {
 		label = "[backend]"
 		path = cfg.BackendPath()
+		entry = cfg.BackendEntry
 	} else {
 		label = "[frontend]"
 		path = cfg.FrontendPath()
+		entry = cfg.FrontendEntry
 	}
 	var err error
 	prog, err = frontend.ParseFile(path)
 	if err != nil {
-		return err
+		side := "backend"
+		if !runBackend {
+			side = "frontend"
+		}
+		return launchEntryError(cfg, side, entry, path, err)
 	}
 	fmt.Printf("== %s v%s (%s only) ==\n", cfg.Name, cfg.Version, label)
 	fmt.Println(label)
 	return backend.RunWithDir(prog, dir)
+}
+
+// launchEntryError explains a missing/unparsable entry file, including the
+// custom-config pitfall: entries are relative to the config file's folder,
+// so the config must live in the app root.
+func launchEntryError(cfg *config.Config, side, entry, abs string, err error) error {
+	return fmt.Errorf("launch %s: %s entry %q not found at %s (config %s lives in %s; keep the config in the app root so relative entries resolve): %w", cfg.Source, side, entry, abs, cfg.Source, cfg.Dir, err)
 }
 
 func cmdCompile(args []string) error {

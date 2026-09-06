@@ -325,5 +325,7 @@ go build -o fusion ./cmd/fusion
 ./fusion build ./tests/hello-app
 ./fusion build --release ./tests/hello-lib
 ./fusion run ./tests/hello-app
+./fusion launch . --backend   # only backend; --frontend for frontend only
+./fusion launch ./tests/hello-app/custom.toml  # custom config must live in app root
 go test ./...
 ```
