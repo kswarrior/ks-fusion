@@ -244,15 +244,19 @@ func ResolveDep(name, spec string, dirs []string) (path, ver string, err error) 
 }
 
 // WriteLock writes fusion.lock with resolved versions.
-func WriteLock(appDir string, resolved map[string]string) error {
+func WriteLock(appDir string, paths, versions map[string]string) error {
 	type entry struct {
 		Name    string `json:"name"`
 		Version string `json:"version"`
 		Path    string `json:"path"`
 	}
 	var list []entry
-	for k, v := range resolved {
-		list = append(list, entry{Name: k, Version: v, Path: v})
+	for k, p := range paths {
+		ver := versions[k]
+		if ver == "" {
+			ver = p
+		}
+		list = append(list, entry{Name: k, Version: ver, Path: p})
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
 	data, err := json.MarshalIndent(map[string]any{"version": 1, "packages": list}, "", "  ")
@@ -290,7 +294,7 @@ func ResolveAll(cfg *config.Config) (map[string]string, error) {
 		resolved[name] = ver
 	}
 	if len(cfg.Dependencies) > 0 {
-		_ = WriteLock(cfg.Dir, paths)
+		_ = WriteLock(cfg.Dir, paths, resolved)
 	}
 	return paths, nil
 }
