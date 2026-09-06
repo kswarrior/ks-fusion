@@ -12,7 +12,7 @@
 |---|---|---|
 | Single static binary, max RPS, strict types | Go / Rust | `.ks` runs on tree-walk interpreter (full language) + VM subset (`fusion compile` v0.1); `fib(25)` ~100x slower than Go (sort/pow optimized, scopes lock-free) |
 | Kernel, drivers, games, hard realtime | C / C++ / Rust | No manual memory, no pointers, no SIMD |
-| Browser UI / React / SSR | Next.js (TS) | `frontend/main.ks` is console logic today, not DOM |
+| Browser UI / React / SSR | Next.js (TS) | `frontend/` is view-models + console renderer (P0), not DOM yet |
 | CRUD + auth + admin panel tomorrow | PHP Laravel / Python Django | No ORM, migrations, HTTP server stdlib yet |
 | Numerical / scientific / matrices | Julia | `.ks` has no vectorized ops, no DataFrames/plots, ~100x slower loop math |
 | Quick scripts, rules, gluing, learning | ks-fusion | — this is the sweet spot |
