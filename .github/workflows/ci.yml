@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Vet
+        run: go vet ./...
+      - name: Test (single run)
+        run: go test ./... -count=1
+      - name: Test repeat-safe (race on TCP shutdown)
+        run: go test ./internal/backend/ -run TestV23TCP -count=3
+      - name: Fmt check
+        run: |
+          go build -o /tmp/fusion ./cmd/fusion
+          /tmp/fusion fmt . --check
+      - name: Vet .ks apps
+        run: |
+          /tmp/fusion vet ./tests/hello-app
+          /tmp/fusion check ./tests/hello-app

@@ -61,18 +61,16 @@ func DebugFile(path string, breaks []int, trace bool) (*DebugResult, error) {
 		return res, err
 	}
 	in.WgWait()
-	// snapshot globals (skip builtins)
+	// snapshot globals (skip builtins which live in globals as VBuiltin)
 	for _, name := range in.Globals() {
-		if _, ok := backend.BuiltinNamesMap()[name]; ok {
+		v, ok := in.Lookup(name)
+		if !ok {
 			continue
 		}
-		if v, ok := in.Lookup(name); ok {
-			// skip func values that are builtins
-			if v.Kind == backend.VBuiltin {
-				continue
-			}
-			res.Vars[name] = v.Display()
+		if v.Kind == backend.VBuiltin {
+			continue
 		}
+		res.Vars[name] = v.Display()
 	}
 	return res, nil
 }
