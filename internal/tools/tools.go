@@ -397,12 +397,22 @@ func VetFile(path string) ([]VetIssue, error) {
 }
 
 func vetFileWithGlobals(path string, globalFuncs map[string]int, globalLets map[string]bool) ([]VetIssue, error) {
+	return vetFileWithGlobalsEnums(path, globalFuncs, globalLets, nil, nil)
+}
+
+func vetFileWithGlobalsEnums(path string, globalFuncs map[string]int, globalLets map[string]bool, globalEnums map[string][]string, globalTypes map[string]string) ([]VetIssue, error) {
 	prog, err := frontend.ParseFile(path)
 	if err != nil {
 		return []VetIssue{{File: path, Line: 0, Rule: "parse", Msg: err.Error(), IsError: true}}, nil
 	}
 	v := newVetter(path)
 	v.globalLets = globalLets
+	for k, vs := range globalEnums {
+		v.enums[k] = append([]string{}, vs...)
+	}
+	for k, t := range globalTypes {
+		v.varTypes[k] = t
+	}
 	// pre-pass: collect top-level func names for arity
 	for _, st := range prog.Statements {
 		if st.Kind == frontend.StmtFunc {
@@ -692,7 +702,50 @@ func (v *vetter) walkStmt(st *frontend.Stmt) {
 	case frontend.StmtDefer:
 		v.walkExpr(st.Expr)
 	case frontend.StmtBreak, frontend.StmtContinue:
+	case frontend.StmtStruct, frontend.StmtEnum:
+		// handled in pre-pass above (no runtime vars to walk)
 	}
+}
+
+// stringLiteral returns the string value when e is a "lit" or 'lit' literal.
+func stringLiteral(e *frontend.Expr) (string, bool) {
+	if e == nil || e.Kind != frontend.ExprString {
+		return "", false
+	}
+	return e.StrVal, true
+}
+
+// boolLiteral returns the bool value when e is a true/false literal.
+func boolLiteral(e *frontend.Expr) (bool, bool) {
+	if e == nil || e.Kind != frontend.ExprBool {
+		return false, false
+	}
+	return e.BoolVal, true
+}
+
+// switchEnumTarget returns the enum type name when the switch target is a
+// variable declared with an enum type (`let c: Color`), else "".
+func (v *vetter) switchEnumTarget(e *frontend.Expr) string {
+	if e == nil || e.Kind != frontend.ExprVar {
+		return ""
+	}
+	t, ok := v.varTypes[e.Name]
+	if !ok {
+		return ""
+	}
+	if _, ok := v.enums[t]; ok {
+		return t
+	}
+	return ""
+}
+
+// switchIsBool reports whether the switch target is bool-typed.
+func (v *vetter) switchIsBool(e *frontend.Expr) bool {
+	if e == nil || e.Kind != frontend.ExprVar {
+		return false
+	}
+	t, ok := v.varTypes[e.Name]
+	return ok && t == "bool"
 }
 
 func (v *vetter) walkExpr(e *frontend.Expr) {
@@ -796,6 +849,8 @@ func VetTarget(target string, denyWarns bool) ([]VetIssue, error) {
 	}
 	globalFuncs := map[string]int{}
 	globalLets := map[string]bool{}
+	globalEnums := map[string][]string{}
+	globalTypes := map[string]string{}
 	for _, f := range files {
 		prog, err := frontend.ParseFile(f)
 		if err != nil {
@@ -809,12 +864,20 @@ func VetTarget(target string, denyWarns bool) ([]VetIssue, error) {
 			}
 			if st.Kind == frontend.StmtLet {
 				globalLets[st.Name] = true
+				if st.TypeAnn != "" {
+					globalTypes[st.Name] = st.TypeAnn
+				}
+			}
+			if st.Kind == frontend.StmtEnum {
+				if _, ok := globalEnums[st.Name]; !ok {
+					globalEnums[st.Name] = append([]string{}, st.Variants...)
+				}
 			}
 		}
 	}
 	var all []VetIssue
 	for _, f := range files {
-		iss, err := vetFileWithGlobals(f, globalFuncs, globalLets)
+		iss, err := vetFileWithGlobalsEnums(f, globalFuncs, globalLets, globalEnums, globalTypes)
 		if err != nil {
 			return nil, err
 		}
