@@ -701,8 +701,11 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
   `cmd/fusion/main.go:289` — single constant, keep in sync). `release/fusion` in repo still reports **v2.0**
   (rebuild from source: `go build -o fusion ./cmd/fusion`). `repl` banner (`tools.go:851`) and old package/comment
   headers still say `v2.2`. `go test ./...` = 82 funcs (not ~90) + 2 `.ks` test files; TLS/WS/`http_serve`/`--bin`/
-  SSE-paths/`build-js`-correctness/LSP/`repl`/`bench`/CLI/`vendor`-E2E untested. `retest.log` is a leftover
+  SSE-paths/`build-js`-correctness/LSP/  `repl`/`bench`/CLI/`vendor`-E2E untested. `retest.log` is a leftover
   (`retest.sh` does not exist). The `.github` workflow in this repo is not a CI test gate (`workflow_dispatch` only, no `go test`).
+  Repeat-safety gap (verified): `go test ./internal/backend/ -count=3` fails — `TestV23TCP` binds hardcoded
+  port `18765` (`stdlib_ext2_test.go:30`) and `tcp_serve` has no shutdown/close, so iteration 2 dies with
+  `bind: address already in use`. Single `go test ./...` passes; `-count=2+` does not.
 
 ## Corrections in this rewrite (vs the previous `vs.md` revision, which said 87/100)
 
