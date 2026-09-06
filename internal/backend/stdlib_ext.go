@@ -47,7 +47,7 @@ func extraBuiltins() []*BuiltinObj {
 		{Name: "glob", Fn: bGlob},
 		{Name: "path_join", Fn: bPathJoin},
 		{Name: "abs_path", Fn: bAbsPath},
-		{Name: "remove", Fn: bRemove},
+		{Name: "remove_all", Fn: bRemoveAll},
 		{Name: "exec", Fn: bExec},
 		{Name: "shell", Fn: bShell},
 		{Name: "cwd", Fn: bCwd},
@@ -506,12 +506,12 @@ func bAbsPath(in *Interpreter, args []Value) (Value, error) {
 	return StrV(p), nil
 }
 
-func bRemove(in *Interpreter, args []Value) (Value, error) {
-	if err := needArgs("remove", args, 1, 1); err != nil {
+func bRemoveAll(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("remove_all", args, 1, 1); err != nil {
 		return Nil(), err
 	}
 	if args[0].Kind != VString {
-		return Nil(), fmt.Errorf("remove wants path string, got %s", TypeName(args[0]))
+		return Nil(), fmt.Errorf("remove_all wants path string, got %s", TypeName(args[0]))
 	}
 	if err := os.RemoveAll(args[0].Str); err != nil {
 		return Nil(), err
