@@ -30,7 +30,12 @@ func RunWebWithWatch(appDir string, port int, watch bool) error {
 		go watcher.loop()
 	}
 	mux := http.NewServeMux()
+	isr := newISRCache()
 	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
+		route := r.URL.Query().Get("route")
+		if route == "" {
+			route = "/"
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
@@ -44,7 +49,13 @@ func RunWebWithWatch(appDir string, port int, watch bool) error {
 				return
 			case <-tick.C:
 				if v := watcher.version(); v != last {
-					fmt.Fprintf(w, "data: reload %d\n\n", v)
+					// HMR patch (v2.4): send fresh view-model, client patches DOM
+					if vmJSON, err := renderRoute(cfg, route); err == nil {
+						// debounce: 1 render/tick already via 300ms poll
+						fmt.Fprintf(w, "data: %s\n\n", vmJSON)
+					} else {
+						fmt.Fprintf(w, "data: reload %d\n\n", v)
+					}
 					if fl != nil {
 						fl.Flush()
 					}
@@ -77,6 +88,13 @@ func RunWebWithWatch(appDir string, port int, watch bool) error {
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		// ISR (v2.4): serve cached HTML/JSON when revalidate TTL fresh
+		if hit, body, ctype := isr.get(r.URL.Path, r.URL.Query().Get("format")); hit {
+			w.Header().Set("X-Cache", "HIT")
+			w.Header().Set("Content-Type", ctype)
+			_, _ = w.Write([]byte(body))
+			return
+		}
 		vmJSON, err := renderRoute(cfg, r.URL.Path)
 		el := time.Since(start)
 		w.Header().Set("X-Render-Time", el.String())
@@ -86,11 +104,13 @@ func RunWebWithWatch(appDir string, port int, watch bool) error {
 		}
 		if r.URL.Query().Get("format") == "json" {
 			w.Header().Set("Content-Type", "application/json")
+			isr.put(r.URL.Path, "json", vmJSON, vmJSON)
 			_, _ = w.Write([]byte(vmJSON))
 			return
 		}
 		html := vmToHTMLWithWatch(vmJSON, r.URL.Path, watch)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		isr.put(r.URL.Path, "html", html, vmJSON)
 		_, _ = w.Write([]byte(html))
 	})
 	addr := fmt.Sprintf(":%d", port)
