@@ -366,9 +366,9 @@ func WriteLock(appDir string, paths, versions map[string]string) error {
 	return os.WriteFile(filepath.Join(appDir, "fusion.lock"), append(data, '\n'), 0o644)
 }
 
-// ResolveAll resolves all deps of cfg, writes fusion.lock, returns path map.
-// Searches local dirs + registry (with yank filtering + checksum index).
-func ResolveAll(cfg *config.Config) (map[string]string, error) {
+// resolveSearchDirs lists where bundles resolve from: app-local dirs,
+// CWD dirs, then registry roots.
+func resolveSearchDirs(cfg *config.Config) []string {
 	dirs := []string{
 		filepath.Join(cfg.Dir, "test-releases"),
 		filepath.Join(cfg.Dir, "target"),
@@ -389,6 +389,13 @@ func ResolveAll(cfg *config.Config) (map[string]string, error) {
 			continue
 		}
 	}
+	return dirs
+}
+
+// ResolveAll resolves all deps of cfg, writes fusion.lock, returns path map.
+// Searches local dirs + registry (with yank filtering + checksum index).
+func ResolveAll(cfg *config.Config) (map[string]string, error) {
+	dirs := resolveSearchDirs(cfg)
 	resolved := map[string]string{}
 	paths := map[string]string{}
 	for name, spec := range cfg.Dependencies {
