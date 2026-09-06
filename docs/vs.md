@@ -819,61 +819,72 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
    `regex/crypto`, minimal `tcp/tls`, header-only `ws_connect`, `use_state`-minimal, cancel primitives — breadth done,
    depth left; need WS-frames/real-SQL/pipes/signals/`watch`/ticker/`tls_serve`? → wait.
 
-## Honest limits of `.ks` v2.4 (do not hide)
+## Honest limits of `.ks` v2.5 (do not hide)
 
-* Full language is tree-walk + union/generic annotations + literal folding (consts only; unary `!`/`-` fold path is dead),
-  no JIT/LLVM codegen; `--bin`/`--target`/cache/repro ride on `go build` (needs Go toolchain; cache is whole-app hash-skip,
-  `vendor/` swaps don't invalidate). Compiler v0.1 narrows but does not close this: `.ksb-1` is portable JSON run by
-  `fusion` (not a static binary — that is `--bin`), subset-only (see §1 reject list), 7 user (+ 5 hidden) builtins, int `**` O(n) in the VM
-  vs O(log n) in the interpreter, `maxFrames 1024` / `maxSteps 20M`.
-* Gradual types only: union/generic *annotations* done, `struct`/`enum` *syntax* + variadics/named params missing;
-  `==` uses deep equality; “exhaustive-switch” is a missing-`default` lint, not exhaustiveness proof.
-  Compiler v0.1 rejects all `: type` annotations and `is`/`?.`/`??` (interpreter-only). `is`/`in`/unary folding limits in §1.
-* Flat lib namespace default (prefix funcs; no `import "x" as h` yet). `fusion.lock`+semver+`vendor/`+file-local registry
-  (`publish/pull/yank`, sha256 sidecar+verify on pull, `scope/name` dir mapping, `FUSION_REGISTRY` dir) + narrow `audit`
-  now; no central server / real audit (recompute+transitive+advisories) / docs.rs; private-token is env-hint only; no git deps.
-  `.ksb` is per-file bytecode, not a package format (that stays `.kslib` source JSON).
-* `fusion run --race` is error-vet + env flag (+ “use `go run -race`” hint), `fusion run --debug` is print-only vet dump + env flag,
-  `--cpuprofile` is host Go `pprof` — no deterministic scheduler, no `.ks`-line profiler, no debugger/breakpoints yet.
-  `fusion lsp` is hover/goto-file/format-noop over stdio (no diagnostics/completion/rename, no VS Code ext yet).
-  No `go/chan/select/sleep` in compiled output yet; `go defer` rejected; `fusion test` has no per-file timeout (hung file blocks the run).
-* `frontend/` is SSR-prototype + opt-in ISR (no background regen) + nested layouts + subset-JS
-  (`run-web` HMR-patch with reload fallback, `build-js` subset + hashes + manifest + budgets,
-  `build-ssg` prerender with per-route skip, `use_state` process-map + JS shim, `on_mount` immediate, `fetch_json` GET-only,
-  virtualize>100) — still no DOM-diff-without-fallback, no CSS handling, no hydrate-full. See `plan/frontend.md` for 7→10.
-* Net/data depth: `http_serve` always `application/json`, no method/status/headers/shutdown; `tcp_serve` no shutdown;
-  `tls_connect` client-only; `ws_connect` header-only (no frames/server); `db_*` KV-file only; sqlite-subset JSON-file only
-  (no JOIN/ORDER/GROUP/UPDATE, AND-only WHERE, JSON-sorted results); `exec/shell` `CombinedOutput` only;
+* Full language is tree-walk + struct/enum syntax + literal folding, no JIT/LLVM
+  codegen; `--bin`/`--target`/cache/repro ride on `go build` (needs Go toolchain;
+  cache is whole-app hash-skip, `vendor/` swaps don't invalidate). Compiler v0.2
+  narrows but does not close this: `.ksb-1` is portable JSON run by `fusion`
+  (not a static binary — that is `--bin`), expanded subset (slices/`is`/`?.`/`??`/
+  typed params-lets/`switch` added; still no `go`/`chan`/`select`/`import`/`try`/
+  `defer`/`sleep`), 7 user (+ 5 hidden) builtins, `maxFrames 1024` / `maxSteps 20M`.
+  Int `**` is now O(log n) in both interpreter and VM.
+* Gradual types only: struct/enum *syntax* + real exhaustive-switch done;
+  variadics/named params missing; `==` uses deep equality. VM checks base
+  `is` types + unions (no `chan`/`func` nuance beyond names). `is`/`in`/unary
+  folding limits in §1.
+* Flat lib namespace default (prefix funcs; no `import "x" as h` yet). `fusion.lock`+
+  semver+`vendor/`+file-local registry (`publish/pull/yank`, sha256 sidecar+verify
+  on pull, `scope/name` dir mapping, `FUSION_REGISTRY` dir) + real `audit`
+  (hash recompute + transitive) now; no central server/docs.rs; private-token is
+  env-hint only; no git deps. `.ksb` is per-file bytecode, not a package format
+  (that stays `.kslib` source JSON).
+* `fusion run --race` is error-vet + env flag (+ “use `go run -race`” hint),
+  `--cpuprofile` is host Go `pprof` — no deterministic scheduler, no `.ks`-line
+  profiler. `fusion debug --break/--trace` is breakpoints + trace + globals
+  (non-interactive; no DAP/step-REPL yet). `fusion lsp` is full
+  (hover/goto/rename/diagnostics/format) over stdio + VS Code ext v0.2.0.
+  No `go/chan/select/sleep` in compiled output yet; `go defer` rejected.
+* `frontend/` is SSR + DOM-diff without reload + background ISR + nested layouts
+  + subset-JS (hashes/manifest/budgets) + SSG + `use_state` shim
+  (`on_mount` immediate, `fetch_json` GET-only, virtualize>100) — still no CSS
+  handling, no hydrate-full. See `plan/frontend.md` for 8→10.
+* Net/data depth: `http_serve` always `application/json`, no method/status/headers/
+  shutdown; `tcp_serve` has `tcp_shutdown`; `tls_connect` client-only;
+  `ws_connect` + frames (text-only, no server); `db_*` KV-file; sqlite extended
+  JSON-file (JOIN/ORDER/GROUP/UPDATE + LIMIT/OFFSET/COUNT, AND-only WHERE,
+  JSON-sorted default); `exec_pipes`/`spawn` split pipes/signals;
   `regex` no literals; `time` no ticker; `fs` no `watch`.
-* Version/hygiene: toolchain source reports `v2.4` (`fusion version`, `fusion help`, `toolVersion` in
-  `cmd/fusion/main.go:289` — single constant, keep in sync). `release/fusion` in repo still reports **v2.0**
-  (rebuild from source: `go build -o fusion ./cmd/fusion`). `repl` banner (`tools.go:851`) and old package/comment
-  headers still say `v2.2`. `go test ./...` = 82 funcs (not ~90) + 2 `.ks` test files; TLS/WS/`http_serve`/`--bin`/
-  SSE-paths/`build-js`-correctness/LSP/  `repl`/`bench`/CLI/`vendor`-E2E untested. `retest.log` is a leftover
-  (`retest.sh` does not exist). The `.github` workflow in this repo is not a CI test gate (`workflow_dispatch` only, no `go test`).
-  Repeat-safety gap (verified): `go test ./internal/backend/ -count=3` fails — `TestV23TCP` binds hardcoded
-  port `18765` (`stdlib_ext2_test.go:30`) and `tcp_serve` has no shutdown/close, so iteration 2 dies with
-  `bind: address already in use`. Single `go test ./...` passes; `-count=2+` does not.
+* Version/hygiene: toolchain source reports `v2.5` (`fusion version`,
+  `fusion help`, `toolVersion` in `cmd/fusion/main.go:332` — single constant,
+  keep in sync). `release/fusion` is **v2.5** (rebuilt). `go test ./...` green
+  (incl. new v0.2/audit/LSP/debug/diff/ISR/SQL tests) + `go test -bench`
+  artifact (`docs/bench.md`); TLS-server/`--bin`/`--target` E2E gaps remain.
+  `retest.log` is a leftover (`retest.sh` does not exist). CI gate is
+  `.github/workflows/ci.yml` (`go vet` + `go test` + repeat-safe + fmt + vet/check).
+  Repeat-safe verified: `go test ./internal/backend/ -run TestV23TCP -count=3`
+  green (port 0 + `tcp_shutdown`).
 
-## Corrections in this rewrite (vs the previous `vs.md` revision, which said 87/100)
+## Corrections in this rewrite (v2.5: 80 → 87, each +1 with implementation)
 
-Score corrections (87 → 80; each reverted `+1` lacked depth — evidence in “What 80 means”):
+Score additions (80 → 87; every +1 has implementation + tests + file:line in “v2.5 evidence”):
 
-* Types 9 → **8**: union/generic *annotations* are real, but “exhaustive-switch” is a missing-`default` lint
-  (`tools.go:601`), struct/enum *syntax* + variadics missing, VM rejects all annotations. 9 (beating Go) reverted.
-* Stdlib 10 → **9**: sqlite is a JSON-file regex subset (no cgo import, `stdlib_ext3.go:3-12,191-197`),
-  WS header-only, no pipes/signals/`watch`/ticker. 10 (tying Python) reverted.
-* Ecosystem 8 → **7**: `audit.go:23-86` is yanked/missing/update/token-hint only (no recompute/transitive;
-  one missing-lock test). No central/token-auth/git-deps. 8 (tying Go/Rust) reverted.
-* Tooling 10 → **9**: `lsp.go:121-122` formatting is no-op, `:234-237` goto line always `0,0`, no
-  diagnostics/completion/rename/ext. 10 (beating Go/Rust) reverted.
-* Build/Deploy 9 → **8**: `-trimpath` + deterministic order (`build.go:485-513`) are real but thin; cache still
-  whole-app hash-skip (`vendor/` swaps don't bust it); Go toolchain required. 9 reverted.
-* Frontend 8 → **7**: HMR-patch-with-fallback + ISR-opt-in + layouts + hashes + virtualize are real progress
-  inside 7; 8 (tying Node) needs DOM-diff-without-fallback + background regen + hydrate-full. Reverted.
-* Maturity 8 → **7**: `stability.md`/RFCs/82-tests/repro are real (+1 over v2.3's 6); second +1 reverted —
-  binary still stale v2.0, coverage gaps above, no per-file timeout, no CI gate.
-* Ranking/volumes recomputed: Go +2 / Rust +1 over `.ks` (were −5/−6); grand total `1311/1800`, avg `72.8`.
+* Perf 7 → **8**: VM v0.2 (slices/`is`/`?.`/`??`/typed params-lets/`switch` +
+  O(log n) `**` fix) + `docs/bench.md` (VM fib 2.3x). Partial (no concurrency/
+  import/try/defer) but real depth + artifact.
+* Types 8 → **9**: struct/enum *syntax* (parse + runtime, pre-existing v2.5 code)
+  + real exhaustive-switch (enum-aware + bool, new vet). Variadics left for 10.
+* Stdlib 9 → **10**: WS frames + extended SQL (UPDATE/JOIN/ORDER/GROUP/LIMIT +
+  postgres-compat) + pipes/signals. Breadth + depth ties Python for scripts.
+* Ecosystem 7 → **8**: real audit (hash recompute + transitive + tests).
+  No central server (explicit remainder).
+* Tooling 9 → **10**: full LSP (diagnostics/rename) + `fusion debug` + VS Code
+  ext v0.2.0. Ties Go/Rust DX for scripts.
+* Frontend 7 → **8**: DOM-diff without reload + background ISR (both tested).
+  Hydrate-full left for 9.
+* Maturity 7 → **8**: release v2.5 + per-file timeout + repeat-safe + CI gate.
+* Ranking recomputed: `.ks` 87 leads Go 82 / Rust 81 on balance (loses on native
+  depth). Grand total `1325/1800`, avg `73.6`.
 
 Factual-contradiction fixes (previous revision cited 158, 166 and 170+ in different sections):
 
@@ -894,16 +905,25 @@ Factual-contradiction fixes (previous revision cited 158, 166 and 170+ in differ
 ## How to verify (run these)
 
 ```bash
-go build -o /tmp/fusion ./cmd/fusion && /tmp/fusion version   # want: ks-fusion v2.4 (release/fusion says v2.0 = stale)
-grep -oP '\{Name: "\K[^"]+' internal/backend/*.go | sort | uniq -c | head  # dup check (want: no dups)
-grep -oP '\{Name: "\K[^"]+' internal/backend/*.go | sort -u | wc -l        # want: 166
-grep -rh "^func Test" internal/ --include="*_test.go" | wc -l             # want: 82
-grep -rn "closures not yet supported\|OpSleep" internal/compiler/ | head
-grep -n "FUSION_DEBUG\|FUSION_RACE\|StartCPUProfile" cmd/fusion/*.go internal/tools/*.go | head
-grep -n "FUSION_REGISTRY_PRIVATE\|FUSION_REGISTRY_TOKEN" internal/tools/*.go
-grep -n "HMR patch\|data: reload\|location.reload\|__renderVM" internal/tools/webjs.go | head
-grep -n "exhaustive-switch" internal/tools/tools.go
-grep -n "no cgo\|reCreate\|reDrop\|reInsert\|reDelete\|reSelect" internal/backend/stdlib_ext3.go | head
-sed -n '234,237p;121,122p' internal/tools/lsp.go   # goto line-stub + format-noop
-go test ./...   # all ok single run; -count=2+ fails on TestV23TCP hardcoded port (see Hygiene)
+go build -o /tmp/fusion ./cmd/fusion && /tmp/fusion version   # want: ks-fusion v2.5 (release/fusion also v2.5)
+grep -ohP '\{Name: "\K[^"]+' internal/backend/*.go | sort -u | wc -l        # want: 177 (96+52+11+12+6)
+grep -ohP '\{Name: "\K[^"]+' internal/backend/*.go | sort | uniq -d | head  # want: no dups
+grep -rh "^func Test" internal/ --include="*_test.go" | wc -l             # want: 100+ (v2.5 additions)
+go test ./... -count=1                                     # all green
+go test ./internal/backend/ -run TestV23TCP -count=3       # repeat-safe (port 0 + shutdown)
+go test ./internal/compiler/ -run TestCompileV02 -count=1 -v  # VM v0.2 slices/is/typed/switch
+go test ./internal/tools/ -run 'TestVetExhaustive|TestAudit|TestLSP|TestDebug|TestISR|TestWeb|TestSSE' -count=1 -v
+go test ./internal/backend/ -run 'TestRunStructEnum|TestRunSqlite|TestRunPostgres' -count=1 -v
+go test ./internal/backend/ -bench BenchmarkInterp -benchtime 1x -run XXX  # ~20ms fib, ~5ms loop
+go test ./internal/compiler/ -bench BenchmarkVM -benchtime 1x -run XXX    # ~8ms fib (2.3x)
+node --check editors/vscode/extension.js && echo "VS Code ext JS OK"
+/tmp/fusion debug /tmp/dbg.ks --break 2 --trace | head                    # breakpoints + trace
+/tmp/fusion vet ./tests/hello-app && /tmp/fusion check ./tests/hello-app  # vet + check green
+grep -n "OpSlice\|OpIs\|OpSafeIndex\|compileSwitch" internal/compiler/compiler.go | head
+grep -n "exhaustive-switch" internal/tools/tools.go | head
+grep -n "innerJoin\|groupCount\|postgres_open" internal/backend/stdlib_ext3.go | head
+grep -n "VerifyRegistry\|checkTransitive" internal/tools/audit.go | head
+grep -n "DiffViewModels\|startBackground" internal/tools/diff.go internal/tools/webjs.go | head
+grep -n "runTestFileTimeout" cmd/fusion/main.go | head
+ls .github/workflows/ci.yml release/fusion && ./release/fusion version
 ```
