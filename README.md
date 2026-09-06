@@ -242,7 +242,32 @@ try_recv(ch)           non-blocking recv, nil when empty
 recv_timeout(ch, ms)   value, or nil on timeout (also nil on drained close)
 send_timeout(ch, v, ms)  true if sent, false on timeout
 chan_len(ch) chan_cap(ch) chan_closed(ch)
+with_timeout(ms, fn)   run fn with timeout; parallel(arr, fn) map in parallel
 sleep(ms)              also a statement
+
+# http + fetch (v2.2)
+http_get(url, headers?) http_post(url, body, ctype?) fetch_json(url) http_serve(port, handler)
+
+# regex (v2.2)
+regex_match(s, pat) regex_find(s, pat) regex_replace(s, pat, repl) regex_split(s, pat)
+
+# crypto/encoding (v2.2)
+sha256(s) md5(s) hmac_sha256(msg, key) base64_encode(s) base64_decode(s)
+hex_encode(s) hex_decode(s) uuid() random_bytes(n)
+
+# fs full (v2.2)
+stat(p) cp(src,dst) mv(src,dst) copy(src,dst) glob(pat) path_join(...) abs_path(p) remove_all(p)
+
+# process/time (v2.2)
+exec(cmd, args?) shell(cmd) cwd() env_all() format_time(ms, layout?) parse_time(s, layout?) time_parts(ms)
+
+# kv db / log / asserts (v2.2)
+db_put(db,k,v) db_get(db,k,dflt?) db_delete(db,k) db_list(db)
+log_info(m) log_warn(m) log_error(m) assert_eq(a,b) assert_ne(a,b) assert_contains(h,n)
+
+# types (v2.2)
+struct_validate(m, schema) struct_assert(m, schema) enum_create(arr) enum_valid(e, v) is_number(x)
+trim_prefix(s,p) trim_suffix(s,sfx) repeat_str(s,n)
 ```
 
 ### Scoping

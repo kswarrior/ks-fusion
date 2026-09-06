@@ -1,10 +1,10 @@
 # ks-fusion Futures / Roadmap
 
-> Current: `v2.1` — tree-walk interpreter in Go, gradual-typed `.ks` language
-> (`: type` annotations, `is`, `?.`/`??`, `ok`/`err` results).
+> Current: `v2.2` (69/100 in docs/vs.md) — tree-walk interpreter in Go, gradual-typed `.ks` language
+> (`: type` annotations, `is`, `?.`/`??`, `ok`/`err` results, 149 builtins, --bin, fmt/vet/doc/check/repl/bench).
 > This doc lists what exists, what is planned, and what is explicitly non-goals.
 
-## 1. Where we are (v2.1, real today)
+## 1. Where we are (v2.2, real today)
 
 * Frontend: lexer + parser (`internal/frontend`) — `# // /* */` comments,
   `"double"`/`'single'` strings, `0xFF 0b101 0o17 1_000 1e3 .5` numbers,
@@ -12,18 +12,23 @@
 * Backend: tree-walk interpreter (`internal/backend`) with closures,
   `if/while/for-in/for-c/switch/try-catch-finally/defer/break/continue`,
   runtime type checks for annotations, `is`/`?.`/`??`.
-* Types (v2.1, gradual): `nil bool int float number string array map func chan any ok err` —
+* Types (v2.2, gradual): `nil bool int float number string array map func chan any ok err` —
   dynamic by default, optional `: type` (nullable), `is`/`is not` tests,
-  `is_type`/`assert_type`, `ok(v)/err(e)` + `is_ok/is_err/unwrap/unwrap_or`.
+  `is_type`/`assert_type`, `ok(v)/err(e)` + `is_ok/is_err/unwrap/unwrap_or`,
+  plus `struct_validate/assert`, `enum_create/valid`, `is_number`, `assert_eq/ne/contains`, `fusion check`/`vet`.
 * Concurrency: `go` + `chan(n) send/recv/close/try_send/try_recv/chan_len/chan_cap/sleep`
   + `select { case v = recv(c) / recv(c) / send(c, v) / timeout(ms) / default }`
   + `for v in ch` drain-until-close + `recv_timeout/send_timeout/chan_closed`,
+  + `with_timeout/parallel` + `fusion run --race`,
   backed by Go goroutines.
-* Stdlib (97 builtins): `len str int float bool type is_type assert_type range`,
-  array/map/string helpers, `math/time/rand/bit_*`,
-  `map/filter/each/reduce/apply`, `json_stringify/json_parse`,
-  `ok/err/is_ok/is_err/unwrap/unwrap_or`,
-  `read_file/write_file/append_file/exists/list_dir/mkdir/remove/input/argv/env/exit`.
+* Stdlib (149 builtins): all v2.1 plus `http_get/post/fetch_json/http_serve`,
+  `regex_match/find/replace/split`, `sha256/md5/hmac_sha256/base64_encode/decode/hex_encode/decode/uuid/random_bytes`,
+  `stat/cp/mv/glob/path_join/abs_path/remove_all`, `exec/shell/cwd/env_all`,
+  `format_time/parse_time/time_parts`, `db_put/get/delete/list`, `log_info/warn/error`,
+  `assert_eq/ne/contains`, `with_timeout/parallel`, `struct_validate/enum_create`.
+* Tooling (v2.2): `fusion fmt/vet/doc/check/repl/bench` + `test`, constant folding.
+* Build (v2.2): `fusion build --bin` single static binary + `--target` matrix + `fusion.lock` semver + `vendor/`.
+* Frontend (v2.2): `fusion run-web` SSR + `fusion build-js` per-route JS + budgets.
 * Packaging (`fusion.toml` + `.kslib`):
   `fusion new [--lib]`, `fusion build [--release] [--out DIR]`, `fusion run`,
   direct `fusion prog.ks` / `fusion lib.kslib` + `#!/usr/bin/env fusion` shebang.
