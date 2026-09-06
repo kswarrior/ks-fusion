@@ -2714,7 +2714,7 @@ func allBuiltins() []*BuiltinObj {
 		{Name: "unwrap", Fn: bUnwrap},
 		{Name: "unwrap_or", Fn: bUnwrapOr},
 	}
-	return append(append(append(base, extraBuiltins()...), extraBuiltinsV23()...), extraBuiltinsV24()...)
+	return append(append(append(append(base, extraBuiltins()...), extraBuiltinsV23()...), extraBuiltinsV24()...), extraBuiltinsV25()...)
 }
 
 // Process-wide builtin cache: built once, reused by every interpreter.
