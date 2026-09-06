@@ -141,3 +141,31 @@ func TestCompileDisassemble(t *testing.T) {
 		t.Fatalf("disassembly missing ops:\n%s", out)
 	}
 }
+
+func TestCompileV02Slices(t *testing.T) {
+	mustRun(t, "assert([1,2,3,4][1:3] == [2, 3])\n")
+	mustRun(t, "assert([1,2,3][:2] == [1, 2])\nassert([1,2,3][1:] == [2, 3])\n")
+	mustRun(t, "assert(\"hello\"[1:3] == \"el\")\nassert(\"hello\"[-2:] == \"lo\")\n")
+	mustFailRun(t, "let x = 1\nassert(x[0:1] == 1)\n")
+}
+
+func TestCompileV02IsCoalesceSafe(t *testing.T) {
+	mustRun(t, "assert(1 is int)\nassert(1 is \"int\")\nassert(\"a\" is not int)\n")
+	mustRun(t, "assert(1 is number and 2.5 is number)\n")
+	mustRun(t, "assert((nil ?? 7) == 7)\nassert((5 ?? 7) == 5)\n")
+	mustRun(t, "let m = {a: 1}\nassert(m?.a == 1)\nassert(m?.missing == nil)\n")
+	mustRun(t, "let a = [1, 2]\nassert(a?.[9] ?? 99 == 99)\n")
+}
+
+func TestCompileV02Typed(t *testing.T) {
+	mustRun(t, "let x: int = 5\nassert(x == 5)\n")
+	mustRun(t, "func add(a: int, b: int): int { return a + b }\nassert(add(2, 3) == 5)\n")
+	mustFailRun(t, "let x: int = \"nope\"\n")
+	mustFailRun(t, "func add(a: int): int { return a }\nprint add(\"bad\")\n")
+}
+
+func TestCompileV02Switch(t *testing.T) {
+	mustRun(t, "let r = \"\"\nswitch 2 {\n case 1 { r = \"one\" }\n case 2, 3 { r = \"few\" }\n default { r = \"many\" }\n}\nassert(r == \"few\")\n")
+	mustRun(t, "let r = \"\"\nswitch 99 {\n case 1 { r = \"one\" }\n default { r = \"dflt\" }\n}\nassert(r == \"dflt\")\n")
+	mustRun(t, "for i in range(3) {\n switch i {\n case 1 { break }\n default { continue }\n }\n assert(i == 1)\n}\n")
+}
