@@ -286,11 +286,19 @@ func toFloat(v Value) float64 {
 	return float64(v.Int)
 }
 
+// validType reports whether name is a known type: base names, unions and
+// generics thereof, or a struct/enum nominal declared in this interpreter.
+// Keep the package-level validType for contexts without an interpreter
+// (all such calls validate base/union/generic shapes only).
 func validType(name string) bool {
+	return validTypeIn(name, nil)
+}
+
+func validTypeIn(name string, in *Interpreter) bool {
 	// unions + generics (v2.4): int|string, array<int>, map<string,int>
 	if hasTopPipe(name) {
 		for _, part := range splitTopPipe(name) {
-			if !validType(part) {
+			if !validTypeIn(part, in) {
 				return false
 			}
 		}
@@ -299,9 +307,9 @@ func validType(name string) bool {
 	if base, args, ok := parseTypeGeneric(name); ok {
 		switch base {
 		case "array":
-			return len(args) == 1 && validType(args[0])
+			return len(args) == 1 && validTypeIn(args[0], in)
 		case "map":
-			return len(args) == 2 && validType(args[0]) && validType(args[1])
+			return len(args) == 2 && validTypeIn(args[0], in) && validTypeIn(args[1], in)
 		}
 		return false
 	}
@@ -310,7 +318,21 @@ func validType(name string) bool {
 		"array", "map", "func", "chan", "any", "ok", "err":
 		return true
 	}
+	if in != nil {
+		return in.hasNominalType(name)
+	}
 	return false
+}
+
+// hasNominalType reports whether name names a declared struct or enum.
+func (in *Interpreter) hasNominalType(name string) bool {
+	in.typeMu.RLock()
+	defer in.typeMu.RUnlock()
+	if _, ok := in.structs[name]; ok {
+		return true
+	}
+	_, ok := in.enums[name]
+	return ok
 }
 
 func hasTopPipe(s string) bool {
