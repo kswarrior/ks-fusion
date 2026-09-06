@@ -80,12 +80,27 @@ func main() {
 	case "run":
 		dir := "."
 		race := false
-		for _, a := range os.Args[2:] {
+		cpuprofile := ""
+		debug := false
+		args := os.Args[2:]
+		for i := 0; i < len(args); i++ {
+			a := args[i]
 			switch {
 			case a == "--race":
 				race = true
+			case a == "--debug":
+				debug = true
+			case a == "--cpuprofile":
+				if i+1 >= len(args) {
+					fmt.Println("usage: fusion run [appdir] [--race] [--debug] [--cpuprofile FILE]")
+					os.Exit(1)
+				}
+				i++
+				cpuprofile = args[i]
+			case strings.HasPrefix(a, "--cpuprofile="):
+				cpuprofile = strings.TrimPrefix(a, "--cpuprofile=")
 			case a == "--help" || a == "-h":
-				fmt.Println("usage: fusion run [appdir] [--race] (backend + frontend together; --race enables race checks)")
+				fmt.Println("usage: fusion run [appdir] [--race] [--debug] [--cpuprofile FILE]")
 				return
 			case strings.HasPrefix(a, "-"):
 				fmt.Printf("unknown flag %q\n", a)
@@ -93,13 +108,13 @@ func main() {
 				os.Exit(1)
 			default:
 				if dir != "." {
-					fmt.Println("usage: fusion run [appdir] [--race] (single target only)")
+					fmt.Println("usage: fusion run [appdir] [--race] [--debug] [--cpuprofile FILE] (single target only)")
 					os.Exit(1)
 				}
 				dir = a
 			}
 		}
-		if err := cmdRunWithRace(dir, race); err != nil {
+		if err := cmdRunWithRaceProfile(dir, race, cpuprofile, debug); err != nil {
 			fmt.Println("error:", err)
 			os.Exit(1)
 		}
@@ -534,6 +549,11 @@ func cmdBuild(dir string, release bool, out string) error {
 	if err != nil {
 		return err
 	}
+	// v2.3 build cache: skip redundant work when hash matches
+	if hit, _, _ := tools.CheckCache(cfg.Dir); hit {
+		fmt.Printf("build cached: %s (no changes)\n", cfg.Dir)
+		return nil
+	}
 	if cfg.IsLib() {
 		if out == "" {
 			out = defaultOutDir(release)
@@ -550,6 +570,7 @@ func cmdBuild(dir string, release bool, out string) error {
 		}
 		fmt.Printf("built %s v%s (%s): %s\n", cfg.LibName, cfg.Version, profile, artifact)
 		fmt.Printf("use it with: import %q\n", cfg.LibName)
+		_ = tools.WriteCache(cfg.Dir)
 		return nil
 	}
 	for _, f := range []string{cfg.BackendPath(), cfg.FrontendPath()} {
@@ -561,6 +582,7 @@ func cmdBuild(dir string, release bool, out string) error {
 	if err := checkDependencies(cfg); err != nil {
 		return err
 	}
+	_ = tools.WriteCache(cfg.Dir)
 	fmt.Printf("build ok: %s v%s\n", cfg.Name, cfg.Version)
 	return nil
 }
