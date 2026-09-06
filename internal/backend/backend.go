@@ -335,6 +335,39 @@ func (in *Interpreter) hasNominalType(name string) bool {
 	return ok
 }
 
+// validTypeWithMaps validates a type name against base/union/generic shapes
+// plus the given nominal maps (used while holding typeMu during declaration,
+// to avoid re-locking).
+func validTypeWithMaps(name string, structs map[string]*StructDef, enums map[string]*EnumDef) bool {
+	if hasTopPipe(name) {
+		for _, part := range splitTopPipe(name) {
+			if !validTypeWithMaps(part, structs, enums) {
+				return false
+			}
+		}
+		return true
+	}
+	if base, args, ok := parseTypeGeneric(name); ok {
+		switch base {
+		case "array":
+			return len(args) == 1 && validTypeWithMaps(args[0], structs, enums)
+		case "map":
+			return len(args) == 2 && validTypeWithMaps(args[0], structs, enums) && validTypeWithMaps(args[1], structs, enums)
+		}
+		return false
+	}
+	switch name {
+	case "nil", "bool", "int", "float", "number", "string",
+		"array", "map", "func", "chan", "any", "ok", "err":
+		return true
+	}
+	if _, ok := structs[name]; ok {
+		return true
+	}
+	_, ok := enums[name]
+	return ok
+}
+
 func hasTopPipe(s string) bool {
 	depth := 0
 	for i := 0; i < len(s); i++ {
@@ -1122,9 +1155,68 @@ func (in *Interpreter) execStmt(env *Env, st *frontend.Stmt) error {
 		return in.execSelect(env, st)
 	case frontend.StmtDefer:
 		return in.execDefer(env, st)
+	case frontend.StmtStruct:
+		return in.execStructDecl(st)
+	case frontend.StmtEnum:
+		return in.execEnumDecl(st)
 	default:
 		return fmt.Errorf("unknown statement")
 	}
+}
+
+// execStructDecl registers `struct Name { field: type, ... }` (v2.5).
+// Duplicate declarations are an error; field types must be known
+// (base/union/generic or previously-declared nominals, forward refs to
+// later nominals are rejected — declare types top-down).
+func (in *Interpreter) execStructDecl(st *frontend.Stmt) error {
+	in.typeMu.Lock()
+	defer in.typeMu.Unlock()
+	if _, ok := in.structs[st.Name]; ok {
+		return fmt.Errorf("duplicate struct %q", st.Name)
+	}
+	if _, ok := in.enums[st.Name]; ok {
+		return fmt.Errorf("type %q already declared as enum", st.Name)
+	}
+	fields := make([]StructField, 0, len(st.Fields))
+	seen := map[string]bool{}
+	for _, f := range st.Fields {
+		if seen[f.Name] {
+			return fmt.Errorf("duplicate struct field %q", f.Name)
+		}
+		seen[f.Name] = true
+		// Validate field type shape without holding the lock recursively:
+		// use the unlocked helper over current maps + base names.
+		if !validTypeWithMaps(f.Type, in.structs, in.enums) {
+			return fmt.Errorf("struct %s: unknown type %q for field %q", st.Name, f.Type, f.Name)
+		}
+		fields = append(fields, StructField{Name: f.Name, Type: f.Type})
+	}
+	in.structs[st.Name] = &StructDef{Name: st.Name, Fields: fields, Line: st.Line}
+	return nil
+}
+
+// execEnumDecl registers `enum Name { A, B, ... }` (v2.5).
+func (in *Interpreter) execEnumDecl(st *frontend.Stmt) error {
+	in.typeMu.Lock()
+	defer in.typeMu.Unlock()
+	if _, ok := in.enums[st.Name]; ok {
+		return fmt.Errorf("duplicate enum %q", st.Name)
+	}
+	if _, ok := in.structs[st.Name]; ok {
+		return fmt.Errorf("type %q already declared as struct", st.Name)
+	}
+	if len(st.Variants) == 0 {
+		return fmt.Errorf("enum %s needs at least one variant", st.Name)
+	}
+	seen := map[string]bool{}
+	for _, v := range st.Variants {
+		if seen[v] {
+			return fmt.Errorf("duplicate enum variant %q", v)
+		}
+		seen[v] = true
+	}
+	in.enums[st.Name] = &EnumDef{Name: st.Name, Variants: append([]string{}, st.Variants...), Line: st.Line}
+	return nil
 }
 
 func assignRHS(st *frontend.Stmt) *frontend.Expr {
