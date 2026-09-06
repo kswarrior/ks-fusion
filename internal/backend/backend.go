@@ -427,11 +427,11 @@ func isErrValue(v Value) bool {
 	return hasErr
 }
 
-func matchesTypeStrict(v Value, typ string) bool {
+func (in *Interpreter) matchesTypeStrict(v Value, typ string) bool {
 	// unions (v2.4)
 	if hasTopPipe(typ) {
 		for _, part := range splitTopPipe(typ) {
-			if matchesTypeStrict(v, part) {
+			if in.matchesTypeStrict(v, part) {
 				return true
 			}
 		}
@@ -450,7 +450,7 @@ func matchesTypeStrict(v Value, typ string) bool {
 				if e.Kind == VNil {
 					continue // nullable elements pass
 				}
-				if !matchesTypeStrict(e, args[0]) {
+				if !in.matchesTypeStrict(e, args[0]) {
 					return false
 				}
 			}
@@ -465,13 +465,22 @@ func matchesTypeStrict(v Value, typ string) bool {
 				if e.Kind == VNil {
 					continue
 				}
-				if !matchesTypeStrict(e, args[1]) {
+				if !in.matchesTypeStrict(e, args[1]) {
 					return false
 				}
 			}
 			return true
 		}
 		return false
+	}
+	// nominal struct/enum types (v2.5)
+	if in != nil {
+		if def := in.structDef(typ); def != nil {
+			return in.matchesStruct(v, def)
+		}
+		if def := in.enumDef(typ); def != nil {
+			return v.Kind == VString && def.has(v.Str)
+		}
 	}
 	switch typ {
 	case "any":
@@ -504,27 +513,84 @@ func matchesTypeStrict(v Value, typ string) bool {
 	return false
 }
 
-func matchesTypeNullable(v Value, typ string) bool {
+func (in *Interpreter) matchesTypeNullable(v Value, typ string) bool {
 	if typ == "" || typ == "any" {
 		return true
 	}
 	if v.Kind == VNil {
 		return true
 	}
-	return matchesTypeStrict(v, typ)
+	return in.matchesTypeStrict(v, typ)
 }
 
-func checkTypeNullable(v Value, typ, what string) error {
+func (in *Interpreter) checkTypeNullable(v Value, typ, what string) error {
 	if typ == "" || typ == "any" {
 		return nil
 	}
-	if !validType(typ) {
+	if !validTypeIn(typ, in) {
 		return fmt.Errorf("unknown type %q", typ)
 	}
-	if !matchesTypeNullable(v, typ) {
+	if !in.matchesTypeNullable(v, typ) {
 		return fmt.Errorf("%s wants %s, got %s", what, typ, TypeName(v))
 	}
 	return nil
+}
+
+// structDef/enumDef look up declared nominal types.
+func (in *Interpreter) structDef(name string) *StructDef {
+	in.typeMu.RLock()
+	defer in.typeMu.RUnlock()
+	return in.structs[name]
+}
+
+func (in *Interpreter) enumDef(name string) *EnumDef {
+	in.typeMu.RLock()
+	defer in.typeMu.RUnlock()
+	return in.enums[name]
+}
+
+func (e *EnumDef) has(variant string) bool {
+	for _, m := range e.Variants {
+		if m == variant {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesStruct validates a map value against a struct shape: every declared
+// field present with a matching (nullable) type, no unknown fields.
+func (in *Interpreter) matchesStruct(v Value, def *StructDef) bool {
+	if v.Kind != VMap {
+		return false
+	}
+	v.Map.Mu.RLock()
+	defer v.Map.Mu.RUnlock()
+	for _, f := range def.Fields {
+		fv, ok := v.Map.Vals[f.Name]
+		if !ok {
+			return false
+		}
+		if fv.Kind == VNil {
+			continue
+		}
+		if !in.matchesTypeStrict(fv, f.Type) {
+			return false
+		}
+	}
+	for k := range v.Map.Vals {
+		known := false
+		for _, f := range def.Fields {
+			if f.Name == k {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return false
+		}
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -907,7 +973,7 @@ func (in *Interpreter) execStmt(env *Env, st *frontend.Stmt) error {
 			return err
 		}
 		if st.TypeAnn != "" {
-			if err := checkTypeNullable(v, st.TypeAnn, "let "+st.Name); err != nil {
+			if err := in.checkTypeNullable(v, st.TypeAnn, "let "+st.Name); err != nil {
 				return err
 			}
 		}
@@ -1089,7 +1155,7 @@ func (in *Interpreter) execAssign(env *Env, st *frontend.Stmt) error {
 			}
 		}
 		if ann, ok := in.lookupTypeAnn(env, st.Name); ok && ann != "" {
-			if err := checkTypeNullable(v, ann, st.Name); err != nil {
+			if err := in.checkTypeNullable(v, ann, st.Name); err != nil {
 				return err
 			}
 		}
@@ -2068,7 +2134,7 @@ func (in *Interpreter) eval(env *Env, e *frontend.Expr) (Value, error) {
 		if err != nil {
 			return Nil(), err
 		}
-		return BoolV(matchesTypeStrict(l, want)), nil
+		return BoolV(in.matchesTypeStrict(l, want)), nil
 	case frontend.ExprCoalesce:
 		l, err := in.eval(env, e.Left)
 		if err != nil {
@@ -2348,7 +2414,7 @@ func (in *Interpreter) evalCall(env *Env, e *frontend.Expr) (Value, error) {
 		if len(args) != len(fn.Func.Params) {
 			return Nil(), fmt.Errorf("function %q wants %d args, got %d", fn.Func.Name, len(fn.Func.Params), len(args))
 		}
-		if err := checkFuncArgs(fn.Func, args); err != nil {
+		if err := in.checkFuncArgs(fn.Func, args); err != nil {
 			return Nil(), err
 		}
 		callEnv := newEnvSized(fn.Func.Closure, len(fn.Func.Params))
@@ -2362,7 +2428,7 @@ func (in *Interpreter) evalCall(env *Env, e *frontend.Expr) (Value, error) {
 		if err != nil {
 			return Nil(), err
 		}
-		if err := checkFuncReturn(fn.Func, ret); err != nil {
+		if err := in.checkFuncReturn(fn.Func, ret); err != nil {
 			return Nil(), err
 		}
 		return ret, nil
@@ -3153,7 +3219,7 @@ func bIsType(in *Interpreter, args []Value) (Value, error) {
 	if !validType(args[1].Str) {
 		return Nil(), fmt.Errorf("unknown type %q (want nil|bool|int|float|number|string|array|map|func|chan|any|ok|err)", args[1].Str)
 	}
-	return BoolV(matchesTypeStrict(args[0], args[1].Str)), nil
+	return BoolV(in.matchesTypeStrict(args[0], args[1].Str)), nil
 }
 
 func bAssertType(in *Interpreter, args []Value) (Value, error) {
@@ -3166,7 +3232,7 @@ func bAssertType(in *Interpreter, args []Value) (Value, error) {
 	if !validType(args[1].Str) {
 		return Nil(), fmt.Errorf("unknown type %q (want nil|bool|int|float|number|string|array|map|func|chan|any|ok|err)", args[1].Str)
 	}
-	if !matchesTypeStrict(args[0], args[1].Str) {
+	if !in.matchesTypeStrict(args[0], args[1].Str) {
 		return Nil(), fmt.Errorf("assert_type failed: wants %s, got %s", args[1].Str, TypeName(args[0]))
 	}
 	return args[0], nil
@@ -3255,7 +3321,7 @@ func (in *Interpreter) callValue(fn Value, args []Value) (Value, error) {
 		if len(args) != len(fn.Func.Params) {
 			return Nil(), fmt.Errorf("function %q wants %d args, got %d", fn.Func.Name, len(fn.Func.Params), len(args))
 		}
-		if err := checkFuncArgs(fn.Func, args); err != nil {
+		if err := in.checkFuncArgs(fn.Func, args); err != nil {
 			return Nil(), err
 		}
 		callEnv := newEnvSized(fn.Func.Closure, len(fn.Func.Params))
@@ -3267,7 +3333,7 @@ func (in *Interpreter) callValue(fn Value, args []Value) (Value, error) {
 		if err != nil {
 			return Nil(), err
 		}
-		if err := checkFuncReturn(fn.Func, ret); err != nil {
+		if err := in.checkFuncReturn(fn.Func, ret); err != nil {
 			return Nil(), err
 		}
 		return ret, nil
