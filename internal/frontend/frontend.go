@@ -661,6 +661,8 @@ func lex(src, path string) ([]token, error) {
 			add(tQuestion, "?")
 		case ',':
 			add(tComma, ",")
+		case '|':
+			add(tPipe, "|")
 		case ':':
 			add(tColon, ":")
 		case ';':
@@ -883,7 +885,27 @@ func (p *parser) parseLet() (*Stmt, error) {
 }
 
 // validTypeNames is the set of type annotation / `is` names.
+// v2.4: unions (`int|string`), generics (`array<int>`, `map<string,int>`) + base names.
 func validTypeName(s string) bool {
+	// union: every part must be valid
+	if containsPipe(s) {
+		for _, part := range splitPipe(s) {
+			if !validTypeName(part) {
+				return false
+			}
+		}
+		return true
+	}
+	// generic: array<T>, map<K,V>
+	if base, args, ok := parseGeneric(s); ok {
+		switch base {
+		case "array":
+			return len(args) == 1 && validTypeName(args[0])
+		case "map":
+			return len(args) == 2 && validTypeName(args[0]) && validTypeName(args[1])
+		}
+		return false
+	}
 	switch s {
 	case "nil", "bool", "int", "float", "number", "string",
 		"array", "map", "func", "chan", "any", "ok", "err":
@@ -892,22 +914,189 @@ func validTypeName(s string) bool {
 	return false
 }
 
-// parseTypeName parses a single type name (ident) with optional trailing `?`
-// nullable marker (accepted and ignored: annotations are nullable by default).
+func containsPipe(s string) bool {
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '<':
+			depth++
+		case '>':
+			depth--
+		case '|':
+			if depth == 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func splitPipe(s string) []string {
+	var out []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '<':
+			depth++
+		case '>':
+			depth--
+		case '|':
+			if depth == 0 {
+				out = append(out, trimSpace(s[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	out = append(out, trimSpace(s[start:]))
+	return out
+}
+
+func trimSpace(s string) string {
+	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t') {
+		s = s[1:]
+	}
+	for len(s) > 0 && (s[len(s)-1] == ' ' || s[len(s)-1] == '\t') {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+func parseGeneric(s string) (string, []string, bool) {
+	i := -1
+	for j := 0; j < len(s); j++ {
+		if s[j] == '<' {
+			i = j
+			break
+		}
+	}
+	if i < 0 || !strings.HasSuffix(s, ">") {
+		return "", nil, false
+	}
+	base := trimSpace(s[:i])
+	inner := s[i+1 : len(s)-1]
+	// split inner by commas at depth 0
+	var args []string
+	depth := 0
+	start := 0
+	for k := 0; k < len(inner); k++ {
+		switch inner[k] {
+		case '<':
+			depth++
+		case '>':
+			depth--
+		case ',':
+			if depth == 0 {
+				args = append(args, trimSpace(inner[start:k]))
+				start = k + 1
+			}
+		}
+	}
+	args = append(args, trimSpace(inner[start:]))
+	return base, args, true
+}
+
+// parseTypeName parses a type: base ident with optional `?<nullable>`,
+// generic args `<T>` / `<K,V>`, and unions via `|` (e.g. `int|string`, `array<int>|nil`).
 func (p *parser) parseTypeName() (string, error) {
 	t := p.peek()
 	if t.K != tIdent {
-		return "", p.errf(t, "want type name (nil|bool|int|float|number|string|array|map|func|chan|any|ok|err), got %q", t.Lit)
+		return "", p.errf(t, "want type name (nil|bool|int|float|number|string|array|map|func|chan|any|ok|err|unions|generics), got %q", t.Lit)
 	}
 	p.next()
 	if !validTypeName(t.Lit) {
-		return "", p.errf(t, "unknown type %q (want nil|bool|int|float|number|string|array|map|func|chan|any|ok|err)", t.Lit)
+		return "", p.errf(t, "unknown type %q", t.Lit)
 	}
-	// trailing `?` (e.g. `int?`) = nullable marker, accepted for familiarity.
+	typ := t.Lit
+	// generic args: array<int>, map<string,int>
+	if p.peek().K == tLt {
+		p.next() // <
+		var parts []string
+		for {
+			nt := p.peek()
+			if nt.K != tIdent {
+				return "", p.errf(nt, "want type arg, got %q", nt.Lit)
+			}
+			p.next()
+			if !validTypeName(nt.Lit) {
+				return "", p.errf(nt, "unknown type arg %q", nt.Lit)
+			}
+			arg := nt.Lit
+			// nested generic one level: array<array<int>>? support via recursion-lite
+			if p.peek().K == tLt {
+				p.next()
+				nt2 := p.peek()
+				if nt2.K != tIdent {
+					return "", p.errf(nt2, "want nested type arg, got %q", nt2.Lit)
+				}
+				p.next()
+				if !validTypeName(nt2.Lit) {
+					return "", p.errf(nt2, "unknown nested type %q", nt2.Lit)
+				}
+				if p.peek().K != tGt {
+					return "", p.errf(p.peek(), "want > to close nested generic")
+				}
+				p.next()
+				arg = arg + "<" + nt2.Lit + ">"
+			}
+			parts = append(parts, arg)
+			if p.peek().K == tComma {
+				p.next()
+				continue
+			}
+			break
+		}
+		if p.peek().K != tGt {
+			return "", p.errf(p.peek(), "want > to close generic type")
+		}
+		p.next()
+		typ = typ + "<" + strings.Join(parts, ",") + ">"
+		if !validTypeName(typ) {
+			return "", p.errf(t, "invalid generic type %q", typ)
+		}
+	}
+	// unions: int|string|nil
+	for p.peek().K == tPipe {
+		p.next() // |
+		nt := p.peek()
+		if nt.K != tIdent {
+			return "", p.errf(nt, "want type after |, got %q", nt.Lit)
+		}
+		p.next()
+		part := nt.Lit
+		if p.peek().K == tLt {
+			// generic after pipe: |array<int>
+			p.next()
+			var parts []string
+			for {
+				at := p.peek()
+				if at.K != tIdent {
+					return "", p.errf(at, "want type arg, got %q", at.Lit)
+				}
+				p.next()
+				parts = append(parts, at.Lit)
+				if p.peek().K == tComma {
+					p.next()
+					continue
+				}
+				break
+			}
+			if p.peek().K != tGt {
+				return "", p.errf(p.peek(), "want > to close generic")
+			}
+			p.next()
+			part = part + "<" + strings.Join(parts, ",") + ">"
+		}
+		typ = typ + "|" + part
+		if !validTypeName(typ) {
+			return "", p.errf(t, "invalid union type %q", typ)
+		}
+	}
+	// trailing `?` nullable marker
 	if p.peek().K == tQuestion {
 		p.next()
 	}
-	return t.Lit, nil
+	return typ, nil
 }
 
 func (p *parser) parseFuncStmt() (*Stmt, error) {
