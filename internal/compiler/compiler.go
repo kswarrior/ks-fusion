@@ -889,6 +889,10 @@ func (c *compiler) compileForC(st *frontend.Stmt) error {
 }
 
 func (c *compiler) compileFuncDef(name string, params []string, body *frontend.Stmt, line int) error {
+	return c.compileFuncDefTyped(name, params, nil, "", body, line)
+}
+
+func (c *compiler) compileFuncDefTyped(name string, params, paramTypes []string, returnType string, body *frontend.Stmt, line int) error {
 	fn := &Func{Name: name, Params: append([]string{}, params...)}
 	c.funcs = append(c.funcs, fn)
 	idx := len(c.funcs) - 1
@@ -896,6 +900,20 @@ func (c *compiler) compileFuncDef(name string, params []string, body *frontend.S
 	c.frames = append(c.frames, &funcCtx{fn: fn})
 	for _, p := range params {
 		c.defineLocal(p)
+	}
+	// v0.2 typed params: runtime nilable check on entry (nil passes).
+	for i, p := range params {
+		var t string
+		if i < len(paramTypes) {
+			t = paramTypes[i]
+		}
+		if t == "" || t == "any" {
+			continue
+		}
+		slot, _, _ := c.resolve(p)
+		c.emitNamed(OpGetLocal, slot, p, line)
+		c.emitNamed(OpCheckType, 0, t, line)
+		c.emit(OpPop, 0, line)
 	}
 	if body.Kind != frontend.StmtBlock {
 		if err := c.compileStmt(body); err != nil {

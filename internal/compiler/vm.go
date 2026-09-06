@@ -590,6 +590,14 @@ func (vm *VM) exec(in Instr) error {
 		if isTruthy(v) {
 			fr.ip = in.Arg
 		}
+	case OpJumpIfNotNil:
+		v, err := vm.peek()
+		if err != nil {
+			return err
+		}
+		if v.Kind != VNil {
+			fr.ip = in.Arg
+		}
 	case OpCall:
 		return vm.opCall(in.Arg)
 	case OpMakeFunc:
@@ -693,6 +701,76 @@ func (vm *VM) exec(in Instr) error {
 		}
 	case OpSleep:
 		return fmt.Errorf("sleep not yet supported by VM v0.1")
+	case OpSlice:
+		endV, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		startV, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		obj, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		v, err := sliceVal(obj, startV, endV)
+		if err != nil {
+			return err
+		}
+		vm.push(v)
+	case OpIs:
+		v, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		vm.push(BoolV(vmIsType(v, in.Name)))
+	case OpSafeIndex:
+		idx, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		obj, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		if obj.Kind == VNil {
+			vm.push(Nil())
+			break
+		}
+		v, err := safeIndexVal(obj, idx)
+		if err != nil {
+			return err
+		}
+		vm.push(v)
+	case OpCoalesce:
+		// legacy: pop right then left (non-short-circuit fallback for old bundles)
+		r, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		l, err := vm.pop()
+		if err != nil {
+			return err
+		}
+		if l.Kind != VNil {
+			vm.push(l)
+		} else {
+			vm.push(r)
+		}
+	case OpCheckType:
+		v, err := vm.peek()
+		if err != nil {
+			return err
+		}
+		if v.Kind == VNil {
+			break // nullable passes
+		}
+		if !vmIsType(v, in.Name) {
+			return fmt.Errorf("wants %s, got %s", in.Name, typeName(v))
+		}
+	case OpSetupTry, OpPopTry, OpDefer:
+		return fmt.Errorf("try/defer not yet supported by VM v0.2 (use the interpreter)")
 	}
 	return nil
 }
@@ -931,6 +1009,153 @@ func setIndex(obj, idx, val Val) error {
 		return nil
 	}
 	return fmt.Errorf("cannot index %s", typeName(obj))
+}
+
+// safeIndexVal is indexVal but missing keys / out-of-range yield nil
+// (the `?.` operator), instead of an error.
+func safeIndexVal(obj, idx Val) (Val, error) {
+	switch obj.Kind {
+	case VArray:
+		if idx.Kind != VInt {
+			return Nil(), nil
+		}
+		if idx.Int < 0 || idx.Int >= len(obj.Arr) {
+			return Nil(), nil
+		}
+		return obj.Arr[idx.Int], nil
+	case VMap:
+		if idx.Kind != VString {
+			return Nil(), nil
+		}
+		if v, ok := obj.Map[idx.Str]; ok {
+			return v, nil
+		}
+		return Nil(), nil
+	case VString:
+		if idx.Kind != VInt {
+			return Nil(), nil
+		}
+		runes := []rune(obj.Str)
+		if idx.Int < 0 || idx.Int >= len(runes) {
+			return Nil(), nil
+		}
+		return StrV(string(runes[idx.Int])), nil
+	}
+	return Nil(), nil
+}
+
+// sliceVal implements a[start:end] for arrays and strings (nil = omitted,
+// negatives count from the end).
+func sliceVal(obj, startV, endV Val) (Val, error) {
+	norm := func(n, length int) int {
+		if n < 0 {
+			n += length
+		}
+		if n < 0 {
+			n = 0
+		}
+		if n > length {
+			n = length
+		}
+		return n
+	}
+	switch obj.Kind {
+	case VArray:
+		n := len(obj.Arr)
+		s, e := 0, n
+		if startV.Kind == VInt {
+			s = norm(startV.Int, n)
+		} else if startV.Kind != VNil {
+			return Nil(), fmt.Errorf("slice start must be int, got %s", typeName(startV))
+		}
+		if endV.Kind == VInt {
+			e = norm(endV.Int, n)
+		} else if endV.Kind != VNil {
+			return Nil(), fmt.Errorf("slice end must be int, got %s", typeName(endV))
+		}
+		if e < s {
+			e = s
+		}
+		out := make([]Val, e-s)
+		copy(out, obj.Arr[s:e])
+		return ArrV(out), nil
+	case VString:
+		runes := []rune(obj.Str)
+		n := len(runes)
+		s, e := 0, n
+		if startV.Kind == VInt {
+			s = norm(startV.Int, n)
+		} else if startV.Kind != VNil {
+			return Nil(), fmt.Errorf("slice start must be int, got %s", typeName(startV))
+		}
+		if endV.Kind == VInt {
+			e = norm(endV.Int, n)
+		} else if endV.Kind != VNil {
+			return Nil(), fmt.Errorf("slice end must be int, got %s", typeName(endV))
+		}
+		if e < s {
+			e = s
+		}
+		return StrV(string(runes[s:e])), nil
+	}
+	return Nil(), fmt.Errorf("cannot slice %s (try array or string)", typeName(obj))
+}
+
+// vmIsType reports whether v matches the `is` type name (subset of the
+// interpreter's matchesTypeStrict: base names + unions with `|`).
+func vmIsType(v Val, typ string) bool {
+	typ = strings.TrimSpace(typ)
+	if strings.Contains(typ, "|") {
+		for _, part := range strings.Split(typ, "|") {
+			if vmIsType(v, strings.TrimSpace(part)) {
+				return true
+			}
+		}
+		return false
+	}
+	// strip trailing `?` (nullable marker) and generics `array<int>` base
+	typ = strings.TrimSuffix(typ, "?")
+	if i := strings.Index(typ, "<"); i >= 0 {
+		typ = typ[:i]
+	}
+	switch typ {
+	case "any":
+		return true
+	case "nil":
+		return v.Kind == VNil
+	case "bool":
+		return v.Kind == VBool
+	case "int":
+		return v.Kind == VInt
+	case "float":
+		return v.Kind == VFloat
+	case "number":
+		return v.Kind == VInt || v.Kind == VFloat
+	case "string":
+		return v.Kind == VString
+	case "array":
+		return v.Kind == VArray
+	case "map":
+		return v.Kind == VMap
+	case "func":
+		return v.Kind == VFunc || v.Kind == VBuiltin
+	case "chan":
+		return false // VM has no channels yet (interpreter-only)
+	case "ok":
+		if v.Kind != VMap {
+			return false
+		}
+		_, hasOk := v.Map["ok"]
+		_, hasErr := v.Map["err"]
+		return hasOk && !hasErr
+	case "err":
+		if v.Kind != VMap {
+			return false
+		}
+		_, hasErr := v.Map["err"]
+		return hasErr
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
