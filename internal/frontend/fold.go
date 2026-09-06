@@ -129,7 +129,7 @@ func foldExpr(e *Expr) *Expr {
 	// fold len("hi") -> 2, len([1,2]) -> 2 (v2.4 perf)
 	if e.Kind == ExprCall && e.Callee != nil && e.Callee.Kind == ExprVar && e.Callee.Name == "len" && len(e.Args) == 1 {
 		if n, ok := foldLen(e.Args[0]); ok {
-			return &Expr{Kind: ExprInt, IntVal: n}, true
+			return &Expr{Kind: ExprInt, IntVal: n}
 		}
 	}
 	return e
