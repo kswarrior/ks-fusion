@@ -176,11 +176,12 @@ func cmdRepl(args []string) error {
 func cmdBench(args []string) error {
 	target := "."
 	n := 20
+	cpuprofile := ""
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
 		case a == "--help" || a == "-h":
-			fmt.Println("usage: fusion bench [target] [--n N]\n  run .ks N times and report timing")
+			fmt.Println("usage: fusion bench [target] [--n N] [--cpuprofile FILE]\n  run .ks N times and report timing")
 			return nil
 		case a == "--n" || a == "-n":
 			if i+1 >= len(args) {
@@ -198,6 +199,14 @@ func cmdBench(args []string) error {
 				return fmt.Errorf("bad --n %q", a)
 			}
 			n = v
+		case a == "--cpuprofile":
+			if i+1 >= len(args) {
+				return fmt.Errorf("usage: fusion bench [--cpuprofile FILE]")
+			}
+			i++
+			cpuprofile = args[i]
+		case strings.HasPrefix(a, "--cpuprofile="):
+			cpuprofile = strings.TrimPrefix(a, "--cpuprofile=")
 		case strings.HasPrefix(a, "-"):
 			return fmt.Errorf("unknown flag %q", a)
 		default:
@@ -207,5 +216,21 @@ func cmdBench(args []string) error {
 			target = a
 		}
 	}
-	return tools.Bench(target, n)
+	if cpuprofile != "" {
+		f, err := os.Create(cpuprofile)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		if err := startCPUProfile(f); err != nil {
+			return err
+		}
+		defer stopCPUProfile()
+		fmt.Println("cpuprofile: writing to", cpuprofile)
+	}
+	err := tools.Bench(target, n)
+	if cpuprofile != "" {
+		fmt.Println("cpuprofile: done", cpuprofile)
+	}
+	return err
 }
