@@ -276,14 +276,15 @@ func main() {
 
 // toolVersion is the toolchain/language version printed by help/version.
 // Keep in sync with docs (README, docs/vs.md, docs/futures.md).
-const toolVersion = "v2.2"
+const toolVersion = "v2.3"
 
 func help() {
-	fmt.Println(`ks-fusion v2.2 (Go)
+	fmt.Println(`ks-fusion v2.3 (Go)
 Commands:
   fusion new [--lib] <dir>   create app (backend/ frontend/ fusion.toml)
                              or library with --lib (src/lib.ks, type="lib")
-  fusion run [appdir] [--race]  run backend + frontend together (--race: race checks)
+  fusion run [appdir] [--race] [--debug] [--cpuprofile FILE]
+                             run backend + frontend together
   fusion launch [target] [--backend] [--frontend] [--config FILE] [--race]
                              target is app dir (default ".") or config file
                              (fusion.toml / custom.toml, must live in app root:
@@ -291,10 +292,10 @@ Commands:
                              No flag = both together; --backend = only backend;
                              --frontend = only frontend; both flags = both.
   fusion build [dir] [--release] [--out DIR] [--bin [--target OS/ARCH] [-o FILE]]
-                             app: parse-check entries + verify [dependencies]
-                             (semver ^ ~ >= + fusion.lock); --bin: single static
-                             executable (embeds .ks + .kslib); --target:
-                             linux/amd64,arm64,darwin/amd64,arm64,windows/amd64,wasm
+                             app: parse-check + cache + verify [dependencies]
+                             (semver ^ ~ >= + fusion.lock + registry); --bin: single
+                             static executable (embeds .ks + .kslib); --target:
+                             linux/amd64,arm64,darwin,windows/amd64,wasm
                              lib: pack .kslib bundle into test-releases/
                                   (--release) or target/ (debug), like cargo
    fusion compile <file.ks> [--out file.ksb] [--dis] [--run]
@@ -308,10 +309,15 @@ Commands:
    fusion doc [target] [--out FILE]  docs from # comments + func sigs
    fusion check [target]      strict check (parse + arity + :type)
    fusion repl                interactive .ks (multiline via braces)
-   fusion bench [target] [--n N]  run .ks N times, report timing
+   fusion bench [target] [--n N] [--cpuprofile FILE]  bench + profile
    fusion vendor [appdir]     copy .kslib deps into vendor/ (offline)
-   fusion run-web [appdir] [--port N]  SSR frontend/ as HTML+JSON (+ /api/*)
+   fusion publish [libdir] [--registry DIR]  publish .kslib + sha256 + index
+   fusion pull <name[@spec]> [--out DIR]  fetch + verify sha256
+   fusion yank <name[@ver]> [--remove]  yank registry version
+   fusion registry            list registry packages
+   fusion run-web [appdir] [--port N] [--watch]  SSR + /api/* + SSE reload
    fusion build-js [appdir] [--out DIR]  transpile pages to JS per-route
+   fusion build-ssg [appdir] [--out DIR]  pre-render routes to HTML+JSON
    fusion prog.ks|lib.kslib   run a single file directly.
                               .kslib bundles start with #!/usr/bin/env fusion,
                               so: chmod +x lib.kslib && ./lib.kslib
