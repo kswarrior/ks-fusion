@@ -1,6 +1,6 @@
 # ks-fusion Futures / Roadmap
 
-> Current: `v2.5` (87/100 in docs/vs.md) — tree-walk interpreter in Go, gradual-typed `.ks` language
+> Current: `v2.5` (83/100 in docs/vs.md) — tree-walk interpreter in Go, gradual-typed `.ks` language
 > (`: type` annotations, `is`, `?.`/`??`, `ok`/`err` results, struct/enum syntax, 177 builtins, --bin, fmt/vet/doc/check/repl/bench/debug, VM v0.2, real audit, full LSP).
 > This doc lists what exists, what is planned, and what is explicitly non-goals.
 

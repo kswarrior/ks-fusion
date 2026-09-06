@@ -1,6 +1,6 @@
 # ks-fusion
 
-Complete programming language (v2.5, 87/100 in docs/vs.md) made in Go.
+Complete programming language (v2.5, 83/100 in docs/vs.md) made in Go.
 Easy like Python, concurrency like Go.
 
 > The toolchain is written in Go (like CPython is written in C).
