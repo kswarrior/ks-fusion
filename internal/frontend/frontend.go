@@ -812,6 +812,13 @@ func isAssignOp(k tokKind) (string, bool) {
 
 func (p *parser) parseStmt() (*Stmt, error) {
 	t := p.peek()
+	// Contextual `struct Name {` / `enum Name {` declarations (v2.5): no new
+	// keywords, so `struct`/`enum` stay usable as ordinary identifiers
+	// everywhere except this statement-leading position.
+	if t.K == tIdent && (t.Lit == "struct" || t.Lit == "enum") &&
+		p.peekAt(1).K == tIdent && p.peekAt(2).K == tLBrace {
+		return p.parseStructOrEnum()
+	}
 	switch t.K {
 	case tLet:
 		return p.parseLet()
@@ -914,8 +921,12 @@ func isNominalType(s string) bool {
 // v2.4: unions (`int|string`), generics (`array<int>`, `map<string,int>`) + base names.
 // v2.5: nominal struct/enum names (Capitalized idents, possibly in unions/generics).
 func validTypeName(s string) bool {
-	if isNominalType(s) {
-		return true
+	// Plain Capitalized ident = nominal struct/enum reference (declaredness
+	// checked by backend/vet, so forward references parse).
+	if isNominalType(s) && !containsPipe(s) {
+		if _, _, ok := parseGeneric(s); !ok {
+			return true
+		}
 	}
 	// union: every part must be valid
 	if containsPipe(s) {
@@ -1024,6 +1035,87 @@ func parseGeneric(s string) (string, []string, bool) {
 	}
 	args = append(args, trimSpace(inner[start:]))
 	return base, args, true
+}
+
+// parseStructOrEnum parses `struct Name { f: T, ... }` and
+// `enum Name { A, B, ... }` declarations (v2.5). Type names must be
+// Capitalized; struct fields map names to type annotations (unions,
+// generics and nominals allowed); enum variants are bare identifiers.
+func (p *parser) parseStructOrEnum() (*Stmt, error) {
+	kw := p.next() // struct | enum
+	nameTok := p.peek()
+	if nameTok.K != tIdent {
+		return "", p.errf(nameTok, "bad %s: want `Name`, got %q", kw.Lit, nameTok.Lit)
+	}
+	if !isNominalType(nameTok.Lit) {
+		return "", p.errf(nameTok, "bad %s name %q: want Capitalized (e.g. `User`)", kw.Lit, nameTok.Lit)
+	}
+	p.next()
+	name := nameTok.Lit
+	if _, err := p.expect(tLBrace, "`{`"); err != nil {
+		return nil, err
+	}
+	p.skipSeps()
+	if kw.Lit == "struct" {
+		var fields []StructField
+		seen := map[string]bool{}
+		for p.peek().K != tRBrace {
+			if p.atEnd() {
+				return nil, p.errf(kw, "unterminated struct %s, missing `}`", name)
+			}
+			ft := p.peek()
+			if ft.K != tIdent {
+				return nil, p.errf(ft, "bad struct field: want `name: type`, got %q", ft.Lit)
+			}
+			p.next()
+			if seen[ft.Lit] {
+				return nil, p.errf(ft, "duplicate struct field %q", ft.Lit)
+			}
+			seen[ft.Lit] = true
+			if _, err := p.expect(tColon, "`:`"); err != nil {
+				return nil, err
+			}
+			tn, err := p.parseTypeName()
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, StructField{Name: ft.Lit, Type: tn, Line: ft.Line})
+			// separators: comma, semicolon or newline(s)
+			for p.peek().K == tComma || p.peek().K == tSemi || p.peek().K == tNewline {
+				p.next()
+			}
+		}
+		p.next() // }
+		if len(fields) == 0 {
+			return nil, p.errf(kw, "struct %s needs at least one field", name)
+		}
+		return &Stmt{Kind: StmtStruct, Name: name, Fields: fields, Line: kw.Line}, nil
+	}
+	var variants []string
+	seen := map[string]bool{}
+	for p.peek().K != tRBrace {
+		if p.atEnd() {
+			return nil, p.errf(kw, "unterminated enum %s, missing `}`", name)
+		}
+		vt := p.peek()
+		if vt.K != tIdent {
+			return nil, p.errf(vt, "bad enum variant: want identifier, got %q", vt.Lit)
+		}
+		p.next()
+		if seen[vt.Lit] {
+			return nil, p.errf(vt, "duplicate enum variant %q", vt.Lit)
+		}
+		seen[vt.Lit] = true
+		variants = append(variants, vt.Lit)
+		for p.peek().K == tComma || p.peek().K == tSemi || p.peek().K == tNewline {
+			p.next()
+		}
+	}
+	p.next() // }
+	if len(variants) == 0 {
+		return nil, p.errf(kw, "enum %s needs at least one variant", name)
+	}
+	return &Stmt{Kind: StmtEnum, Name: name, Variants: variants, Line: kw.Line}, nil
 }
 
 // parseTypeName parses a type: base ident with optional `?<nullable>`,

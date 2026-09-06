@@ -552,6 +552,26 @@ func newEnvSized(parent *Env, size int) *Env {
 // to true permanently and all later scope access takes the global
 // RWMutex. This keeps the single-threaded fast path (fib, loops)
 // free of atomic/mutex overhead per lookup.
+// StructDef is a `struct Name { field: type, ... }` declaration (v2.5).
+type StructDef struct {
+	Name   string
+	Fields []StructField
+	Line   int
+}
+
+// StructField is one named, typed struct field.
+type StructField struct {
+	Name string
+	Type string
+}
+
+// EnumDef is an `enum Name { A, B, ... }` declaration (v2.5).
+type EnumDef struct {
+	Name     string
+	Variants []string
+	Line     int
+}
+
 type Interpreter struct {
 	mu       sync.RWMutex
 	globals  *Env
@@ -563,10 +583,21 @@ type Interpreter struct {
 	impMu    sync.Mutex
 	imported map[string]bool
 	conc     atomic.Bool
+	// Custom nominal types from struct/enum declarations (v2.5).
+	// Guarded by typeMu: definitions run on the main flow but `go`
+	// blocks share the interpreter.
+	typeMu  sync.RWMutex
+	structs map[string]*StructDef
+	enums   map[string]*EnumDef
 }
 
 func New() *Interpreter {
-	in := &Interpreter{globals: newEnv(nil), imported: map[string]bool{}}
+	in := &Interpreter{
+		globals:  newEnv(nil),
+		imported: map[string]bool{},
+		structs:  map[string]*StructDef{},
+		enums:    map[string]*EnumDef{},
+	}
 	in.defineBuiltins(in.globals)
 	return in
 }
