@@ -522,6 +522,6 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
   No `go/chan/select/sleep` in compiled output yet.
 * `frontend/` is not web yet — P0 gives route table + view-models + console renderer,
   no DOM, no CSS, no SSR/HMR. See `plan/frontend.md` P1–P10 for what moves Frontend 3→10.
-* Version skew to know: language/docs say `v2.1`, `fusion help` in `cmd/fusion/main.go`
-  still prints `v2.0`, and `release/fusion` may predate `compile` — rebuild from source
-  (`go build -o fusion ./cmd/fusion`) before using `fusion compile`.
+* Version: toolchain reports `v2.1` (`fusion version`, `fusion help`, `toolVersion` in
+  `cmd/fusion/main.go` — single constant, keep in sync). `release/fusion` may still
+  predate `compile` — rebuild from source (`go build -o fusion ./cmd/fusion`).

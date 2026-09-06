@@ -79,6 +79,10 @@ func main() {
 	case "run":
 		dir := "."
 		if len(os.Args) >= 3 {
+			if os.Args[2] == "--help" || os.Args[2] == "-h" {
+				fmt.Println("usage: fusion run [appdir] (backend + frontend together; see `fusion launch --help` for --backend/--frontend)")
+				return
+			}
 			dir = os.Args[2]
 		}
 		if err := cmdRun(dir); err != nil {
@@ -100,6 +104,9 @@ func main() {
 			switch {
 			case a == "--release":
 				release = true
+			case a == "--help" || a == "-h":
+				fmt.Println("usage: fusion build [dir] [--release] [--out DIR]")
+				return
 			case a == "--out" || a == "-o":
 				if i+1 >= len(args) {
 					fmt.Println("usage: fusion build [dir] [--release] [--out DIR]")
@@ -161,11 +168,12 @@ Commands:
                              compile the .ks subset to bytecode (.ksb-1);
                              outside the subset, the compiler says so —
                              run those files with the interpreter instead
-  fusion prog.ks|lib.kslib   run a single file directly.
-                             .kslib bundles start with #!/usr/bin/env fusion,
-                             so: chmod +x lib.kslib && ./lib.kslib
-                             (needs fusion on PATH)
-  fusion help`)
+   fusion prog.ks|lib.kslib   run a single file directly.
+                              .kslib bundles start with #!/usr/bin/env fusion,
+                              so: chmod +x lib.kslib && ./lib.kslib
+                              (needs fusion on PATH)
+   fusion version|--version   print toolchain version
+   fusion help`)
 }
 
 const fusionTomlTmpl = `# App made in ks-fusion
