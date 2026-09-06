@@ -94,6 +94,11 @@ func main() {
 			fmt.Println("error:", err)
 			os.Exit(1)
 		}
+	case "test":
+		if err := cmdTest(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
 	case "build":
 		dir := "."
 		release := false
@@ -164,10 +169,12 @@ Commands:
                              app: parse-check entries + verify [dependencies]
                              lib: pack .kslib bundle into test-releases/
                                   (--release) or target/ (debug), like cargo
-  fusion compile <file.ks> [--out file.ksb] [--dis] [--run]
-                             compile the .ks subset to bytecode (.ksb-1);
-                             outside the subset, the compiler says so —
-                             run those files with the interpreter instead
+   fusion compile <file.ks> [--out file.ksb] [--dis] [--run]
+                              compile the .ks subset to bytecode (.ksb-1);
+                              outside the subset, the compiler says so —
+                              run those files with the interpreter instead
+   fusion test [target]        run *_test.ks files (assert, TAP output)
+                              target is dir (default ".") or a single .ks file
    fusion prog.ks|lib.kslib   run a single file directly.
                               .kslib bundles start with #!/usr/bin/env fusion,
                               so: chmod +x lib.kslib && ./lib.kslib
