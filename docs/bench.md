@@ -1,6 +1,6 @@
 # Benchmarks (v2.5, real measurements)
 
-Measured 2026-09-06 on `linux/amd64` (Intel Xeon 6973P-C, `go test -bench`).
+Measured 2026-09-06 on `linux/amd64` (Intel Xeon 6973P-C, `go test -bench`; re-checked same day).
 Reproduce: `go test ./internal/backend/ -bench BenchmarkInterp -benchtime 10x`
 and `go test ./internal/compiler/ -bench BenchmarkVM -benchtime 10x`.
 
@@ -8,16 +8,16 @@ and `go test ./internal/compiler/ -bench BenchmarkVM -benchtime 10x`.
 
 | Bench | Time/op (1x) | What it measures |
 |---|---|---|
-| `BenchmarkInterpFib20` | ~20.2ms | `fib(20)` recursion (calls + branches) |
-| `BenchmarkInterpLoop10k` | ~5.6ms | `for i in range(10000)` scalar loop |
+| `BenchmarkInterpFib20` | ~16–20ms | `fib(20)` recursion (calls + branches) |
+| `BenchmarkInterpLoop10k` | ~5.3–5.6ms | `for i in range(10000)` scalar loop |
 | `BenchmarkInterpMapFilter` | ~0.76ms | `map(filter(range(1000)))` builtin chain |
 
 ## VM v0.2 (bytecode, expanded subset)
 
 | Bench | Time/op (1x) | vs interpreter | What it measures |
 |---|---|---|---|
-| `BenchmarkVMFib20` | ~8.7ms | **2.3x faster** | same `fib(20)` via bytecode |
-| `BenchmarkVMLoop10k` | ~8.8ms | 1.6x slower | same 10k loop (`for-in` desugar via `__iter_*` calls) |
+| `BenchmarkVMFib20` | ~7.8–8.7ms | **≈2x faster** | same `fib(20)` via bytecode |
+| `BenchmarkVMLoop10k` | ~7.9–8.8ms | **≈0.7x (slower)** | same 10k loop (`for-in` desugar via `__iter_*` calls) |
 
 ## What this proves (Perf)
 
