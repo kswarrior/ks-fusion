@@ -309,6 +309,10 @@ type vetter struct {
 	builtins   map[string]bool
 	globalLets map[string]bool
 	isFrontend bool
+	// v2.5 nominal types for exhaustive-switch: enum name -> variants,
+	// var name -> declared type annotation (from `let x: T`).
+	enums    map[string][]string
+	varTypes map[string]string
 }
 
 func newVetter(file string) *vetter {
@@ -325,6 +329,8 @@ func newVetter(file string) *vetter {
 		funcArity: map[string]int{},
 		builtins: bm,
 		isFrontend: strings.Contains(filepath.ToSlash(file), "frontend/"),
+		enums: map[string][]string{},
+		varTypes: map[string]string{},
 	}
 }
 
@@ -478,6 +484,15 @@ func (v *vetter) walkStmt(st *frontend.Stmt) {
 			v.walkExpr(st.Expr)
 		}
 		v.define(st.Name, st.Line, false)
+		if st.TypeAnn != "" {
+			v.varTypes[st.Name] = st.TypeAnn
+		}
+	case frontend.StmtStruct:
+		// register struct name so later `let x: Name` resolves; fields are
+		// types only (no runtime vars to walk).
+		v.varTypes[st.Name] = "struct"
+	case frontend.StmtEnum:
+		v.enums[st.Name] = append([]string{}, st.Variants...)
 	case frontend.StmtAssign:
 		v.walkExpr(st.Expr)
 		if !v.isDefined(st.Name) {
@@ -586,20 +601,54 @@ func (v *vetter) walkStmt(st *frontend.Stmt) {
 	case frontend.StmtSwitch:
 		v.walkExpr(st.Expr)
 		hasDefault := false
+		covered := map[string]bool{}
 		for _, c := range st.Cases {
 			if c.IsDefault {
 				hasDefault = true
 			}
 			for _, val := range c.Values {
 				v.walkExpr(val)
+				if s, ok := stringLiteral(val); ok {
+					covered[s] = true
+				}
+				if b, ok := boolLiteral(val); ok {
+					if b {
+						covered["true"] = true
+					} else {
+						covered["false"] = true
+					}
+				}
 			}
 			v.pushScope()
 			v.walkStmt(c.Body)
 			v.popScope()
 		}
-		if !hasDefault {
-			v.issues = append(v.issues, VetIssue{File: v.file, Line: st.Line, Rule: "exhaustive-switch", Msg: "non-exhaustive switch (add default for enum/union coverage)"})
+		// Real exhaustiveness (v2.5): a `default` always covers; otherwise,
+		// a switch on an enum-typed var must name every variant, and a
+		// switch on a bool-typed var must cover true+false.
+		if hasDefault {
+			break
 		}
+		if enumName := v.switchEnumTarget(st.Expr); enumName != "" {
+			variants := v.enums[enumName]
+			var missing []string
+			for _, m := range variants {
+				if !covered[m] {
+					missing = append(missing, m)
+				}
+			}
+			if len(missing) > 0 {
+				v.issues = append(v.issues, VetIssue{File: v.file, Line: st.Line, Rule: "exhaustive-switch", Msg: fmt.Sprintf("non-exhaustive switch on enum %q: missing %s", enumName, strings.Join(missing, ", "))})
+			}
+			break
+		}
+		if v.switchIsBool(st.Expr) {
+			if !covered["true"] || !covered["false"] {
+				v.issues = append(v.issues, VetIssue{File: v.file, Line: st.Line, Rule: "exhaustive-switch", Msg: "non-exhaustive switch on bool: cover true, false or add default"})
+			}
+			break
+		}
+		v.issues = append(v.issues, VetIssue{File: v.file, Line: st.Line, Rule: "exhaustive-switch", Msg: "non-exhaustive switch (add default for enum/union coverage)"})
 	case frontend.StmtSelect:
 		for _, c := range st.SelectCases {
 			switch c.Kind {
