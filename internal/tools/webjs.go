@@ -22,7 +22,7 @@ import (
 // Routes: / -> frontend/pages/home.ks home_page, /hi -> hi_page, /api/* -> backend/api/*.ks
 func RunWeb(appDir string, port int) error { return RunWebWithWatch(appDir, port, false) }
 
-// RunWebWithWatch adds --watch polling + SSE reload (v2.3 HMR-lite).
+// RunWebWithWatch adds --watch polling + SSE keyed patches (v2.5 DOM-diff).
 func RunWebWithWatch(appDir string, port int, watch bool) error {
 	cfg, err := config.Load(appDir)
 	if err != nil {
@@ -171,13 +171,8 @@ func attachWebRoutes(mux *http.ServeMux, cfg *config.Config, watcher *webWatcher
 		isr.put(r.URL.Path, "html", html, vmJSON)
 		_, _ = w.Write([]byte(html))
 	})
-	addr := fmt.Sprintf(":%d", port)
-	extra := "SSR + /api/*, ?format=json"
-	if watch {
-		extra += ", --watch SSE reload"
-	}
-	fmt.Printf("ks-fusion web: serving %s at http://localhost%s (%s)\n", cfg.Name, addr, extra)
-	return http.ListenAndServe(addr, mux)
+	// background ISR regen (v2.5): refresh entries expiring within 10s, every 5s
+	return isr.startBackground(5*time.Second, 10*time.Second)
 }
 
 func renderRoute(cfg *config.Config, route string) (string, error) {
