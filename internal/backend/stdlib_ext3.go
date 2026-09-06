@@ -26,7 +26,10 @@ var (
 // v2.4 sqlite-compatible subset (file-backed, no cgo):
 // sqlite_open(path) -> id, sqlite_exec(id, sql), sqlite_query(id, sql) -> array,
 // sqlite_close(id). Supports CREATE TABLE IF NOT EXISTS, DROP TABLE,
-// INSERT INTO, SELECT * FROM ... [WHERE ...], DELETE FROM.
+// INSERT INTO, SELECT * FROM ... [JOIN ... ON ...] [WHERE ...] [GROUP BY ...]
+// [ORDER BY ...] [LIMIT ...] [OFFSET ...], DELETE FROM, UPDATE ... SET ....
+// postgres_open/exec/query/close (v2.5) are the same embedded engine under a
+// postgres-compatible name (no server required).
 
 var sqliteMu = struct {
 	m map[int]*sqliteDB
@@ -88,6 +91,13 @@ func extraBuiltinsV24() []*BuiltinObj {
 		{Name: "sqlite_exec", Fn: bSqliteExec},
 		{Name: "sqlite_query", Fn: bSqliteQuery},
 		{Name: "sqlite_close", Fn: bSqliteClose},
+		// postgres-compatible dialect over the same embedded engine (v2.5):
+		// same SQL subset (CREATE/DROP/INSERT/SELECT/DELETE/UPDATE + JOIN/
+		// WHERE/GROUP BY/ORDER BY/LIMIT/OFFSET), file-backed, no server.
+		{Name: "postgres_open", Fn: bSqliteOpen},
+		{Name: "postgres_exec", Fn: bSqliteExec},
+		{Name: "postgres_query", Fn: bSqliteQuery},
+		{Name: "postgres_close", Fn: bSqliteClose},
 		{Name: "with_cancel", Fn: bWithCancel},
 		{Name: "make_cancel", Fn: bMakeCancel},
 		{Name: "cancel", Fn: bCancel},
@@ -302,13 +312,26 @@ func parseSetClause(s string) (map[string]Value, error) {
 func sqliteSelect(db *sqliteDB, sql string) ([]map[string]Value, error) {
 	m := reSelect.FindStringSubmatch(strings.TrimSpace(sql))
 	if m == nil {
-		return nil, fmt.Errorf("unsupported SELECT (want SELECT <cols|*> FROM <t> [WHERE ...]): %q", sql)
+		return nil, fmt.Errorf("unsupported SELECT (want SELECT <cols|*> FROM <t> [JOIN ...] [WHERE ...] [GROUP BY ...] [ORDER BY ...] [LIMIT ...]): %q", sql)
 	}
-	cols, table, where := strings.TrimSpace(m[1]), m[2], m[3]
+	cols, table := strings.TrimSpace(m[1]), m[2]
+	joinTable, joinOn := strings.TrimSpace(m[3]), strings.TrimSpace(m[4])
+	where := strings.TrimSpace(m[5])
+	groupBy := strings.TrimSpace(m[6])
+	orderBy, orderDir := strings.TrimSpace(m[7]), strings.ToUpper(strings.TrimSpace(m[8]))
+	limitStr, offsetStr := strings.TrimSpace(m[9]), strings.TrimSpace(m[10])
+	// base rows (+ JOIN)
 	rows := db.tables[table]
-	var out []map[string]Value
+	if joinTable != "" {
+		joined, err := innerJoin(rows, db.tables[joinTable], joinOn)
+		if err != nil {
+			return nil, err
+		}
+		rows = joined
+	}
+	var filtered []map[string]Value
 	for _, r := range rows {
-		if strings.TrimSpace(where) != "" {
+		if where != "" {
 			ok, err := evalWhere(r, where)
 			if err != nil {
 				return nil, err
@@ -317,6 +340,19 @@ func sqliteSelect(db *sqliteDB, sql string) ([]map[string]Value, error) {
 				continue
 			}
 		}
+		filtered = append(filtered, r)
+	}
+	// GROUP BY + COUNT(*) aggregate (v2.5): SELECT <groupcol>, COUNT(*) [AS c] ... GROUP BY <groupcol>
+	if groupBy != "" {
+		return groupCount(filtered, cols, groupBy)
+	}
+	var out []map[string]Value
+	// COUNT(*) without GROUP BY returns one row {count: N}
+	if isCountStar(cols) {
+		alias := countAlias(cols)
+		return []map[string]Value{{alias: IntV(len(filtered))}}, nil
+	}
+	for _, r := range filtered {
 		if cols == "*" {
 			cp := map[string]Value{}
 			for k, v := range r {
@@ -327,6 +363,8 @@ func sqliteSelect(db *sqliteDB, sql string) ([]map[string]Value, error) {
 			cp := map[string]Value{}
 			for _, c := range splitCSV(cols) {
 				c = strings.Trim(strings.TrimSpace(c), `"'`)
+				// strip table prefix (t.col -> col) and AS alias
+				c = unqualify(stripAlias(c))
 				if v, ok := r[c]; ok {
 					cp[c] = v
 				} else {
@@ -339,16 +377,227 @@ func sqliteSelect(db *sqliteDB, sql string) ([]map[string]Value, error) {
 	if out == nil {
 		out = []map[string]Value{}
 	}
-	// ORDER BY? skip (insertion order); sort by first col for determinism when requested? keep simple
-	sort.Slice(out, func(i, j int) bool {
-		// deterministic: compare JSON
-		a, _ := valueToJSON(MapV(out[i]))
-		b, _ := valueToJSON(MapV(out[j]))
-		aj, _ := json.Marshal(a)
-		bj, _ := json.Marshal(b)
-		return string(aj) < string(bj)
-	})
+	if orderBy != "" {
+		col := unqualify(orderBy)
+		desc := orderDir == "DESC"
+		sort.SliceStable(out, func(i, j int) bool {
+			less := compareValues(out[i][col], out[j][col]) < 0
+			if desc {
+				return !less && compareValues(out[i][col], out[j][col]) != 0
+			}
+			return less
+		})
+	} else {
+		sort.Slice(out, func(i, j int) bool {
+			// deterministic: compare JSON
+			a, _ := valueToJSON(MapV(out[i]))
+			b, _ := valueToJSON(MapV(out[j]))
+			aj, _ := json.Marshal(a)
+			bj, _ := json.Marshal(b)
+			return string(aj) < string(bj)
+		})
+	}
+	// LIMIT / OFFSET
+	if offsetStr != "" || limitStr != "" {
+		off := 0
+		if offsetStr != "" {
+			fmt.Sscanf(offsetStr, "%d", &off)
+		}
+		if off < 0 {
+			off = 0
+		}
+		if off > len(out) {
+			out = []map[string]Value{}
+		} else {
+			out = out[off:]
+		}
+		if limitStr != "" {
+			var lim int
+			fmt.Sscanf(limitStr, "%d", &lim)
+			if lim < len(out) {
+				out = out[:lim]
+			}
+		}
+	}
 	return out, nil
+}
+
+// innerJoin returns the inner join of left/right on `a.col = b.col` (or
+// `col = col`): merged maps, right columns win on collision except the join
+// key keeps the left value. Table prefixes are stripped.
+func innerJoin(left, right []map[string]Value, on string) ([]map[string]Value, error) {
+	m := regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_.]*)\s*=\s*([A-Za-z_][A-Za-z0-9_.]*)\s*$`).FindStringSubmatch(on)
+	if m == nil {
+		return nil, fmt.Errorf("bad JOIN ON %q (want a.col = b.col)", on)
+	}
+	lc, rc := unqualify(m[1]), unqualify(m[2])
+	var out []map[string]Value
+	for _, l := range left {
+		lv, ok := l[lc]
+		if !ok {
+			continue
+		}
+		for _, r := range right {
+			rv, ok := r[rc]
+			if !ok {
+				continue
+			}
+			if !valuesEqual(lv, rv) {
+				continue
+			}
+			merged := map[string]Value{}
+			for k, v := range l {
+				merged[k] = v
+			}
+			for k, v := range r {
+				if _, exists := merged[k]; !exists {
+					merged[k] = v
+				}
+			}
+			out = append(out, merged)
+		}
+	}
+	if out == nil {
+		out = []map[string]Value{}
+	}
+	return out, nil
+}
+
+// groupCount implements SELECT <g>, COUNT(*) [AS c] ... GROUP BY <g>.
+func groupCount(rows []map[string]Value, cols, groupBy string) ([]map[string]Value, error) {
+	parts := splitCSV(cols)
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("bad GROUP BY select list")
+	}
+	alias := "count"
+	hasCount := false
+	for _, p := range parts {
+		if isCountStar(strings.TrimSpace(p)) {
+			hasCount = true
+			alias = countAlias(strings.TrimSpace(p))
+		}
+	}
+	if !hasCount {
+		return nil, fmt.Errorf("GROUP BY needs COUNT(*) in select list")
+	}
+	groups := map[string][]map[string]Value{}
+	order := []string{}
+	keyOf := func(r map[string]Value) string {
+		v, ok := r[groupBy]
+		if !ok {
+			return "\x00nil"
+		}
+		j, _ := valueToJSON(v)
+		b, _ := json.Marshal(j)
+		return string(b)
+	}
+	for _, r := range rows {
+		k := keyOf(r)
+		if _, ok := groups[k]; !ok {
+			order = append(order, k)
+		}
+		groups[k] = append(groups[k], r)
+	}
+	sort.Strings(order)
+	var out []map[string]Value
+	for _, k := range order {
+		rep := groups[k][0]
+		row := map[string]Value{}
+		if v, ok := rep[groupBy]; ok {
+			row[groupBy] = v
+		} else {
+			row[groupBy] = Nil()
+		}
+		row[alias] = IntV(len(groups[k]))
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+func unqualify(col string) string {
+	if i := strings.LastIndex(col, "."); i >= 0 {
+		return col[i+1:]
+	}
+	return col
+}
+
+func stripAlias(expr string) string {
+	// `COUNT(*) AS c` / `col AS c` -> alias; else the expr itself.
+	if m := regexp.MustCompile(`(?i)^(.+?)\s+AS\s+([A-Za-z_][A-Za-z0-9_]*)\s*$`).FindStringSubmatch(expr); m != nil {
+		_ = m[1]
+		return m[2]
+	}
+	fields := strings.Fields(expr)
+	if len(fields) == 2 {
+		// `col c` shorthand
+		return fields[1]
+	}
+	return expr
+}
+
+func isCountStar(expr string) bool {
+	e := strings.ToUpper(stripAliasQualifier(expr))
+	e = strings.ReplaceAll(e, " ", "")
+	return e == "COUNT(*)"
+}
+
+func stripAliasQualifier(expr string) string {
+	if m := regexp.MustCompile(`(?i)^(.+?)\s+AS\s+[A-Za-z_][A-Za-z0-9_]*\s*$`).FindStringSubmatch(expr); m != nil {
+		return strings.TrimSpace(m[1])
+	}
+	return strings.TrimSpace(expr)
+}
+
+func countAlias(expr string) string {
+	if m := regexp.MustCompile(`(?i)^.+?\s+AS\s+([A-Za-z_][A-Za-z0-9_]*)\s*$`).FindStringSubmatch(expr); m != nil {
+		return m[1]
+	}
+	return "count"
+}
+
+func compareValues(a, b Value) int {
+	if a.Kind == VNil && b.Kind == VNil {
+		return 0
+	}
+	if a.Kind == VNil {
+		return -1
+	}
+	if b.Kind == VNil {
+		return 1
+	}
+	if (a.Kind == VInt || a.Kind == VFloat) && (b.Kind == VInt || b.Kind == VFloat) {
+		af, _ := asFloat(a)
+		bf, _ := asFloat(b)
+		switch {
+		case af < bf:
+			return -1
+		case af > bf:
+			return 1
+		}
+		return 0
+	}
+	as, bs := "", ""
+	if a.Kind == VString {
+		as = a.Str
+	} else {
+		j, _ := valueToJSON(a)
+		bb, _ := json.Marshal(j)
+		as = string(bb)
+	}
+	if b.Kind == VString {
+		bs = b.Str
+	} else {
+		j, _ := valueToJSON(b)
+		bb, _ := json.Marshal(j)
+		bs = string(bb)
+	}
+	switch {
+	case as < bs:
+		return -1
+	case as > bs:
+		return 1
+	}
+	return 0
 }
 
 func splitCSV(s string) []string {

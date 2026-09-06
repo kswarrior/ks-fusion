@@ -330,5 +330,56 @@ func TestRunStructEnumSyntax(t *testing.T) {
 func TestRunSqliteSubset(t *testing.T) {
 	dir := t.TempDir()
 	db := dir + "/s.db"
-	mustRun(t, "let db = sqlite_open(\"" + db + "\")\n" + "sqlite_exec(db, \"CREATE TABLE t (a)\")\n" + "sqlite_exec(db, \"INSERT INTO t (a) VALUES (1)\")\n" + "let r = sqlite_query(db, \"SELECT * FROM t\")\nassert(len(r) == 1)\nsqlite_close(db)\n")
+	mustRun(t, "let db = sqlite_open(\""+db+"\")\n"+"sqlite_exec(db, \"CREATE TABLE t (a)\")\n"+"sqlite_exec(db, \"INSERT INTO t (a) VALUES (1)\")\n"+"let r = sqlite_query(db, \"SELECT * FROM t\")\nassert(len(r) == 1)\nsqlite_close(db)\n")
+}
+
+func TestRunSqliteExtended(t *testing.T) {
+	dir := t.TempDir()
+	db := dir + "/ext.db"
+	mustRun(t, "let db = sqlite_open(\""+db+"\")\n"+
+		"sqlite_exec(db, \"CREATE TABLE t (a, b)\")\n"+
+		"sqlite_exec(db, \"INSERT INTO t (a, b) VALUES (3, 'c')\")\n"+
+		"sqlite_exec(db, \"INSERT INTO t (a, b) VALUES (1, 'a')\")\n"+
+		"sqlite_exec(db, \"INSERT INTO t (a, b) VALUES (2, 'b')\")\n"+
+		// UPDATE
+		"assert(sqlite_exec(db, \"UPDATE t SET b = 'z' WHERE a = 1\") == 1)\n"+
+		"let r1 = sqlite_query(db, \"SELECT b FROM t WHERE a = 1\")\nassert(r1[0].b == \"z\")\n"+
+		// ORDER BY + LIMIT/OFFSET
+		"let r2 = sqlite_query(db, \"SELECT a FROM t ORDER BY a ASC\")\nassert(r2[0].a == 1)\nassert(r2[2].a == 3)\n"+
+		"let r3 = sqlite_query(db, \"SELECT a FROM t ORDER BY a DESC LIMIT 1\")\nassert(len(r3) == 1)\nassert(r3[0].a == 3)\n"+
+		"let r4 = sqlite_query(db, \"SELECT a FROM t ORDER BY a ASC LIMIT 1 OFFSET 1\")\nassert(len(r4) == 1)\nassert(r4[0].a == 2)\n"+
+		// COUNT(*)
+		"let r5 = sqlite_query(db, \"SELECT COUNT(*) FROM t\")\nassert(r5[0].count == 3)\n"+
+		// GROUP BY
+		"sqlite_exec(db, \"CREATE TABLE g (k, v)\")\n"+
+		"sqlite_exec(db, \"INSERT INTO g (k, v) VALUES ('x', 1)\")\n"+
+		"sqlite_exec(db, \"INSERT INTO g (k, v) VALUES ('x', 2)\")\n"+
+		"sqlite_exec(db, \"INSERT INTO g (k, v) VALUES ('y', 3)\")\n"+
+		"let r6 = sqlite_query(db, \"SELECT k, COUNT(*) AS n FROM g GROUP BY k\")\nassert(len(r6) == 2)\n"+
+		"sqlite_close(db)\n")
+}
+
+func TestRunSqliteJoin(t *testing.T) {
+	dir := t.TempDir()
+	db := dir + "/join.db"
+	mustRun(t, "let db = sqlite_open(\""+db+"\")\n"+
+		"sqlite_exec(db, \"CREATE TABLE users (id, name)\")\n"+
+		"sqlite_exec(db, \"CREATE TABLE orders (uid, item)\")\n"+
+		"sqlite_exec(db, \"INSERT INTO users (id, name) VALUES (1, 'ada')\")\n"+
+		"sqlite_exec(db, \"INSERT INTO users (id, name) VALUES (2, 'bob')\")\n"+
+		"sqlite_exec(db, \"INSERT INTO orders (uid, item) VALUES (1, 'book')\")\n"+
+		"sqlite_exec(db, \"INSERT INTO orders (uid, item) VALUES (1, 'pen')\")\n"+
+		"let r = sqlite_query(db, \"SELECT name, item FROM users JOIN orders ON users.id = orders.uid\")\n"+
+		"assert(len(r) == 2)\n"+
+		"sqlite_close(db)\n")
+}
+
+func TestRunPostgresCompat(t *testing.T) {
+	dir := t.TempDir()
+	db := dir + "/pg.db"
+	mustRun(t, "let db = postgres_open(\""+db+"\")\n"+
+		"postgres_exec(db, \"CREATE TABLE t (a)\")\n"+
+		"postgres_exec(db, \"INSERT INTO t (a) VALUES (7)\")\n"+
+		"let r = postgres_query(db, \"SELECT * FROM t\")\nassert(len(r) == 1)\nassert(r[0].a == 7)\n"+
+		"postgres_close(db)\n")
 }
