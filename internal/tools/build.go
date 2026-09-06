@@ -329,7 +329,16 @@ func ResolveDep(name, spec string, dirs []string) (path, ver string, err error) 
 		if !okj {
 			return true
 		}
-		return cmpVer(vi, vj) > 0
+		if c := cmpVer(vi, vj); c != 0 {
+			return c > 0
+		}
+		// Same version: secure (.ksx) wins over plain (.kslib).
+		si := strings.HasSuffix(filtered[i].Path, ".ksx")
+		sj := strings.HasSuffix(filtered[j].Path, ".ksx")
+		if si != sj {
+			return si && !sj
+		}
+		return filtered[i].Path < filtered[j].Path
 	})
 	return filtered[0].Path, filtered[0].Ver, nil
 }
