@@ -81,17 +81,18 @@ func TestLSPRenameBadName(t *testing.T) {
 
 func TestLSPFormatting(t *testing.T) {
 	uri := "file:///tmp/lsp-fmt-test.ks"
-	setOpenDoc(uri, "let x=1\nprint x\n")
+	raw := "let x = 1   \nprint x\n"
+	setOpenDoc(uri, raw)
 	defer dropOpenDoc(uri)
 	edits := formattingEdits(uri)
 	if len(edits) != 1 {
 		t.Fatalf("want 1 formatting edit, got %d", len(edits))
 	}
 	newText := edits[0].(map[string]any)["newText"].(string)
-	if newText != FormatSource("let x=1\nprint x\n") {
+	if newText != FormatSource(raw) {
 		t.Fatalf("want canonical format, got %q", newText)
 	}
-	setOpenDoc(uri, FormatSource("let x=1\nprint x\n"))
+	setOpenDoc(uri, FormatSource(raw))
 	if got := formattingEdits(uri); len(got) != 0 {
 		t.Fatalf("want no edits when clean, got %d", len(got))
 	}

@@ -1,0 +1,17 @@
+{
+  "name": "ks",
+  "scopeName": "source.ks",
+  "fileTypes": ["ks"],
+  "patterns": [
+    { "match": "#.*$", "name": "comment.line.number-sign.ks" },
+    { "match": "//.*$", "name": "comment.line.double-slash.ks" },
+    {
+      "match": "\\b(let|func|return|if|else|while|for|in|break|continue|print|sleep|go|import|try|catch|finally|switch|case|default|defer|select|and|or|not|is)\\b",
+      "name": "keyword.control.ks"
+    },
+    { "match": "\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'", "name": "string.quoted.ks" },
+    { "match": "\\b\\d[\\d_]*(\\.\\d+)?([eE][+-]?\\d+)?\\b|0x[0-9a-fA-F_]+|0b[01_]+|0o[0-7_]+", "name": "constant.numeric.ks" },
+    { "match": "\\b(true|false|nil)\\b", "name": "constant.language.ks" },
+    { "match": "\\b(func)\\s+([A-Za-z_][A-Za-z0-9_]*)", "captures": { "1": { "name": "keyword.control.ks" }, "2": { "name": "entity.name.function.ks" } } }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "name": "ks-fusion",
+  "displayName": "ks-fusion",
+  "description": "Language support for ks-fusion (.ks): LSP hover/goto-def/rename/format-on-save via `fusion lsp`.",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Programming Languages"],
+  "activationEvents": ["onLanguage:ks"],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "ks",
+        "aliases": ["ks-fusion", "ks"],
+        "extensions": [".ks"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ks",
+        "scopeName": "source.ks",
+        "path": "./syntaxes/ks.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "ks-fusion",
+      "properties": {
+        "ks-fusion.serverPath": {
+          "type": "string",
+          "default": "fusion",
+          "description": "Path to the fusion binary (used as `fusion lsp`)."
+        }
+      }
+    }
+  }
+}
