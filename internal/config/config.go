@@ -31,6 +31,23 @@ func (c *Config) LibDir() string {
 
 // Load reads <appDir>/fusion.toml. Uses stdlib only (tiny parser).
 func Load(appDir string) (*Config, error) {
+	return LoadFile(filepath.Join(appDir, "fusion.toml"))
+}
+
+// LoadFile reads an explicit config file (e.g. `fusion launch ./myapp.toml`).
+// Dir is set to the file's directory so relative entry_backend/entry_frontend
+// and path dependencies keep working. Like package.json, this file holds
+// the frontend/backend entry paths.
+func LoadFile(path string) (*Config, error) {
+	dir := filepath.Dir(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("missing config %s: %w", path, err)
+	}
+	return parseConfig(data, dir, path)
+}
+
+func parseConfig(data []byte, appDir, sourcePath string) (*Config, error) {
 	c := &Config{
 		Name:          filepath.Base(appDir),
 		Version:       "0.1.0",
@@ -42,11 +59,6 @@ func Load(appDir string) (*Config, error) {
 		Dependencies:  map[string]string{},
 	}
 	c.LibName = c.Name
-	path := filepath.Join(appDir, "fusion.toml")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("missing fusion.toml in %s: %w", appDir, err)
-	}
 	section := "package"
 	for _, raw := range strings.Split(string(data), "\n") {
 		line := strings.TrimSpace(stripInlineComment(raw))
@@ -76,7 +88,7 @@ func Load(appDir string) (*Config, error) {
 			case "type":
 				t := strings.ToLower(val)
 				if t != "app" && t != "lib" {
-					return nil, fmt.Errorf("invalid fusion.toml in %s: type must be \"app\" or \"lib\", got %q", appDir, val)
+					return nil, fmt.Errorf("invalid config %s: type must be \"app\" or \"lib\", got %q", sourcePath, val)
 				}
 				c.Type = t
 			case "entry_backend", "backend":
@@ -101,10 +113,10 @@ func Load(appDir string) (*Config, error) {
 		c.LibName = c.Name
 	}
 	if strings.TrimSpace(c.BackendEntry) == "" {
-		return nil, fmt.Errorf("invalid fusion.toml in %s: entry_backend is empty", appDir)
+		return nil, fmt.Errorf("invalid config %s: entry_backend is empty", sourcePath)
 	}
 	if strings.TrimSpace(c.FrontendEntry) == "" {
-		return nil, fmt.Errorf("invalid fusion.toml in %s: entry_frontend is empty", appDir)
+		return nil, fmt.Errorf("invalid config %s: entry_frontend is empty", sourcePath)
 	}
 	return c, nil
 }
