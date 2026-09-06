@@ -378,6 +378,25 @@ func BuildBin(appDir, out, target string) error {
 		}
 		embeds = append(embeds, binEmbedded{Rel: filepath.ToSlash(rel), Data: string(data)})
 	}
+	// embed resolved .kslib deps so --bin runs without external test-releases/
+	if len(cfg.Dependencies) > 0 {
+		if paths, err := ResolveAll(cfg); err == nil {
+			for _, p := range paths {
+				if strings.HasPrefix(p, "path:") {
+					continue
+				}
+				data, err := os.ReadFile(p)
+				if err != nil {
+					continue
+				}
+				embeds = append(embeds, binEmbedded{Rel: "test-releases/" + filepath.Base(p), Data: string(data)})
+			}
+		}
+	}
+	// embed fusion.lock if present
+	if lockData, err := os.ReadFile(filepath.Join(cfg.Dir, "fusion.lock")); err == nil {
+		embeds = append(embeds, binEmbedded{Rel: "fusion.lock", Data: string(lockData)})
+	}
 	// generate main.go inside module (internal/ import rule: must build within module)
 	modRoot := findModuleRoot()
 	tmpName := fmt.Sprintf("tmp-fusion-bin-%d", time.Now().UnixNano())
