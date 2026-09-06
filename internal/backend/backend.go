@@ -710,6 +710,9 @@ type Interpreter struct {
 	typeMu  sync.RWMutex
 	structs map[string]*StructDef
 	enums   map[string]*EnumDef
+	// Debug hook (v2.5): when non-nil, called before each statement with
+	// its line number. Return non-nil to abort execution (breakpoints).
+	OnStmt func(line int, stmtKind string) error
 }
 
 func New() *Interpreter {
@@ -998,6 +1001,11 @@ func (in *Interpreter) lookupTypeAnn(env *Env, name string) (string, bool) {
 func (in *Interpreter) execStmt(env *Env, st *frontend.Stmt) error {
 	if f := in.fail(); f != nil {
 		return f
+	}
+	if in.OnStmt != nil && st.Line > 0 {
+		if err := in.OnStmt(st.Line, stmtKindName(st.Kind)); err != nil {
+			return err
+		}
 	}
 	switch st.Kind {
 	case frontend.StmtLet:
