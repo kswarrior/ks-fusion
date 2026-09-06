@@ -524,7 +524,10 @@ func (w *webWatcher) loop() {
 	}
 }
 
-// ISR cache (v2.4): route -> rendered body with revalidate TTL.
+// ISR cache (v2.4 opt-in TTL, v2.5 background regen): route -> rendered
+// body with revalidate TTL. A background loop refreshes entries before they
+// expire; handlers serve stale bodies while a refresh is in flight or when a
+// re-render fails.
 type isrEntry struct {
 	body    string
 	ctype   string
@@ -532,11 +535,81 @@ type isrEntry struct {
 }
 
 type isrCache struct {
-	mu sync.Mutex
-	m  map[string]isrEntry
+	mu         sync.Mutex
+	m          map[string]isrEntry
+	refreshing map[string]bool
+	// regen rebuilds one cache key; set by the server.
+	regen func(route, format string) (body, ctype, vmJSON string, ok bool)
 }
 
-func newISRCache() *isrCache { return &isrCache{m: map[string]isrEntry{}} }
+func newISRCache() *isrCache { return &isrCache{m: map[string]isrEntry{}, refreshing: map[string]bool{}} }
+
+// startBackground refreshes entries expiring within `ahead` every `interval`.
+// Stop via the returned func (tests) or leave running for the server lifetime.
+func (c *isrCache) startBackground(interval, ahead time.Duration) func() {
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		tick := time.NewTicker(interval)
+		defer tick.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-tick.C:
+				c.refreshSoon(ahead)
+			}
+		}
+	}()
+	return func() { close(stop); <-done }
+}
+
+func (c *isrCache) refreshSoon(ahead time.Duration) {
+	c.mu.Lock()
+	var keys []string
+	now := time.Now()
+	for k, e := range c.m {
+		if e.expires.Sub(now) <= ahead && !c.refreshing[k] {
+			c.refreshing[k] = true
+			keys = append(keys, k)
+		}
+	}
+	regen := c.regen
+	c.mu.Unlock()
+	for _, k := range keys {
+		go func(key string) {
+			defer func() {
+				c.mu.Lock()
+				delete(c.refreshing, key)
+				c.mu.Unlock()
+			}()
+			if regen == nil {
+				return
+			}
+			route, format := splitISRKey(key)
+			body, ctype, vmJSON, ok := regen(route, format)
+			if !ok {
+				return // keep stale entry; handler serves it on errors
+			}
+			ttl := isrTTL(vmJSON)
+			if ttl <= 0 {
+				return
+			}
+			c.mu.Lock()
+			c.m[key] = isrEntry{body: body, ctype: ctype, expires: time.Now().Add(ttl)}
+			c.mu.Unlock()
+		}(k)
+	}
+}
+
+func splitISRKey(key string) (route, format string) {
+	// keys are route + "?format=" + format
+	if i := strings.LastIndex(key, "?format="); i >= 0 {
+		return key[:i], key[i+len("?format="):]
+	}
+	return key, ""
+}
 
 func isrTTL(vmJSON string) time.Duration {
 	// convention: view-model props.revalidate = seconds (Next.js ISR analogue)
