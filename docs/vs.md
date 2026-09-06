@@ -15,7 +15,7 @@
 | Browser UI / React / SSR | Next.js (TS) | `frontend/main.ks` is console logic today, not DOM |
 | CRUD + auth + admin panel tomorrow | PHP Laravel / Python Django | No ORM, migrations, HTTP server stdlib yet |
 | Quick scripts, rules, gluing, learning | ks-fusion | — this is the sweet spot |
-| npm / PyPI ecosystem | Node.js / Python | `.ks` has 97 builtins + local `.kslib` only |
+| npm / PyPI ecosystem | Node.js / Python | `.ks` has 97 builtins (interpreter; 7 in VM subset) + local `.kslib`/`.ksb` only |
 
 ## Big table
 
@@ -84,7 +84,8 @@ Details in `More` below. Frontend breakdown:
 **Score: ks-fusion 49/100 vs Go 82/100 — Go wins by 33.**
 
 Same ideas: `go func(){...}()`, `chan(1)`, `send/recv/close`, `select`, `defer` LIFO.
-Difference: Go is compiled + statically typed; `.ks` is interpreted + gradual-typed
+Difference: Go is compiled + statically typed; `.ks` runs on a tree-walk interpreter
+(full language) with an opt-in bytecode subset (`fusion compile` v0.1) + gradual types
 (optional `: type` annotations checked at runtime, `is`/`?.`/`??`).
 
 ```go
@@ -126,7 +127,8 @@ select {
 ```
 
 Pick Go for prod servers, strict APIs, single binary.
-Pick `.ks` for shorter scripts with Go-flavored concurrency and no compile step.
+Pick `.ks` for shorter scripts with Go-flavored concurrency and no mandatory compile step
+(`fusion compile` is opt-in, subset-only: no `go`/`chan`/`select`).
 
 ### vs Rust
 
@@ -267,14 +269,14 @@ Do not reimplement React in `.ks` — explicit non-goal in `futures.md`.
 **Score: ks-fusion 49/100 vs Vite 77/100 — Vite wins by 28 (different category).**
 
 Vite = instant HMR dev server + `esbuild`/Rollup bundler + plugin ecosystem.
-`fusion` = `new/run/build` for `.ks` only, no HMR, no bundling, no CSS/DOM.
+`fusion` = `new/run/build` (+ `compile --dis/--run` subset) for `.ks` only, no HMR, no bundling, no CSS/DOM.
 
-|  | Vite | `fusion` (v2.1) |
+|  | Vite | `fusion` (v2.1 + compiler v0.1) |
 |---|---|---|
 | Dev | HMR <100ms | `run` rerun, no watch |
-| Build | tree-shaken JS/CSS | source JSON `.kslib` / parse-check |
+| Build | tree-shaken JS/CSS | source JSON `.kslib` / parse-check + subset `.ksb` bytecode |
 | Plugins | 1000s (React, TS, Tailwind) | none yet |
-| Target | browser | console interpreter |
+| Target | browser | console interpreter + subset VM |
 
 Pick Vite for React/TS/Tailwind frontends.
 Pick `.ks` for logic; future `fusion run --web` will copy the HMR idea, and
@@ -453,15 +455,24 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
 1. Browser UI? → React + Vite + TS, or Next.js for SSR.
 2. CRUD + login + billing next week? → Laravel / Django / Rails / Next.js.
 3. 100k RPS / embedded / game loop? → Go / Rust / C++ / C.
-4. Script, bot, rule engine, teaching `go/chan/select`, prototype? → `.ks`.
+4. Script, bot, rule engine, teaching `go/chan/select`, prototype? → `.ks` (interpreter).
+   Pure arithmetic/control-flow/funcs with no concurrency? → try `fusion compile --run` (VM subset).
 5. Need `http/DB` in `.ks` today? → shell out or wait — see `docs/futures.md` P1 stdlib.
 
-## Honest limits of `.ks` v2.1 (do not hide)
+## Honest limits of `.ks` v2.1 + compiler v0.1 (do not hide)
 
-* Interpreted tree-walk, no JIT/native binary, no cross-compile matrix
+* Full language is tree-walk interpreted, no JIT/native binary, no cross-compile matrix
   (v2.1 tree-walk opts: lock-free scopes, halved env allocs, O(n log n) sort,
   O(log n) pow, string+string fast path — fib still ~100x slower than Go).
+  Compiler v0.1 narrows but does not close this: `.ksb-1` is portable JSON run by
+  `fusion` (not a static binary), subset-only, 7 builtins, int `**` O(n) in the VM.
 * Gradual types only (no structs/enums/generics yet), `==` uses deep equality.
+  Compiler v0.1 rejects `: type` annotations and `is`/`?.`/`??` (interpreter-only).
 * Flat lib namespace (prefix functions), newest local bundle wins, no lockfile.
+  `.ksb` is per-file bytecode, not a package format (that stays `.kslib`).
 * No `fusion run --race`, no cancel/`with_timeout` yet, no HTTP/WS/DB/regex/crypto stdlib.
+  No `go/chan/select/sleep` in compiled output yet.
 * `frontend/` is not web — no DOM, no CSS, no SSR.
+* Version skew to know: language/docs say `v2.1`, `fusion help` in `cmd/fusion/main.go`
+  still prints `v2.0`, and `release/fusion` may predate `compile` — rebuild from source
+  (`go build -o fusion ./cmd/fusion`) before using `fusion compile`.
