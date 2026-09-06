@@ -195,7 +195,9 @@ func ParseSource(src, path string) (*Program, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Program{Statements: stmts, Path: path}, nil
+	prog := &Program{Statements: stmts, Path: path}
+	FoldProgram(prog)
+	return prog, nil
 }
 
 // ParseExpr parses a single expression string (kept for compat/tests).
