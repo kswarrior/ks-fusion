@@ -422,20 +422,7 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 	case frontend.StmtForC:
 		return c.compileForC(st)
 	case frontend.StmtFunc:
-		if len(st.ParamTypes) > 0 {
-			for _, t := range st.ParamTypes {
-				if t != "" {
-					return fmt.Errorf("line %d: typed params not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
-				}
-			}
-		}
-		if st.ReturnType != "" {
-			return fmt.Errorf("line %d: return types not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
-		}
-		if st.TypeAnn != "" {
-			return fmt.Errorf("line %d: type annotations not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
-		}
-		return c.compileFuncDef(st.Name, st.Names, st.Body, st.Line)
+		return c.compileFuncDefTyped(st.Name, st.Names, st.ParamTypes, st.ReturnType, st.Body, st.Line)
 	case frontend.StmtReturn:
 		if len(c.frames) == 1 {
 			return fmt.Errorf("line %d: return outside function (compiler v0.1)", st.Line)
@@ -481,15 +468,85 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 	case frontend.StmtImport:
 		return fmt.Errorf("line %d: `import` not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
 	case frontend.StmtTry:
-		return fmt.Errorf("line %d: `try/catch` not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
+		return fmt.Errorf("line %d: `try/catch` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
 	case frontend.StmtSwitch:
-		return fmt.Errorf("line %d: `switch` not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
+		return c.compileSwitch(st)
 	case frontend.StmtSelect:
-		return fmt.Errorf("line %d: `select` not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
+		return fmt.Errorf("line %d: `select` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
 	case frontend.StmtDefer:
-		return fmt.Errorf("line %d: `defer` not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
+		return fmt.Errorf("line %d: `defer` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
+	case frontend.StmtStruct, frontend.StmtEnum:
+		return fmt.Errorf("line %d: `struct`/`enum` declarations run in the interpreter (compiler v0.2 records nominal types at runtime)", st.Line)
 	}
-	return fmt.Errorf("line %d: unknown statement (compiler v0.1)", st.Line)
+	return fmt.Errorf("line %d: unknown statement (compiler v0.2)", st.Line)
+}
+
+// compileSwitch desugars `switch x { case a,b {..} default {..} }` to a
+// hidden-target + Eq-chain (first match wins, no fallthrough). `break`
+// inside a case exits the switch; `continue` propagates to the enclosing loop.
+func (c *compiler) compileSwitch(st *frontend.Stmt) error {
+	c.beginScope()
+	if err := c.compileExpr(st.Expr); err != nil {
+		return err
+	}
+	tgtTmp := c.hiddenName("switch")
+	tgtSlot := c.defineLocal(tgtTmp)
+	_ = tgtSlot
+	// switch break context (captures break, forwards continue)
+	c.loops = append(c.loops, loopCtx{continueAt: -2, savedDepth: c.cur().depth, savedNLocals: len(c.cur().locals)})
+	var endJumps []int
+	for _, cs := range st.Cases {
+		if cs.IsDefault {
+			// default: always runs (if reached)
+			c.beginScope()
+			if err := c.compileStmt(cs.Body); err != nil {
+				return err
+			}
+			c.endScope(st.Line)
+			continue
+		}
+		// for each value in `case a, b`: if target == v, run body then jump end
+		var nextTests []int
+		for _, val := range cs.Values {
+			c.emitGetLocal(tgtSlot, tgtTmp, st.Line)
+			if err := c.compileExpr(val); err != nil {
+				return err
+			}
+			c.emit(OpEq, 0, st.Line)
+			jNext := c.emit(OpJumpIfFalse, -1, st.Line)
+			c.emit(OpPop, 0, st.Line)
+			// matched: run body
+			c.beginScope()
+			if err := c.compileStmt(cs.Body); err != nil {
+				return err
+			}
+			c.endScope(st.Line)
+			endJumps = append(endJumps, c.emit(OpJump, -1, st.Line))
+			c.patch(jNext, len(c.cur().fn.Chunk.Code))
+			c.emit(OpPop, 0, st.Line)
+			_ = nextTests
+		}
+	}
+	// patch switch breaks to here; forward continues to enclosing loop
+	sw := c.loops[len(c.loops)-1]
+	c.loops = c.loops[:len(c.loops)-1]
+	end := len(c.cur().fn.Chunk.Code)
+	for _, b := range sw.breaks {
+		c.patch(b, end)
+	}
+	for _, cp := range endJumps {
+		c.patch(cp, end)
+	}
+	// forward switch-level continues (should be none — `continue` in a case
+	// targets the enclosing for/while) to the parent loop context.
+	if len(sw.continues) > 0 && len(c.loops) > 0 {
+		parent := &c.loops[len(c.loops)-1]
+		parent.continues = append(parent.continues, sw.continues...)
+	} else if len(sw.continues) > 0 {
+		return fmt.Errorf("line %d: continue outside loop (compiler v0.2)", st.Line)
+	}
+	c.endScope(st.Line)
+	return nil
 }
 
 func (c *compiler) popToLoopDepth(line int) {
@@ -515,11 +572,30 @@ func (c *compiler) emitGetLocal(slot int, name string, line int) {
 }
 
 func (c *compiler) compileLet(st *frontend.Stmt) error {
-	if st.TypeAnn != "" {
-		return fmt.Errorf("line %d: `let x: %s` not yet supported by compiler v0.1 (runs in interpreter)", st.Line, st.TypeAnn)
-	}
 	if err := c.compileExpr(st.Expr); err != nil {
 		return err
+	}
+	// v0.2: `let x: T` runtime check (nil passes, like the interpreter).
+	if st.TypeAnn != "" && st.TypeAnn != "any" {
+		c.emitNamed(OpCheckType, 0, st.TypeAnn, st.Line)
+		// CheckType peeks; value stays for Define/Set below. Pop the extra?
+		// No: CheckType leaves the value, so Define consumes it. But our
+		// CheckType peeks (no pop), so the stack still has one value. Good.
+		// Actually CheckType peeks, so we need no extra handling — but it
+		// leaves the value; DefineGlobal/SetLocal will pop it? No, Define
+		// pops via OpDefineGlobal which pops. For locals, defineLocal does
+		// not emit (value already on stack as local slot). Wait: locals are
+		// stack slots — value stays. CheckType peeked, so still one value.
+		// Pop the check dup? No dup — CheckType does not push. So stack is
+		// correct: one value for the binding.
+		// However CheckType above peeked; we must pop nothing extra.
+		// To keep the value for the binding, do nothing here — but CheckType
+		// peeked, so the value remains. For globals, DefineGlobal pops it.
+		// For locals, the value is the slot. Both correct. But we emitted
+		// CheckType which peeked; the value is still there. Good.
+		// Note: CheckType leaves value; no pop needed. Remove the Pop below
+		// if added. (Kept as peek semantics.)
+		_ = 0
 	}
 	// Top-level (depth 0) lets are globals; block-scoped and function lets
 	// are locals so `{ let x = 1 }` does not leak.
