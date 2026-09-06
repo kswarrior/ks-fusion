@@ -400,6 +400,15 @@ func BuildBin(appDir, out, target string) error {
 	if err != nil {
 		return err
 	}
+	// tidy first (resolve replace -> local path)
+	tidy := exec.Command("go", "mod", "tidy")
+	tidy.Dir = tmpDir
+	tidy.Env = os.Environ()
+	tidy.Stdout = os.Stdout
+	tidy.Stderr = os.Stderr
+	if err := tidy.Run(); err != nil {
+		return fmt.Errorf("go mod tidy failed: %w", err)
+	}
 	cmd := exec.Command("go", "build", "-o", absOut, ".")
 	cmd.Dir = tmpDir
 	env := os.Environ()
