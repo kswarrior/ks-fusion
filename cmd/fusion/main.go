@@ -223,6 +223,26 @@ func main() {
 			fmt.Println("error:", err)
 			os.Exit(1)
 		}
+	case "publish":
+		if err := cmdPublish(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
+	case "pull":
+		if err := cmdPull(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
+	case "yank":
+		if err := cmdYank(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
+	case "registry":
+		if err := cmdRegistry(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
 	case "version", "--version", "-V":
 		fmt.Println("ks-fusion", toolVersion)
 	case "help", "--help", "-h":
