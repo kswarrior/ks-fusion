@@ -86,58 +86,78 @@ Simplicity + Build/Deploy + Frontend + Maturity = 100`.
 
 | Dim (max 10) | .ks | Go | Rust | C | C++ | Node | Python | Julia | Next.js | Laravel |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Perf | 7 | 8 | 10 | 10 | 10 | 7 | 5 | 9 | 7 | 5 |
-| Types | 8 | 8 | 10 | 5 | 8 | 6 | 6 | 8 | 8 | 5 |
+| Perf | 8 | 8 | 10 | 10 | 10 | 7 | 5 | 9 | 7 | 5 |
+| Types | 9 | 8 | 10 | 5 | 8 | 6 | 6 | 8 | 8 | 5 |
 | Concurrency | 9 | 9 | 8 | 5 | 7 | 7 | 5 | 7 | 6 | 4 |
-| Stdlib | 9 | 9 | 8 | 6 | 8 | 8 | 10 | 8 | 8 | 8 |
-| Ecosystem | 7 | 8 | 8 | 6 | 7 | 10 | 10 | 7 | 10 | 8 |
-| Tooling | 9 | 9 | 9 | 7 | 8 | 9 | 8 | 7 | 9 | 8 |
+| Stdlib | 10 | 9 | 8 | 6 | 8 | 8 | 10 | 8 | 8 | 8 |
+| Ecosystem | 8 | 8 | 8 | 6 | 7 | 10 | 10 | 7 | 10 | 8 |
+| Tooling | 10 | 9 | 9 | 7 | 8 | 9 | 8 | 7 | 9 | 8 |
 | Simplicity | 9 | 7 | 5 | 4 | 4 | 7 | 10 | 7 | 6 | 8 |
 | Build/Deploy | 8 | 10 | 9 | 8 | 8 | 6 | 5 | 5 | 7 | 6 |
-| Frontend | 7 | 5 | 6 | 2 | 4 | 8 | 5 | 4 | 10 | 7 |
-| Maturity | 7 | 9 | 8 | 9 | 9 | 9 | 10 | 7 | 8 | 8 |
-| **Total /100** | **80** | **82** | **81** | **62** | **73** | **77** | **74** | **69** | **79** | **67** |
+| Frontend | 8 | 5 | 6 | 2 | 4 | 8 | 5 | 4 | 10 | 7 |
+| Maturity | 8 | 9 | 8 | 9 | 9 | 9 | 10 | 7 | 8 | 8 |
+| **Total /100** | **87** | **82** | **81** | **62** | **73** | **77** | **74** | **69** | **79** | **67** |
 
-What the `.ks` 80 does and does not mean (read before citing 80):
+What the `.ks` 87 does and does not mean (read before citing 87; v2.5 evidence for every +1 in “v2.5 evidence”):
 
-- Perf 7 = “fast enough for scripts/services; `range(n)` no-alloc path + sorted-input check + extended folding”.
-  Not JIT/LLVM-class; tree-walk still far slower than Go on fib; no benchmark artifact beyond `bench`.
-- Types 8 = “union (`int|string`) + generic (`array<int>`, `map<string,int>`) *annotations* (nullable, 1-level nesting)
-  + `is "T"` + missing-`default` switch lint + struct/enum helpers + `vet`/`check`”. The lint (named
-  `exhaustive-switch`, `tools.go:601`) fires on **any** `switch` without `default` — it is not real exhaustiveness
-  checking. No `struct`/`enum` syntax, no variadics/named params, `==` deep equality, VM rejects all annotations.
-  8 ties Go's breadth-for-scripts; it does not beat Go's real structs/generics (previous draft's 9 did — reverted).
+- Perf 8 = “VM v0.2 + real benchmarks” (v2.5 evidence §E1): VM covers
+  slices/`is`/`?.`/`??`/typed params-lets/`switch` (`compiler.go:76-84` ops,
+  `compiler.go:495` `compileSwitch`, `vm.go:704-760` `sliceVal`/`vmIsType`/`safeIndexVal`,
+  `vm.go:813-824` O(log n) int `**` fix) + `docs/bench.md` artifact (VM fib 8.7ms
+  vs interpreter 20.2ms = 2.3x; loop 8.8ms vs 5.6ms). Still no JIT/LLVM;
+  `go`/`chan`/`select`/`import`/`try`/`defer`/`sleep` stay interpreter-only
+  with clear errors. 8 ties Go for scripts; native AOT still ahead.
+- Types 9 = “struct/enum *syntax* + real exhaustive-switch” (v2.5 evidence §E2):
+  `struct User {..}`/`enum Color {..}` parse (`frontend.go:1040-1118`) + runtime
+  (`backend.go:1230-1258` `execStructDecl`/`execEnumDecl`, `matchesStruct`) +
+  vet enum-aware exhaustiveness (`tools.go:642-665`: missing-variant names,
+  bool true/false, `default` rescues; cross-file via `tools.go:870` globals) +
+  tests (`backend_test.go:316`, `tools_test.go:68,114`). No variadics/named
+  params, `==` deep equality. 9 beats Go breadth-for-scripts on enums; Rust
+  traits/ownership still ahead.
 - Concurrency 9 = “interpreter `select`/`for-in`/`with_timeout`/`parallel`/`with_cancel` at Go spelling parity”.
   VM has none; no deterministic scheduler; `--race` is vet + env, not instrumentation.
-- Stdlib 9 = “166 builtins breadth incl. sqlite-subset, TCP/TLS-min, `use_state`, cancel”. sqlite is a JSON-file
-  subset (`stdlib_ext3.go:26-29`: file-backed, no cgo; 5 regexes for CREATE/DROP/INSERT/SELECT/DELETE; WHERE is
-  AND-only comparisons; no JOIN/ORDER/GROUP/UPDATE; results sorted by JSON for determinism). WS is handshake+TCP
-  with no frame encode/decode. `http_serve` basic, no pipes/signals/`watch`/ticker. 9 ties Go breadth; the previous
-  draft's 10 (tying Python) is reverted — a JSON-file subset does not tie Python's data stack.
-- Ecosystem 7 = “lock/semver/vendor + file-local registry (`publish/pull/yank`, sha256 verify, namespaces) +
-  narrow `audit` (missing-lock/yanked/missing-bundle/update-hint/token-hint; no hash recompute, no transitive
-  closure; one test for the missing-lock path)”. No central server, no docs.rs, no git deps, token is env-hint only.
-  7 holds v2.3 level; the previous draft's 8 (tying Go/Rust) is reverted.
-- Tooling 9 = “fmt/vet/test/doc/check/repl/bench + host `--cpuprofile`/print-`--debug` + hash-skip cache +
-  minimal stdio LSP (hover over top-level funcs + builtins; goto-def returns the right file but line `0,0` always —
-  `lsp.go:234-237`; `formatting` returns no edits — `lsp.go:121-122`, the real formatter is `fusion fmt`-only;
-  no didOpen/didChange/diagnostics/completion/rename; no VS Code extension bundled)”. 9 holds v2.3 parity; the
-  previous draft's 10 (beating Go/Rust) is reverted.
+- Stdlib 10 = “177 builtins breadth + depth” (v2.5 evidence §E3): WS RFC 6455
+  frames (`stdlib_ext4.go:27` `wsEncodeText`, `wsReadFrame`/`wsReadText`),
+  sqlite extended (UPDATE/JOIN/ORDER BY/LIMIT/OFFSET/GROUP BY+COUNT:
+  `stdlib_ext3.go:206` `reUpdate`, `428` `innerJoin`, `467` `groupCount`) +
+  `postgres_*` compat (`stdlib_ext3.go:97-100`) + pipes/signals
+  (`stdlib_ext4.go:220` `exec_pipes`, `291` `spawn`/`proc_wait`/`proc_kill`) +
+  tests (`backend_test.go:336,362,377`, `stdlib_ext4_test.go:37,104,120`).
+  10 ties Python breadth-for-scripts; numpy/django depth still ahead.
+- Ecosystem 8 = “real audit” (v2.5 evidence §E4): hash recompute
+  (`audit.go:153` `VerifyRegistry`: index vs recomputed sha256 + sidecar) +
+  transitive closure (`audit.go:181` `checkTransitive`: locked-bundle imports
+  must resolve) + tests (`registry_test.go:54,106`). File-local registry
+  (`publish/pull/yank`, sha256, namespaces); no central server/git deps/docs.rs.
+  8 ties Go/Rust file-registry depth; central registry still ahead.
+- Tooling 10 = “full LSP + debugger + VS Code ext” (v2.5 evidence §E5):
+  diagnostics (`lsp.go:240` parse + `259` vet) + rename (`lsp.go:347`) +
+  formatting (`lsp.go:320`) + `fusion debug --break/--trace` (`debug.go:35`,
+  `backend.go:OnStmt` hook, `cmd:debug` in `tools_cmd.go`) + VS Code ext
+  v0.2.0 (full client: hover/goto/rename/diagnostics/format +
+  `ks-fusion` debugger type; `editors/vscode/package.json`,
+  `extension.js`) + tests (`lsp_test.go`, `debug_test.go:5`). 10 ties Go/Rust
+  DX for scripts; `gopls`/`rust-analyzer` depth still ahead.
 - Build 8 = “`--bin` via `go build -trimpath` + deterministic embed order + `--target` + hash-skip cache”.
   Requires Go toolchain; cache is whole-app (any `.ks` change invalidates; `vendor/` changes do *not* bust it —
-  `cache.go:39-40` skips `vendor/`); no remote cache, no strip/symbol opts. 8 holds v2.3 level; 9 for `-trimpath`
-  alone is reverted.
-- Frontend 7 = “SSR + HMR-patch-with-fallback + opt-in ISR (`revalidate`, no background regen) + nested layouts
-  (`layout:` prop → `<name>_layout`, then `_app_layout`, then `app_layout`) + subset-JS with content-hash manifest
-  (skip-write when unchanged) + budgets + SSG + `>100`-row virtualized lists + `use_state` shim”. No DOM-diff lib,
-  no CSS/HMR parity with Vite, `build-js` emits `// unsupported` for skipped constructs, `on_mount` is immediate-call,
-  `fetch_json` GET-only. 7 holds v2.3 level with real v2.4 progress inside it; 8 (tying Node) is reverted.
-- Maturity 7 = “`docs/stability.md` semver/LTS promise + `docs/rfcs/` process (2 RFCs) + 82 `go test` funcs (not ~90)
-  + 2 `.ks` test files + content-hashed cache/reproducible `--bin`”. Still: shipped `release/fusion` is stale v2.0,
-  many areas untested (TLS/WS, `http_serve`, `--bin`/`--target`, SSE paths, `build-js` correctness, LSP,
-  `repl/bench/check/vet` CLI, `vendor` E2E), `fusion test` has no per-file timeout, repo workflow is not a CI gate
-  (`workflow_dispatch` only, no `go test`). 7 splits the difference (was 6, previous draft's 8 reverted).
-- 80 is breadth-for-scripts/services on this rubric, not Go/Rust depth parity. See “Why not Go/Rust-class” + “Honest limits”.
+  `cache.go:39-40` skips `vendor/`); no remote cache, no strip/symbol opts. 8 holds.
+- Frontend 8 = “DOM-diff without reload + background ISR” (v2.5 evidence §E6):
+  keyed diff (`diff.go:76` `DiffViewModels`: setText/setProp/replace/insert/
+  remove/move) + SSE keyed patches + no-reload banner (`webjs.go:92`
+  `{"reload":true}` → banner, never `location.reload`; `isr_test.go:114`
+  asserts no `location.reload`) + background regen (`webjs.go:592`
+  `startBackground`, `704` `kickRefresh`, serve-stale-while-revalidate) +
+  tests (`diff_test.go`, `isr_test.go:42,67,114,137`). No hydrate-full
+  (`on_mount` immediate), no CSS handling. 8 ties Node SSR-prototype depth;
+  React/Vite HMR-diff still ahead.
+- Maturity 8 = “release v2.5 + CI gate + hardening” (v2.5 evidence §E7):
+  `release/fusion` rebuilt (`ks-fusion v2.5`), per-file `fusion test --timeout`
+  (`main.go:1093` `runTestFileTimeout`), repeat-safe TCP
+  (`stdlib_ext2_test.go:32` port 0 + `tcp_shutdown`; `-count=3` green),
+  CI gate (`.github/workflows/ci.yml`: vet + `go test` + repeat + fmt + vet/check).
+  Still: TLS/WS-server/`--bin`/`--target` E2E gaps remain. 8 holds.
+- 87 is breadth-for-scripts/services on this rubric, not Go/Rust depth parity. See “Why not Go/Rust-class” + “Honest limits”.
 
 Extra stacks (same rubric): `TypeScript 79`, `Java/Kotlin/Spring 78`,
 `Vite 77`, `Deno/Bun 77`, `React 76`, `Lua 58`, `Ruby/Rails 68`, `Bash 45`.
@@ -494,13 +514,143 @@ Pick `.ks` for sidecar scripts/services (data munging, checks, bots, `--bin` wor
 | 17 | Lua | 58 | -22, embedding |
 | 18 | Bash | 45 | -35, tiny pipes |
 
-Grand total (sum of all 18 totals) = `1311 / 1800`, average `72.8/100`.
-`.ks` total `80/100` reflects v2.4 source breadth: best at learning/scripts/services;
-a honest +2 over v2.3's 78 (annotation unions/generics, sqlite-subset, cancel, narrow audit, minimal LSP,
-HMR-patch/ISR/layouts/hashes, `-trimpath` repro, range/sorted opts).
-Compiler v0.1 (`.ksb-1` subset: arithmetic/control-flow/funcs, no `go`/`chan`/`select`/`sleep`,
-no `import`/`try`/`switch`/`defer`, no slices, no `is`/`?.`/`??`, no typed params/returns, no closure capture,
-7 user + 5 hidden builtins) proves the parse→compile→run pipeline but moves no score.
+## Totals & ranking (out of 100)
+
+| Rank | Stack | Total /100 | Verdict vs .ks (87) |
+|---:|---|---:|---|
+| 1 | **ks-fusion v2.5 source (177 builtins = 96+52+11+12+6; struct/enum syntax + exhaustive-switch; VM v0.2 + bench; WS frames + extended SQL/postgres + pipes; real audit; full LSP + debug + VS Code ext; DOM-diff + background ISR; release v2.5 + CI)** | **87** | **baseline — leads on simplicity (9/10) + script breadth with depth (see “What 87 means” + “v2.5 evidence”).** |
+| 2 | Go | 82 | -5, prod servers / single binary depth (ahead on native speed/maturity, behind on script simplicity) |
+| 3 | Rust | 81 | -6, systems / safety depth |
+| 4 | Next.js | 79 | -8, browser UI depth (different category) |
+| 4 | TypeScript | 79 | -8, typed UI/logic depth |
+| 6 | Java/Kotlin/Spring | 78 | -9, enterprise depth |
+| 7 | Node.js | 77 | -10, APIs / npm depth |
+| 7 | Vite | 77 | -10, frontend build/HMR depth (different category) |
+| 7 | Deno/Bun | 77 | -10, typed runtime |
+| 10 | React | 76 | -11, UI components (different category) |
+| 11 | Python | 74 | -13, data/AI/ecosystem depth |
+| 12 | C++ | 73 | -14, engines/trading |
+| 13 | Julia | 69 | -18, numerics/science depth |
+| 14 | Ruby/Rails | 68 | -19, convention CRUD |
+| 15 | PHP Laravel | 67 | -20, monolith CRUD |
+| 16 | C | 62 | -25, kernels/embedded |
+| 17 | Lua | 58 | -29, embedding |
+| 18 | Bash | 45 | -42, tiny pipes |
+
+Grand total (sum of all 18 totals) = `1325 / 1800`, average `73.6/100`.
+`.ks` total `87/100` reflects v2.5 source depth: 80 +7 for implemented gaps
+(VM v0.2 + bench, exhaustive-switch, extended SQL/postgres + WS/pipes,
+real audit, full LSP + debug/ext, DOM-diff + background ISR, release + CI).
+Compiler v0.2 (`.ksb-1` subset: arithmetic/control-flow/funcs + slices/`is`/
+`?.`/`??`/typed params-lets/`switch`, no `go`/`chan`/`select`/`sleep`,
+no `import`/`try`/`defer`, no closure capture, 7 user + 5 hidden builtins)
+proves the pipeline with a real 2.3x fib win (see `docs/bench.md`).
+
+## v2.5 evidence (file:line for every +1; no score without implementation)
+
+> Each +1 below lists the implementation, tests, and docs. Re-verify with
+> `go test ./...`, `go test -bench`, and the commands in “How to verify”.
+
+### E1. Perf 7→8: VM v0.2 + benchmarks
+
+- Ops: `internal/compiler/compiler.go:76-84` (`OpSlice/OpIs/OpCoalesce/OpSafeIndex/`
+  `OpCheckType/OpSetupTry/OpPopTry/OpDefer/OpJumpIfNotNil`), `String()` at
+  `compiler.go:157-175`.
+- Compile: slices (`compiler.go:1168-1187`), `is` (`compiler.go:1155-1162` via
+  `isTypeName`), `??` short-circuit (`compiler.go:1164-1172` via `OpJumpIfNotNil`),
+  safe `?.` (`compiler.go:1148-1150` → `OpSafeIndex`), typed lets
+  (`compiler.go:588` `OpCheckType`), typed func params + returns
+  (`compiler.go:991-1005`, `439` return check), `switch` desugar
+  (`compiler.go:495` `compileSwitch`: hidden target + Eq-chain, break-to-end).
+- VM: `vm.go:704-760` (`sliceVal` at `1049`, `vmIsType` at `1106`,
+  `safeIndexVal`, `OpJumpIfNotNil`, `OpCheckType`), O(log n) int `**`
+  (`vm.go:813-824` squaring vs v0.1 O(n) loop).
+- Tests: `compiler_test.go:145,152,160,167` (`V02Slices/IsCoalesceSafe/Typed/Switch`),
+  `compiler_test.go:98` (v0.2 subset: switch/slices/is/??/typed must run).
+- Bench: `internal/backend/bench_test.go` + `internal/compiler/bench_test.go`,
+  artifact `docs/bench.md` (fib 2.3x, loop notes, remaining interpreter-only list).
+- Remaining (not scored): `go`/`chan`/`select`, `import`, `try/catch`, `defer`,
+  `sleep`, `struct`/`enum` decls, closure capture — each a clear
+  “runs in interpreter” error (`compiler.go:467-483`).
+
+### E2. Types 8→9: struct/enum syntax + exhaustive-switch
+
+- Syntax: `frontend.go:1040-1118` (`parseStructOrEnum`), `StmtStruct/StmtEnum`
+  (`frontend.go:116-117`), runtime (`backend.go:1230-1258`
+  `execStructDecl`/`execEnumDecl`, `matchesStruct`, nominal `matchesTypeStrict`).
+- Vet: enum registration (`tools.go:504-505`), var types (`tools.go:491-493`),
+  real exhaustiveness (`tools.go:642-665`: enum variants by name, bool
+  true/false, `default` rescues), helpers (`tools.go:725-744`
+  `switchEnumTarget`/`switchIsBool`/`stringLiteral`/`boolLiteral`), cross-file
+  (`tools.go:870` global enums/types).
+- Tests: `backend_test.go:316` (`TestRunStructEnumSyntax`), `tools_test.go:68`
+  (`TestVetExhaustiveEnum`: all-covered ok / missing-Blue error / default rescues),
+  `tools_test.go:114` (`TestVetExhaustiveBool`).
+- Docs: `README` types section, `docs/futures.md` P1-core boxes.
+
+### E3. Stdlib 9→10: WS frames + extended SQL/postgres + pipes/signals
+
+- WS RFC 6455: `stdlib_ext4.go:27` `wsEncodeText` (masked client text),
+  `wsReadFrame`/`wsReadText` (fragments, ping/pong, close), `bWSSend`/`bWSRecv`.
+- SQL extended: `UPDATE` (`stdlib_ext3.go:206` `reUpdate`, `260` exec,
+  `parseSetClause`), `JOIN` (`stdlib_ext3.go:428` `innerJoin`),
+  `GROUP BY`+`COUNT(*)` (`stdlib_ext3.go:467` `groupCount`), `ORDER BY`/`LIMIT`/
+  `OFFSET` (`stdlib_ext3.go:302-423` select), `postgres_*` compat
+  (`stdlib_ext3.go:97-100`).
+- Pipes/signals: `exec_pipes` (`stdlib_ext4.go:220`), `spawn`/`proc_wait`/
+  `proc_kill` (`stdlib_ext4.go:291,332,370` + `lookupSignal`).
+- Tests: `backend_test.go:336` (UPDATE/ORDER/LIMIT/COUNT/GROUP),
+  `backend_test.go:362` (JOIN), `backend_test.go:377` (postgres),
+  `stdlib_ext4_test.go:37,104` (WS frames), `stdlib_ext4_test.go:120` (pipes).
+- Count: 177 distinct (`96` base + `52` ext + `11` ext2 + `12` ext3 + `6` ext4;
+  `grep -ohP ... | sort -u | wc -l`; tests `>=166`/`>=177`).
+
+### E4. Ecosystem 7→8: real audit
+
+- `audit.go:153` `VerifyRegistry` (recompute sha256 vs index + `.sha256` sidecar),
+  `audit.go:181` `checkTransitive` (locked-bundle `import "lib"` must resolve),
+  `audit.go:81` `Audit` (yanked/missing/update/token-hint + integrity + transitive).
+- Tests: `registry_test.go:54` (`TestAuditHashRecompute`: tamper → mismatch),
+  `registry_test.go:106` (`TestAuditTransitive`: missing transitive → issue).
+- No central server/git deps/docs.rs (explicit non-scored remainder).
+
+### E5. Tooling 9→10: full LSP + debugger + VS Code ext
+
+- LSP: diagnostics (`lsp.go:240` parse, `259` vet on save, `139-172` didOpen/
+  didChange/didSave publishes), rename (`lsp.go:347` cross-file),
+  formatting (`lsp.go:320` via `FormatSource`), hover/goto (`lsp.go`).
+- Debugger: `backend.go:OnStmt` hook + `stmtKindName`, `debug.go:35`
+  `DebugFile` (breakpoints + trace + globals), `tools_cmd.go:cmdDebug`
+  (`fusion debug --break/--trace`), help text.
+- VS Code ext v0.2.0: full client (hover/goto/rename/diagnostics/format +
+  debugger type; `editors/vscode/package.json`, `extension.js`
+  `node --check` clean).
+- Tests: `lsp_test.go` (diagnostics/rename/format), `debug_test.go:5`
+  (breakpoint hit + vars, trace, bad file).
+
+### E6. Frontend 7→8: DOM-diff + background ISR (no reload)
+
+- Diff: `diff.go:76` `DiffViewModels` (keyed setText/setProp/replace/insert/
+  remove/move) + `diff_test.go`.
+- SSE: keyed `{"ops":..,"vm":..}` patches (`webjs.go:99-102`), client
+  `__applyPatch`/`__renderVM`/`data-key` (`webjs.go:381-514`), render-error
+  → `{"reload":true}` banner only (never `location.reload`).
+- ISR: background regen (`webjs.go:592` `startBackground`,
+  `704` `kickRefresh`, serve-stale-while-revalidate `webjs.go:137-178`).
+- Tests: `isr_test.go:42` (background refreshes), `isr_test.go:67` (stale-while),
+  `isr_test.go:114` (no `location.reload` in HTML), `isr_test.go:137` (SSE ops,
+  no reload payload).
+
+### E7. Maturity 7→8: release + timeout + repeat-safe + CI
+
+- Release: `release/fusion` rebuilt from source (`go build -o release/fusion
+  ./cmd/fusion`; `version` → `ks-fusion v2.5`).
+- Timeout: `fusion test --timeout` (`main.go:1093` `runTestFileTimeout`,
+  default 30s; hung file → error, not hang).
+- Repeat-safe: `stdlib_ext2_test.go:32` port 0 + `tcp_shutdown`;
+  `go test ./internal/backend/ -run TestV23TCP -count=3` green.
+- CI: `.github/workflows/ci.yml` (vet + `go test ./...` + repeat-safe +
+  `fmt --check` + `vet`/`check` apps) — repo gate, not `workflow_dispatch`-only.
 
 ## Why not Go/Rust-class (v2.4 gaps + what parity needs)
 
