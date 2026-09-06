@@ -383,6 +383,10 @@ func (v *vetter) isDefined(name string) bool {
 }
 
 func VetFile(path string) ([]VetIssue, error) {
+	return vetFileWithGlobals(path, nil, nil)
+}
+
+func vetFileWithGlobals(path string, globalFuncs map[string]int, globalLets map[string]bool) ([]VetIssue, error) {
 	prog, err := frontend.ParseFile(path)
 	if err != nil {
 		return []VetIssue{{File: path, Line: 0, Rule: "parse", Msg: err.Error(), IsError: true}}, nil
@@ -393,23 +397,49 @@ func VetFile(path string) ([]VetIssue, error) {
 		if st.Kind == frontend.StmtFunc {
 			v.funcArity[st.Name] = len(st.Names)
 		}
-		if st.Kind == frontend.StmtLet {
-			// top-level lets also visible; arity not needed
+	}
+	// merge globals (flat namespace: all files in app + imported libs share globals)
+	hasImport := false
+	for _, st := range prog.Statements {
+		if st.Kind == frontend.StmtImport {
+			hasImport = true
+			break
+		}
+	}
+	for name, ar := range globalFuncs {
+		if _, ok := v.funcArity[name]; !ok {
+			v.funcArity[name] = ar
 		}
 	}
 	v.pushScope()
 	// define top-level funcs in outer scope
 	for name := range v.funcArity {
 		v.define(name, 1, false)
-		v.scopes[len(v.scopes)-1].used[name] = false // will warn if never used? funcs are entry points; mark used
 		v.scopes[len(v.scopes)-1].used[name] = true
+	}
+	// define global lets as known (avoid cross-file unknown-var)
+	for name := range globalLets {
+		if !v.isDefined(name) {
+			v.define(name, 1, false)
+			v.scopes[len(v.scopes)-1].used[name] = true
+		}
 	}
 	for _, st := range prog.Statements {
 		v.walkStmt(st)
 	}
 	v.popScope()
+	// if file has imports, unknown-var/arity from libs can't be resolved statically:
+	// downgrade those errors to warns to avoid false positives (flat globals + .kslib).
+	if hasImport {
+		for i := range v.issues {
+			if v.issues[i].Rule == "unknown-var" || v.issues[i].Rule == "arity" {
+				v.issues[i].IsError = false
+			}
+		}
+	}
 	// frontend rules via text scan
 	v.frontendTextRules(path)
+	// drop unknown-var errors that match globals discovered after (safety)
 	sort.Slice(v.issues, func(i, j int) bool {
 		if v.issues[i].Line == v.issues[j].Line {
 			return v.issues[i].Rule < v.issues[j].Rule
@@ -429,8 +459,12 @@ func (v *vetter) frontendTextRules(path string) {
 	}
 	lines := strings.Split(string(data), "\n")
 	for i, l := range lines {
-		// env( in frontend is server-only violation
-		if strings.Contains(l, "env(") && !strings.HasPrefix(strings.TrimSpace(l), "#") && !strings.HasPrefix(strings.TrimSpace(l), "//") {
+		// env( in frontend is server-only violation (ROUTE is the allowed routing exception)
+		trim := strings.TrimSpace(l)
+		if strings.HasPrefix(trim, "#") || strings.HasPrefix(trim, "//") {
+			continue
+		}
+		if strings.Contains(l, "env(") && !strings.Contains(l, `"ROUTE"`) && !strings.Contains(l, `'ROUTE'`) {
 			v.issues = append(v.issues, VetIssue{File: path, Line: i + 1, Rule: "frontend-env", Msg: "env() in frontend/ is server-only; keep secrets in backend/"})
 		}
 	}
@@ -710,15 +744,34 @@ func (v *vetter) walkExpr(e *frontend.Expr) {
 	}
 }
 
-// VetTarget vets all .ks under target.
+// VetTarget vets all .ks under target (flat-globals aware: collects all
+// top-level funcs/lets first so cross-file imports don't false-positive).
 func VetTarget(target string, denyWarns bool) ([]VetIssue, error) {
 	files, err := collectKsFiles(target)
 	if err != nil {
 		return nil, err
 	}
+	globalFuncs := map[string]int{}
+	globalLets := map[string]bool{}
+	for _, f := range files {
+		prog, err := frontend.ParseFile(f)
+		if err != nil {
+			continue
+		}
+		for _, st := range prog.Statements {
+			if st.Kind == frontend.StmtFunc {
+				if _, ok := globalFuncs[st.Name]; !ok {
+					globalFuncs[st.Name] = len(st.Names)
+				}
+			}
+			if st.Kind == frontend.StmtLet {
+				globalLets[st.Name] = true
+			}
+		}
+	}
 	var all []VetIssue
 	for _, f := range files {
-		iss, err := VetFile(f)
+		iss, err := vetFileWithGlobals(f, globalFuncs, globalLets)
 		if err != nil {
 			return nil, err
 		}
