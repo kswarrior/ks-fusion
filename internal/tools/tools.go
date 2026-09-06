@@ -302,11 +302,12 @@ type vetScope struct {
 }
 
 type vetter struct {
-	file     string
-	issues   []VetIssue
-	scopes   []*vetScope
-	funcArity map[string]int
-	builtins map[string]bool
+	file       string
+	issues     []VetIssue
+	scopes     []*vetScope
+	funcArity  map[string]int
+	builtins   map[string]bool
+	globalLets map[string]bool
 	isFrontend bool
 }
 
@@ -379,6 +380,9 @@ func (v *vetter) isDefined(name string) bool {
 	if _, ok := v.funcArity[name]; ok {
 		return true
 	}
+	if v.globalLets != nil && v.globalLets[name] {
+		return true
+	}
 	return false
 }
 
@@ -392,6 +396,7 @@ func vetFileWithGlobals(path string, globalFuncs map[string]int, globalLets map[
 		return []VetIssue{{File: path, Line: 0, Rule: "parse", Msg: err.Error(), IsError: true}}, nil
 	}
 	v := newVetter(path)
+	v.globalLets = globalLets
 	// pre-pass: collect top-level func names for arity
 	for _, st := range prog.Statements {
 		if st.Kind == frontend.StmtFunc {
@@ -416,13 +421,6 @@ func vetFileWithGlobals(path string, globalFuncs map[string]int, globalLets map[
 	for name := range v.funcArity {
 		v.define(name, 1, false)
 		v.scopes[len(v.scopes)-1].used[name] = true
-	}
-	// define global lets as known (avoid cross-file unknown-var)
-	for name := range globalLets {
-		if !v.isDefined(name) {
-			v.define(name, 1, false)
-			v.scopes[len(v.scopes)-1].used[name] = true
-		}
 	}
 	for _, st := range prog.Statements {
 		v.walkStmt(st)
