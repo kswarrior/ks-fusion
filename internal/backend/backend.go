@@ -2533,6 +2533,22 @@ func cachedBuiltinMap() map[string]*BuiltinObj {
 	return builtinCacheMap
 }
 
+// BuiltinNames returns all builtin names (exported for vet/LSP).
+func BuiltinNames() []string {
+	initBuiltinCache()
+	out := make([]string, 0, len(builtinCacheList))
+	for _, b := range builtinCacheList {
+		out = append(out, b.Name)
+	}
+	return out
+}
+
+// BuiltinCount returns number of builtins.
+func BuiltinCount() int {
+	initBuiltinCache()
+	return len(builtinCacheList)
+}
+
 func needArgs(name string, args []Value, min, max int) error {
 	if len(args) < min || (max >= 0 && len(args) > max) {
 		if min == max {
