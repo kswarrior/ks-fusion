@@ -143,7 +143,7 @@ assert(r.code != 0)
 }
 
 func TestV25BuiltinCount(t *testing.T) {
-	if BuiltinCount() < 172 {
-		t.Fatalf("want >=172 builtins after v2.5, got %d", BuiltinCount())
+	if BuiltinCount() < 177 {
+		t.Fatalf("want >=177 builtins after v2.5 (96+52+11+12+6), got %d", BuiltinCount())
 	}
 }

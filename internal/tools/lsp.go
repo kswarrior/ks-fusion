@@ -19,8 +19,10 @@ var diagnosticLineRe = regexp.MustCompile(`:(\d+):`)
 
 func backendBuiltinNames() []string { return backend.BuiltinNames() }
 
-// Minimal LSP (v2.4): stdio JSON-RPC with initialize, hover, definition, shutdown.
-// Enough for VS Code extension (hover/goto-def) + format-on-save via `fusion fmt`.
+// Full LSP (v2.5): stdio JSON-RPC with initialize, hover, definition, rename,
+// diagnostics (parse + vet), formatting. Enough for VS Code extension
+// (hover/goto-def/rename/diagnostics/format-on-save via `fusion lsp`)
+// + `fusion debug` breakpoints.
 
 type lspRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -119,7 +121,7 @@ func RunLSP() error {
 			respond(req.ID, map[string]any{"capabilities": map[string]any{
 				"textDocumentSync": 1, "hoverProvider": true, "definitionProvider": true,
 				"documentFormattingProvider": true, "renameProvider": true,
-			}, "serverInfo": map[string]any{"name": "fusion-lsp", "version": "v2.4"}})
+			}, "serverInfo": map[string]any{"name": "fusion-lsp", "version": "v2.5"}})
 		case "initialized":
 			// no-op
 		case "shutdown":
