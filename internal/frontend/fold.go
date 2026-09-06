@@ -1,7 +1,8 @@
 package frontend
 
-// Constant folding (v2.2 perf): fold literal binary ops at parse time.
-// 1+2 -> 3, 2.5+1 -> 3.5, "a"+"b" -> "ab", true and false -> false, etc.
+// Constant folding (v2.2+v2.3 perf): fold literal binary ops at parse time.
+// 1+2 -> 3, 2.5+1 -> 3.5, "a"+"b" -> "ab", true and false -> false,
+// 2**10 -> 1024, "a" ?? "b" -> "a", 1 is int -> true, 2 in [1,2] -> true, etc.
 // Idempotent, never changes semantics (division by zero left unfolded).
 func FoldProgram(p *Program) {
 	for _, st := range p.Statements {
