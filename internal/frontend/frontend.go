@@ -293,6 +293,7 @@ const (
 	tQuestion
 	tCoalesce
 	tQuestionDot
+	tPipe
 )
 
 type token struct {
