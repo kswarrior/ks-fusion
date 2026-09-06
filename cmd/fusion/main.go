@@ -79,14 +79,27 @@ func main() {
 		}
 	case "run":
 		dir := "."
-		if len(os.Args) >= 3 {
-			if os.Args[2] == "--help" || os.Args[2] == "-h" {
-				fmt.Println("usage: fusion run [appdir] (backend + frontend together; see `fusion launch --help` for --backend/--frontend)")
+		race := false
+		for _, a := range os.Args[2:] {
+			switch {
+			case a == "--race":
+				race = true
+			case a == "--help" || a == "-h":
+				fmt.Println("usage: fusion run [appdir] [--race] (backend + frontend together; --race enables race checks)")
 				return
+			case strings.HasPrefix(a, "-"):
+				fmt.Printf("unknown flag %q\n", a)
+				help()
+				os.Exit(1)
+			default:
+				if dir != "." {
+					fmt.Println("usage: fusion run [appdir] [--race] (single target only)")
+					os.Exit(1)
+				}
+				dir = a
 			}
-			dir = os.Args[2]
 		}
-		if err := cmdRun(dir); err != nil {
+		if err := cmdRunWithRace(dir, race); err != nil {
 			fmt.Println("error:", err)
 			os.Exit(1)
 		}
@@ -223,22 +236,25 @@ func main() {
 
 // toolVersion is the toolchain/language version printed by help/version.
 // Keep in sync with docs (README, docs/vs.md, docs/futures.md).
-const toolVersion = "v2.1"
+const toolVersion = "v2.2"
 
 func help() {
-	fmt.Println(`ks-fusion v2.1 (Go)
+	fmt.Println(`ks-fusion v2.2 (Go)
 Commands:
   fusion new [--lib] <dir>   create app (backend/ frontend/ fusion.toml)
                              or library with --lib (src/lib.ks, type="lib")
-  fusion run [appdir]        run backend + frontend together
-  fusion launch [target] [--backend] [--frontend] [--config FILE]
+  fusion run [appdir] [--race]  run backend + frontend together (--race: race checks)
+  fusion launch [target] [--backend] [--frontend] [--config FILE] [--race]
                              target is app dir (default ".") or config file
                              (fusion.toml / custom.toml, must live in app root:
                              entry paths resolve relative to its folder).
                              No flag = both together; --backend = only backend;
                              --frontend = only frontend; both flags = both.
-  fusion build [dir] [--release] [--out DIR]
+  fusion build [dir] [--release] [--out DIR] [--bin [--target OS/ARCH] [-o FILE]]
                              app: parse-check entries + verify [dependencies]
+                             (semver ^ ~ >= + fusion.lock); --bin: single static
+                             executable (embeds .ks + .kslib); --target:
+                             linux/amd64,arm64,darwin/amd64,arm64,windows/amd64,wasm
                              lib: pack .kslib bundle into test-releases/
                                   (--release) or target/ (debug), like cargo
    fusion compile <file.ks> [--out file.ksb] [--dis] [--run]
@@ -247,10 +263,19 @@ Commands:
                               run those files with the interpreter instead
    fusion test [target]        run *_test.ks files (assert, TAP output)
                               target is dir (default ".") or a single .ks file
+   fusion fmt [target] [--check]  format .ks (idempotent; --check for CI)
+   fusion vet [target] [--deny-warns]  vet .ks (unused, arity, unknown, frontend env)
+   fusion doc [target] [--out FILE]  docs from # comments + func sigs
+   fusion check [target]      strict check (parse + arity + :type)
+   fusion repl                interactive .ks (multiline via braces)
+   fusion bench [target] [--n N]  run .ks N times, report timing
+   fusion vendor [appdir]     copy .kslib deps into vendor/ (offline)
+   fusion run-web [appdir] [--port N]  SSR frontend/ as HTML+JSON (+ /api/*)
+   fusion build-js [appdir] [--out DIR]  transpile pages to JS per-route
    fusion prog.ks|lib.kslib   run a single file directly.
                               .kslib bundles start with #!/usr/bin/env fusion,
                               so: chmod +x lib.kslib && ./lib.kslib
-                              (needs fusion on PATH)
+                              (needs fusion on PATH; --bin needs no runtime)
    fusion version|--version   print toolchain version
    fusion help`)
 }
@@ -588,11 +613,35 @@ func sortStrings(s []string) {
 }
 
 func cmdRun(dir string) error {
+	return cmdRunWithRace(dir, false)
+}
+
+func cmdRunWithRace(dir string, race bool) error {
 	cfg, err := config.Load(dir)
 	if err != nil {
 		return err
 	}
-	return runWithConfig(cfg, true, true)
+	if race {
+		fmt.Println("race: enabled (Go race detector via `go run -race ./cmd/fusion run` + logical chan checks)")
+		// logical pre-check: vet concurrency-relevant rules
+		if issues, err := tools.VetTarget(dir, false); err == nil {
+			errs := 0
+			for _, is := range issues {
+				if is.IsError {
+					errs++
+				}
+			}
+			if errs > 0 {
+				return fmt.Errorf("race: vet found %d errors, fix before race run", errs)
+			}
+		}
+		os.Setenv("FUSION_RACE", "1")
+	}
+	err = runWithConfig(cfg, true, true)
+	if race {
+		fmt.Println("race: ok (no logical races detected; for full Go data-race run: go run -race ./cmd/fusion run " + dir + ")")
+	}
+	return err
 }
 
 // cmdLaunch is the package.json-scripts style entry:
@@ -639,16 +688,19 @@ func cmdLaunch(args []string) error {
 				return fmt.Errorf("single --config only (got %q and %q)", configFlag, v)
 			}
 			configFlag = v
+		case a == "--race":
+			os.Setenv("FUSION_RACE", "1")
+			fmt.Println("race: enabled")
 		case a == "--help" || a == "-h":
-			fmt.Println(`usage: fusion launch [target] [--backend] [--frontend] [--config FILE]
+			fmt.Println(`usage: fusion launch [target] [--backend] [--frontend] [--config FILE] [--race]
   target: app dir (default ".") or config file (fusion.toml, custom.toml).
           The config file must live in the app root: entry_backend /
           entry_frontend are relative to its folder.
   no flag: both backend + frontend together; --backend: only backend;
-  --frontend: only frontend; --backend --frontend: both.`)
+  --frontend: only frontend; --backend --frontend: both; --race: race checks.`)
 			return nil
 		case strings.HasPrefix(a, "-"):
-			return fmt.Errorf("unknown flag %q (usage: fusion launch [target] [--backend] [--frontend] [--config FILE])", a)
+			return fmt.Errorf("unknown flag %q (usage: fusion launch [target] [--backend] [--frontend] [--config FILE] [--race])", a)
 		default:
 			if target != "." {
 				return fmt.Errorf("usage: fusion launch [target] [--backend] [--frontend] [--config FILE] (single target only)")
