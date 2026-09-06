@@ -71,12 +71,12 @@ Details in `More` below. Frontend breakdown:
 | Concurrency | 8 | 6 | 5 | 4 | 6 |
 | Stdlib | 4 | 7 | 5 | 4 | 8 |
 | Ecosystem | 3 | 10 | 10 | 9 | 10 |
-| Tooling | 4 | 9 | 9 | 10 | 9 |
+| Tooling | 5 | 9 | 9 | 10 | 9 |
 | Simplicity | 9 | 6 | 6 | 8 | 6 |
 | Build/Deploy | 4 | 7 | 7 | 10 | 7 |
 | Frontend | 3 | 10 | 10 | 10 | 10 |
 | Maturity | 3 | 9 | 9 | 8 | 8 |
-| **Total /100** | **49** | **79** | **76** | **77** | **79** |
+| **Total /100** | **50** | **79** | **76** | **77** | **79** |
 
 ## Language-by-language
 
@@ -347,27 +347,27 @@ Pick `.ks` for sidecar scripts (data munging, checks, bots) next to Laravel.
 
 | Rank | Stack | Total /100 | Verdict vs .ks (50) |
 |---:|---|---:|---|
-| 1 | Go | 82 | +33, prod servers / single binary |
-| 2 | Rust | 81 | +32, systems / safety |
-| 3 | Next.js | 79 | +30, browser UI (different category) |
-| 3 | TypeScript | 79 | +30, typed UI/logic |
-| 5 | Java/Kotlin/Spring | 78 | +29, enterprise |
-| 6 | Node.js | 77 | +28, APIs / npm |
-| 6 | Vite | 77 | +28, frontend build/HMR (different category) |
-| 6 | Deno/Bun | 77 | +28, typed runtime |
-| 9 | React | 76 | +27, UI components (different category) |
-| 10 | Python | 74 | +25, data/AI/ecosystem |
-| 11 | C++ | 73 | +24, engines/trading |
-| 12 | Julia | 69 | +20, numerics/science |
-| 13 | Ruby/Rails | 68 | +19, convention CRUD |
-| 14 | PHP Laravel | 67 | +18, monolith CRUD |
-| 15 | C | 62 | +13, kernels/embedded |
-| 16 | Lua | 58 | +9, embedding |
-| 17 | **ks-fusion v2.1 + compiler v0.1 + frontend P0** | **49** | **baseline — wins on simplicity (9/10), leads Bash by 4; Perf 5/10 after tree-walk opts (VM subset unrated, P0 moves no score)** |
-| 18 | Bash | 45 | -4, tiny pipes |
+| 1 | Go | 82 | +32, prod servers / single binary |
+| 2 | Rust | 81 | +31, systems / safety |
+| 3 | Next.js | 79 | +29, browser UI (different category) |
+| 3 | TypeScript | 79 | +29, typed UI/logic |
+| 5 | Java/Kotlin/Spring | 78 | +28, enterprise |
+| 6 | Node.js | 77 | +27, APIs / npm |
+| 6 | Vite | 77 | +27, frontend build/HMR (different category) |
+| 6 | Deno/Bun | 77 | +27, typed runtime |
+| 9 | React | 76 | +26, UI components (different category) |
+| 10 | Python | 74 | +24, data/AI/ecosystem |
+| 11 | C++ | 73 | +23, engines/trading |
+| 12 | Julia | 69 | +19, numerics/science |
+| 13 | Ruby/Rails | 68 | +18, convention CRUD |
+| 14 | PHP Laravel | 67 | +17, monolith CRUD |
+| 15 | C | 62 | +12, kernels/embedded |
+| 16 | Lua | 58 | +8, embedding |
+| 17 | **ks-fusion v2.1 + compiler v0.1 + frontend P0 + test runner** | **50** | **baseline — wins on simplicity (9/10), leads Bash by 5; Perf 5/10 after tree-walk opts (VM subset unrated, P0 moves no score; +1 Tooling for `fusion test`)** |
+| 18 | Bash | 45 | -5, tiny pipes |
 
-Grand total (sum of all 18 totals) = `1271 / 1800`, average `70.6/100`.
-`.ks` total `49/100` reflects v2.1 + compiler v0.1 + frontend P0 reality: best at learning/scripts,
+Grand total (sum of all 18 totals) = `1272 / 1800`, average `70.7/100`.
+`.ks` total `50/100` reflects v2.1 + compiler v0.1 + frontend P0 + test-runner reality: best at learning/scripts,
 at Python/Node parity on Types (6/10) and Rust parity on Concurrency (8/10),
 at Python parity on Perf (5/10) after tree-walk opts;
 compiler v0.1 (`.ksb-1` subset: arithmetic/control-flow/funcs, no `go`/`chan`/`select`,
@@ -380,10 +380,10 @@ still behind everywhere else until `futures.md` P0/P1 + `plan/frontend.md` P1–
 
 ## Why not Go/Rust-class (v2.1 + compiler v0.1 gaps + what parity needs)
 
-> Score context: `.ks 49/100` vs `Go 82/100` vs `Rust 81/100`.
-> The 32–33 pt gap is the 5 blocks below
+> Score context: `.ks 50/100` vs `Go 82/100` vs `Rust 81/100`.
+> The 31–32 pt gap is the 5 blocks below
 > (Types half-closed, Concurrency at Rust parity, Perf tree-walk opts done in v2.1,
-> compiler v0.1 pipeline proven but subset-only).
+> compiler v0.1 pipeline proven but subset-only, test runner landed but fmt/vet pending).
 > Fix the rest → ~75–80/100.
 
 ### 1. Compiler v0.1 exists (subset) — full language still tree-walk, no native/static binary, no LLVM, no JIT
@@ -495,7 +495,7 @@ still behind everywhere else until `futures.md` P0/P1 + `plan/frontend.md` P1–
 | 14 | FFI | `cgo` | `unsafe`/FFI | none | opt-in `ffi_*` + Go plugin API | `futures.md` P2 interop |
 | 15 | Stability | compat promise | editions | v2.0 | RFC process + semver + LTS | `futures.md` §5 |
 
-Close rows 1–2 + 5 + 10–11 and the rest of rows 3–4 and `.ks` moves `49 → ~75–80/100` (Go/Rust-class for scripts/services).
+Close rows 1–2 + 5 + 10–11 and the rest of rows 3–4 and `.ks` moves `50 → ~75–80/100` (Go/Rust-class for scripts/services).
 Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
 
 ## Decision guide

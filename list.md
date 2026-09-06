@@ -1,15 +1,15 @@
-# Missing List — everything not yet done (score 49/100 → 75–80)
+# Missing List — everything not yet done (score 50/100 → 75–80)
 
 > Source: `docs/vs.md` gaps + `docs/futures.md` roadmap + `plan/frontend.md` + `plan/tooling.md`.
 > Checked = exists today. Unchecked = missing. Score impact in brackets.
 
-## Tooling P0 (Tooling 4→9, Maturity 3→8)
+## Tooling P0 (Tooling 5→9, Maturity 3→8)
 
 - [x] `fusion new/run/build/launch/compile` (launch has --backend/--frontend/--config)
 - [x] `fusion version`, `run/build/launch --help`, v2.1 single constant
 - [ ] `fusion fmt` + `--check` (canonical format, idempotent) [+1 Tooling]
 - [ ] `fusion vet` (unused let, arity, unknown var, index-keys, set_html, env-in-frontend) [+1 Tooling]
-- [ ] `fusion test` (`*_test.ks`, assert, TAP, timeout, isolation) [+1 Tooling, +1 Maturity]
+- [x] `fusion test` (`*_test.ks`, assert, TAP, isolation; per-file timeout still missing)
 - [ ] `fusion doc` from `#` comments
 - [ ] `fusion check` strict (parse + arity + `: type` + `is` narrowing, structs/enums later)
 - [ ] Namespaced imports (`import "x" as h`) — today flat globals

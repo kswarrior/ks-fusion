@@ -49,7 +49,9 @@
   `break` ends the `select`, `ch = nil` disables a case).
   Left: `fusion run --race`, structured `with_timeout`/cancel.
 * [ ] `fusion fmt` (canonical formatter) + `fusion vet` (unused var, bad arity lint).
-* [ ] `fusion test` runner: `*_test.ks` with `assert`, exit-code + TAP output.
+* [x] `fusion test` runner: `*_test.ks` with `assert`, exit-code + TAP output. Done:
+  `fusion test [target]` (dir recursive or single file), per-file isolation, app-root
+  imports via nearest `fusion.toml`. Left: per-file timeout.
 * [ ] `fusion doc` from `#` comments.
 * [ ] Namespaced imports: `import "hello-lib" as hl` / `hl.greet()`.
   Today: flat globals, prefix your functions.
