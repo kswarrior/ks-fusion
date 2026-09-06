@@ -652,11 +652,11 @@ proves the pipeline with a real 2.3x fib win (see `docs/bench.md`).
 - CI: `.github/workflows/ci.yml` (vet + `go test ./...` + repeat-safe +
   `fmt --check` + `vet`/`check` apps) — repo gate, not `workflow_dispatch`-only.
 
-## Why not Go/Rust-class (v2.4 gaps + what parity needs)
+## Why not Go/Rust-class (v2.5 gaps + what parity needs)
 
-> Score context: `.ks 80/100` vs `Go 82/100` vs `Rust 81/100` (behind on depth, ahead of Next/TS on balance).
-> The 1–2 pt gap is full VM/AOT + real LSP/debugger + native DB/WS-frames + syntax structs/enums + maturity hardening.
-> Close those with depth (not breadth) → ~82–84/100. Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
+> Score context: `.ks 87/100` vs `Go 82/100` vs `Rust 81/100` (ahead on balance for scripts/services; behind on native depth).
+> The remaining gap is native AOT/LLVM + central registry + variadics/hydrate-full + remote cache.
+> Close those with depth → ~89–90/100. Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
 
 ### 1. Compiler still subset — full language tree-walk + `--bin` embed via `go build`, no LLVM/JIT
 
