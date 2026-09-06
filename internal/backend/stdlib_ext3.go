@@ -280,7 +280,23 @@ func sqliteExecStmt(db *sqliteDB, sql string) (int, error) {
 		}
 		return len(rows), nil
 	}
-	return 0, fmt.Errorf("unsupported SQL (subset: CREATE/DROP/INSERT/SELECT/DELETE): %q", sql)
+	return 0, fmt.Errorf("unsupported SQL (subset: CREATE/DROP/INSERT/SELECT/DELETE/UPDATE): %q", sql)
+}
+
+// parseSetClause parses `a = 1, b = 'x'` into a column->value map.
+func parseSetClause(s string) (map[string]Value, error) {
+	out := map[string]Value{}
+	for _, part := range splitCSV(s) {
+		m := regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*$`).FindStringSubmatch(part)
+		if m == nil {
+			return nil, fmt.Errorf("bad SET clause %q (want col = val, ...)", part)
+		}
+		out[m[1]] = parseSQLVal(strings.TrimSpace(m[2]))
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("empty SET clause")
+	}
+	return out, nil
 }
 
 func sqliteSelect(db *sqliteDB, sql string) ([]map[string]Value, error) {
