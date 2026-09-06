@@ -34,7 +34,7 @@ func main() {
 		help()
 		return
 	}
-	// Direct file mode: `fusion prog.ks` or `fusion lib.kslib`
+	// Direct file mode: `fusion prog.ks`, `fusion lib.kslib` or secure `fusion lib.ksx`
 	// (also what the `#!/usr/bin/env fusion` shebang invokes).
 	// Bytecode mode: `fusion prog.ksb` runs a `fusion compile` bundle.
 	if a := os.Args[1]; !strings.HasPrefix(a, "-") && strings.HasSuffix(a, compiler.Ext) {
@@ -45,7 +45,7 @@ func main() {
 		return
 	}
 	if a := os.Args[1]; !strings.HasPrefix(a, "-") &&
-		(strings.HasSuffix(a, ".ks") || strings.HasSuffix(a, lib.Ext)) {
+		(strings.HasSuffix(a, ".ks") || strings.HasSuffix(a, lib.Ext) || strings.HasSuffix(a, lib.SecureExt)) {
 		if err := backend.RunFile(a); err != nil {
 			fmt.Println("error:", err)
 			os.Exit(1)
@@ -131,6 +131,9 @@ func main() {
 	case "build":
 		dir := "."
 		release := false
+		secure := false
+		password := ""
+		keyFile := ""
 		out := ""
 		bin := false
 		binOut := ""
@@ -141,14 +144,38 @@ func main() {
 			switch {
 			case a == "--release":
 				release = true
+			case a == "--secure":
+				secure = true
 			case a == "--bin":
 				bin = true
 			case a == "--help" || a == "-h":
-				fmt.Println("usage: fusion build [dir] [--release] [--out DIR] [--bin [--target OS/ARCH] [-o FILE]]")
+				fmt.Println("usage: fusion build [dir] [--release] [--secure [--password PWD] [--key-file FILE]] [--out DIR] [--bin [--target OS/ARCH] [-o FILE]]")
 				return
+			case a == "--password":
+				if i+1 >= len(args) {
+					fmt.Println("usage: fusion build [dir] [--secure [--password PWD] [--key-file FILE]]")
+					os.Exit(1)
+				}
+				i++
+				password = args[i]
+				secure = true
+			case strings.HasPrefix(a, "--password="):
+				password = strings.TrimPrefix(a, "--password=")
+				secure = true
+			case a == "--key-file":
+				if i+1 >= len(args) {
+					fmt.Println("usage: fusion build [dir] [--secure [--password PWD] [--key-file FILE]]")
+					os.Exit(1)
+				}
+				i++
+				keyFile = args[i]
+				secure = true
+			case strings.HasPrefix(a, "--key-file="):
+				keyFile = strings.TrimPrefix(a, "--key-file=")
+				secure = true
 			case a == "--out" || a == "-o":
 				if i+1 >= len(args) {
-					fmt.Println("usage: fusion build [dir] [--release] [--out DIR] [--bin [--target OS/ARCH] [-o FILE]]")
+					fmt.Println("usage: fusion build [dir] [--release] [--secure ...] [--out DIR] [--bin [--target OS/ARCH] [-o FILE]]")
 					os.Exit(1)
 				}
 				i++
@@ -174,6 +201,15 @@ func main() {
 				dir = a
 			}
 		}
+		if keyFile != "" {
+			pw, err := lib.ReadKeyFile(keyFile)
+			if err != nil {
+				fmt.Println("error:", err)
+				os.Exit(1)
+			}
+			password = pw
+			secure = true
+		}
 		if bin {
 			if out != "" {
 				binOut = out
@@ -184,7 +220,7 @@ func main() {
 			}
 			break
 		}
-		if err := cmdBuild(dir, release, out); err != nil {
+		if err := cmdBuildSecure(dir, release, secure, password, out); err != nil {
 			fmt.Println("error:", err)
 			os.Exit(1)
 		}
@@ -301,13 +337,16 @@ Commands:
                              entry paths resolve relative to its folder).
                              No flag = both together; --backend = only backend;
                              --frontend = only frontend; both flags = both.
-  fusion build [dir] [--release] [--out DIR] [--bin [--target OS/ARCH] [-o FILE]]
+  fusion build [dir] [--release] [--secure [--password PWD] [--key-file FILE]] [--out DIR] [--bin [--target OS/ARCH] [-o FILE]]
                              app: parse-check + cache + verify [dependencies]
                              (semver ^ ~ >= + fusion.lock + registry); --bin: single
                              static executable (embeds .ks + .kslib); --target:
                              linux/amd64,arm64,darwin,windows/amd64,wasm
                              lib: pack .kslib bundle into test-releases/
                                   (--release) or target/ (debug), like cargo
+                                  --secure: opaque .ksx bundle (AES-256-GCM, no
+                                  source in clear); no password = obfuscation,
+                                  --password/--key-file/FUSION_KEY = real safety
    fusion compile <file.ks> [--out file.ksb] [--dis] [--run]
                               compile the .ks subset to bytecode (.ksb-1);
                               outside the subset, the compiler says so —
@@ -330,10 +369,12 @@ Commands:
    fusion build-ssg [appdir] [--out DIR]  pre-render routes to HTML+JSON (ISR)
    fusion audit [appdir]      check lock vs registry (yanked/updates/checksums)
    fusion lsp                 minimal LSP (hover/goto-def/format) for VS Code
-   fusion prog.ks|lib.kslib   run a single file directly.
+   fusion prog.ks|lib.kslib|lib.ksx   run a single file directly.
                               .kslib bundles start with #!/usr/bin/env fusion,
                               so: chmod +x lib.kslib && ./lib.kslib
-                              (needs fusion on PATH; --bin needs no runtime)
+                              .ksx secure bundles look like random bytes
+                              (needs fusion on PATH + FUSION_KEY if password was set;
+                              --bin needs no runtime)
    fusion version|--version   print toolchain version
    fusion help`)
 }
@@ -563,18 +604,39 @@ func defaultOutDir(release bool) string {
 }
 
 func cmdBuild(dir string, release bool, out string) error {
+	return cmdBuildSecure(dir, release, false, "", out)
+}
+
+func cmdBuildSecure(dir string, release, secure bool, password, out string) error {
 	cfg, err := config.Load(dir)
 	if err != nil {
 		return err
 	}
 	// v2.3 build cache: skip redundant work when hash matches
-	if hit, _, _ := tools.CheckCache(cfg.Dir); hit {
-		fmt.Printf("build cached: %s (no changes)\n", cfg.Dir)
-		return nil
+	// (secure builds always rebuild so --secure never returns a stale plain hit).
+	if !secure {
+		if hit, _, _ := tools.CheckCache(cfg.Dir); hit {
+			fmt.Printf("build cached: %s (no changes)\n", cfg.Dir)
+			return nil
+		}
 	}
 	if cfg.IsLib() {
 		if out == "" {
 			out = defaultOutDir(release)
+		}
+		if secure {
+			artifact, err := lib.BuildSecure(cfg, out, password)
+			if err != nil {
+				return err
+			}
+			mode := "opaque (default key)"
+			if lib.ResolvePassword(password) != "" {
+				mode = "encrypted (password)"
+			}
+			fmt.Printf("built secure %s v%s: %s (%s)\n", cfg.LibName, cfg.Version, artifact, mode)
+			fmt.Printf("use it with: import %q (needs same FUSION_KEY if password was set)\n", cfg.LibName)
+			_ = tools.WriteCache(cfg.Dir)
+			return nil
 		}
 		// lib.Build parse-checks every .ks source, so a successful
 		// build also means the whole lib is valid.
@@ -590,6 +652,9 @@ func cmdBuild(dir string, release bool, out string) error {
 		fmt.Printf("use it with: import %q\n", cfg.LibName)
 		_ = tools.WriteCache(cfg.Dir)
 		return nil
+	}
+	if secure {
+		return fmt.Errorf("--secure needs a library (type = \"lib\"), got app %s", cfg.Dir)
 	}
 	for _, f := range []string{cfg.BackendPath(), cfg.FrontendPath()} {
 		if _, err := frontend.ParseFile(f); err != nil {
