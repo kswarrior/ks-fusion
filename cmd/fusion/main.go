@@ -218,21 +218,121 @@ for v in range(3) {
 print "backend: ok"
 `
 
-const frontendTmpl = `# frontend/main.ks - UI text
-let title = "Hello from ks-fusion"
-print title
+const frontendTmpl = `# frontend/main.ks - entry: route table + layout only (P0).
+# File name = route name. No business logic here; pages/components own it.
+import "frontend/store/app.ks"
+import "frontend/components/header.ks"
+import "frontend/layouts/app.ks"
+import "frontend/pages/home.ks"
+import "frontend/pages/hi.ks"
 
-let user = {name: "ada", tags: ["ks", "fusion"]}
-print "user:", user.name, user.tags
+func render_console(vm) {
+  let t = vm?.type ?? "unknown"
+  if t == "page" {
+    let p = vm.props
+    print p.title
+    print "count = " + p.count
+    print "user:", p.user.name
+    for i, tag in p.user.tags {
+      print "tag", i, "=", tag
+    }
+    return nil
+  }
+  if t == "text" {
+    print vm.props?.title ?? "hi"
+    return nil
+  }
+  print json_stringify(vm)
+  return nil
+}
 
-for i, t in user.tags {
-  print "tag", i, "=", t
+let route = env("ROUTE", "/")
+let r = app_fetch_user()
+assert(is_ok(r))
+
+if route == "/" {
+  let vm = home_page(app_state())
+  let app = app_layout(vm)
+  assert(app.key == "app")
+  render_console(vm)
+} else if route == "/hi" {
+  render_console(hi_page({}))
+} else {
+  error("unknown route: " + route)
 }
 print "frontend: ok"
 `
 
+const frontendStoreTmpl = `# frontend/store/app.ks - shared state + helpers (no view code).
+# P0: single state map threaded as context; fetches return ok()/err().
+
+let app_title = "Hello from ks-fusion"
+
+func app_state() {
+  return {
+    title: app_title,
+    count: 1 + 2,
+    user: {name: "ada", tags: ["ks", "fusion"]}
+  }
+}
+
+func app_fetch_user() {
+  let s = app_state()
+  return ok(s.user)
+}
+`
+
+const frontendHeaderTmpl = `# frontend/components/header.ks - one func per component.
+# Contract: (props: map) -> view-model {key, type, props, children}.
+
+func header_render(props) {
+  let title = props?.title ?? "untitled"
+  return {key: "header", type: "header", props: {title: title}, children: []}
+}
+`
+
+const frontendLayoutTmpl = `# frontend/layouts/app.ks - shared wrapper (header/footer once).
+# Contract: (page: map) -> view-model.
+
+func app_layout(page) {
+  return {key: "app", type: "layout", props: {}, children: [page]}
+}
+`
+
+const frontendHomeTmpl = `# frontend/pages/home.ks - "/" route.
+# Contract: (props: map) -> view-model. Uses store + header component.
+
+func home_page(props) {
+  let title = props?.title ?? app_title
+  let user = props?.user ?? {name: "ada", tags: ["ks", "fusion"]}
+  let head = header_render({title: title})
+  return {
+    key: "home",
+    type: "page",
+    props: {title: title, count: 1 + 2, user: user},
+    children: [head],
+    head: {title: title}
+  }
+}
+`
+
+const frontendHiTmpl = `# frontend/pages/hi.ks - "/hi" route.
+# Contract: (props: map) -> view-model.
+
+func hi_page(props) {
+  return {key: "hi", type: "text", props: {title: "hi"}, children: []}
+}
+`
+
 func cmdNew(dir string) error {
-	for _, d := range []string{filepath.Join(dir, "backend"), filepath.Join(dir, "frontend")} {
+	for _, d := range []string{
+		filepath.Join(dir, "backend"),
+		filepath.Join(dir, "frontend"),
+		filepath.Join(dir, "frontend", "pages"),
+		filepath.Join(dir, "frontend", "components"),
+		filepath.Join(dir, "frontend", "layouts"),
+		filepath.Join(dir, "frontend", "store"),
+	} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return err
 		}
@@ -244,10 +344,20 @@ func cmdNew(dir string) error {
 	if err := os.WriteFile(filepath.Join(dir, "backend", "main.ks"), []byte(backendTmpl), 0o644); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "frontend", "main.ks"), []byte(frontendTmpl), 0o644); err != nil {
-		return err
+	frontendFiles := map[string]string{
+		filepath.Join(dir, "frontend", "main.ks"):               frontendTmpl,
+		filepath.Join(dir, "frontend", "store", "app.ks"):       frontendStoreTmpl,
+		filepath.Join(dir, "frontend", "components", "header.ks"): frontendHeaderTmpl,
+		filepath.Join(dir, "frontend", "layouts", "app.ks"):     frontendLayoutTmpl,
+		filepath.Join(dir, "frontend", "pages", "home.ks"):      frontendHomeTmpl,
+		filepath.Join(dir, "frontend", "pages", "hi.ks"):        frontendHiTmpl,
 	}
-	fmt.Println("created", dir, "with backend/ frontend/ fusion.toml")
+	for path, content := range frontendFiles {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return err
+		}
+	}
+	fmt.Println("created", dir, "with backend/ frontend/{main,pages,components,layouts,store}/ fusion.toml")
 	return nil
 }
 
