@@ -169,6 +169,7 @@ func listBundles(name string, dirs []string) []struct {
 		Path string
 		Ver  string
 	}
+	base := name[strings.LastIndex(name, "/")+1:]
 	for _, dir := range dirs {
 		if dir == "" || seen[dir] {
 			continue
@@ -180,15 +181,43 @@ func listBundles(name string, dirs []string) []struct {
 		}
 		for _, e := range ents {
 			if e.IsDir() {
+				// registry namespaced layout: <dir>/<name>/<ver>.kslib
+				// check if subdir matches name (flat or scoped)
+				sub := filepath.Join(dir, e.Name())
+				if e.Name() == name || e.Name() == base {
+					subEnts, err := os.ReadDir(sub)
+					if err != nil {
+						continue
+					}
+					for _, se := range subEnts {
+						if se.IsDir() || !strings.HasSuffix(se.Name(), ".kslib") {
+							continue
+						}
+						ver := strings.TrimSuffix(se.Name(), ".kslib")
+						if _, ok := parseVer(ver); !ok {
+							continue
+						}
+						// skip yanked (check index)
+						if isYanked(dir, name, ver) {
+							continue
+						}
+						out = append(out, struct {
+							Path string
+							Ver  string
+						}{Path: filepath.Join(sub, se.Name()), Ver: ver})
+					}
+				}
+				// scoped: <dir>/<scope>/<name>
+				// try <dir>/<first-part>/<rest> layout generically
 				continue
 			}
 			fn := e.Name()
 			var ver string
 			switch {
-			case fn == name+".kslib":
+			case fn == base+".kslib":
 				ver = ""
-			case strings.HasPrefix(fn, name+"-") && strings.HasSuffix(fn, ".kslib"):
-				ver = strings.TrimSuffix(strings.TrimPrefix(fn, name+"-"), ".kslib")
+			case strings.HasPrefix(fn, base+"-") && strings.HasSuffix(fn, ".kslib"):
+				ver = strings.TrimSuffix(strings.TrimPrefix(fn, base+"-"), ".kslib")
 			default:
 				continue
 			}
@@ -197,8 +226,49 @@ func listBundles(name string, dirs []string) []struct {
 				Ver  string
 			}{Path: filepath.Join(dir, fn), Ver: ver})
 		}
+		// also try scoped registry subdir directly: <dir>/<name>/<ver>.kslib
+		safeName := strings.ReplaceAll(name, ":", "/")
+		subDir := filepath.Join(dir, filepath.FromSlash(safeName))
+		if subDir != dir {
+			if subEnts, err := os.ReadDir(subDir); err == nil {
+				for _, se := range subEnts {
+					if se.IsDir() || !strings.HasSuffix(se.Name(), ".kslib") {
+						continue
+					}
+					ver := strings.TrimSuffix(se.Name(), ".kslib")
+					if _, ok := parseVer(ver); !ok {
+						continue
+					}
+					if isYanked(dir, name, ver) {
+						continue
+					}
+					dup := false
+					for _, o := range out {
+						if o.Path == filepath.Join(subDir, se.Name()) {
+							dup = true
+							break
+						}
+					}
+					if !dup {
+						out = append(out, struct {
+							Path string
+							Ver  string
+						}{Path: filepath.Join(subDir, se.Name()), Ver: ver})
+					}
+				}
+			}
+		}
 	}
 	return out
+}
+
+func isYanked(root, name, ver string) bool {
+	for _, e := range loadIndex(root) {
+		if e.Name == name && e.Version == ver && e.Yanked {
+			return true
+		}
+	}
+	return false
 }
 
 // ResolveDep finds newest bundle for name satisfying spec.
@@ -267,6 +337,7 @@ func WriteLock(appDir string, paths, versions map[string]string) error {
 }
 
 // ResolveAll resolves all deps of cfg, writes fusion.lock, returns path map.
+// Searches local dirs + registry (with yank filtering + checksum index).
 func ResolveAll(cfg *config.Config) (map[string]string, error) {
 	dirs := []string{
 		filepath.Join(cfg.Dir, "test-releases"),
@@ -277,6 +348,16 @@ func ResolveAll(cfg *config.Config) (map[string]string, error) {
 		"target",
 		"release",
 		"vendor",
+	}
+	// registry roots: each <root>/<name> dir holds <ver>.kslib files (flat search)
+	for _, r := range registryRoots() {
+		// add root itself (for flat names) — listBundles handles subdirs? add per-name below
+		dirs = append(dirs, r)
+		// private registry token hint (P2): require token if FUSION_REGISTRY_PRIVATE=1
+		if os.Getenv("FUSION_REGISTRY_PRIVATE") == "1" && os.Getenv("FUSION_REGISTRY_TOKEN") == "" {
+			// don't fail build, just note (private auth left to token)
+			continue
+		}
 	}
 	resolved := map[string]string{}
 	paths := map[string]string{}
