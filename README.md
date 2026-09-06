@@ -268,6 +268,11 @@ log_info(m) log_warn(m) log_error(m) assert_eq(a,b) assert_ne(a,b) assert_contai
 # types (v2.3)
 struct_validate(m, schema) struct_assert(m, schema) enum_create(arr) enum_valid(e, v) is_number(x)
 trim_prefix(s,p) trim_suffix(s,sfx) repeat_str(s,n)
+
+# state + net (v2.3)
+use_state(k, init) set_state(k, v) on_mount(fn) fetch_json(url)
+tcp_connect(host,port) tcp_send(id,s) tcp_recv(id,n?) tcp_close(id) tcp_serve(port,fn)
+tls_connect(host,port) ws_connect(host,port)
 ```
 
 ### Scoping
