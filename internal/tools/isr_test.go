@@ -152,48 +152,88 @@ func TestSSEPatchMessage(t *testing.T) {
 	if err := json.Unmarshal(base, &baseline); err != nil {
 		t.Fatalf("baseline not JSON: %v", err)
 	}
-	// change the page, bump the watcher, read one SSE message
+	// subscribe first, then change the page twice: full vm, then keyed ops
 	pagePath := filepath.Join(cfg.Dir, "frontend", "pages", "home.ks")
-	if err := os.WriteFile(pagePath, []byte("func home_page(props) {\n return {key: \"home\", type: \"page\", props: {title: \"changed\"}, children: []}\n}\n"), 0o644); err != nil {
-		t.Fatal(err)
+	type result struct {
+		resp *http.Response
+		err  error
 	}
-	watcher.ver++
-	req, _ := http.NewRequest("GET", srv.URL+"/events?route=/", nil)
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp2, err := client.Do(req)
-	if err != nil {
-		t.Fatal(err)
+	done := make(chan result, 1)
+	go func() {
+		req, _ := http.NewRequest("GET", srv.URL+"/events?route=/", nil)
+		resp, err := http.DefaultClient.Do(req)
+		done <- result{resp, err}
+	}()
+	time.Sleep(200 * time.Millisecond) // let the handler subscribe (last=ver=0)
+	writePage := func(title string) {
+		t.Helper()
+		if err := os.WriteFile(pagePath, []byte("func home_page(props) {\n return {key: \"home\", type: \"page\", props: {title: \""+title+"\"}, children: []}\n}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		watcher.ver++
+	}
+	var resp2 *http.Response
+	readFrame := func() map[string]any {
+		t.Helper()
+		var frame strings.Builder
+		br := bufioReader(resp2.Body)
+		for {
+			line, err := br.ReadString('\n')
+			if err != nil {
+				t.Fatalf("SSE frame: %v", err)
+			}
+			if strings.TrimSpace(line) == "" {
+				break
+			}
+			frame.WriteString(line)
+		}
+		first := frame.String()
+		if !strings.HasPrefix(first, "data: ") {
+			t.Fatalf("want SSE data frame, got %q", first[:min(64, len(first))])
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(first, "data: "))
+		if strings.Contains(payload, "location.reload") {
+			t.Fatal("SSE must not carry reload fallback")
+		}
+		var msg map[string]any
+		if err := json.Unmarshal([]byte(payload), &msg); err != nil {
+			t.Fatalf("SSE payload not JSON: %v (%q)", err, payload[:min(120, len(payload))])
+		}
+		return msg
+	}
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		resp2 = r.resp
+	case <-time.After(5 * time.Second):
+		t.Fatal("SSE subscribe timed out")
 	}
 	defer resp2.Body.Close()
-	// read one SSE frame: "data: <payload>\n\n"
-	var frame strings.Builder
-	br := bufioReader(resp2.Body)
-	for {
-		line, err := br.ReadString('\n')
-		if err != nil {
-			t.Fatalf("SSE frame: %v", err)
-		}
-		if strings.TrimSpace(line) == "" {
-			break
-		}
-		frame.WriteString(line)
+	writePage("changed")
+	msg1 := readFrame()
+	vm1, hasVM := msg1["vm"].(map[string]any)
+	if !hasVM {
+		t.Fatalf("first message must carry full vm, got %v", msg1)
 	}
-	first := frame.String()
-	if !strings.HasPrefix(first, "data: ") {
-		t.Fatalf("want SSE data frame, got %q", first[:min(64, len(first))])
+	if props, _ := vm1["props"].(map[string]any); props["title"] != "changed" {
+		t.Fatalf("want title changed, got %v", vm1["props"])
 	}
-	payload := strings.TrimSpace(strings.TrimPrefix(first, "data: "))
-	var msg map[string]any
-	if err := json.Unmarshal([]byte(payload), &msg); err != nil {
-		t.Fatalf("SSE payload not JSON: %v (%q)", err, payload[:min(120, len(payload))])
+	writePage("changed2")
+	msg2 := readFrame()
+	ops, hasOps := msg2["ops"].([]any)
+	if !hasOps || len(ops) == 0 {
+		t.Fatalf("second message must carry keyed ops, got %v", msg2)
 	}
-	if _, hasOps := msg["ops"]; !hasOps {
-		if _, hasVM := msg["vm"]; !hasVM {
-			t.Fatalf("want ops or vm message, got %v", msg)
+	foundProp := false
+	for _, o := range ops {
+		if om, ok := o.(map[string]any); ok && om["op"] == "setProp" {
+			foundProp = true
 		}
 	}
-	if s := string(base); strings.Contains(string(payload), "location.reload") {
-		t.Fatalf("SSE must not carry reload fallback (base %d bytes)", len(s))
+	if !foundProp {
+		t.Fatalf("want setProp op for title change, got %v", ops)
 	}
 }
 
