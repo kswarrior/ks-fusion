@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/kswarrior/ks-fusion/internal/frontend"
 )
@@ -58,30 +59,53 @@ func TestWSFramesRoundtrip(t *testing.T) {
 	}
 }
 
-func TestWSRecvSkipsPing(t *testing.T) {
-	c1, c2 := net.Pipe()
-	defer c1.Close()
-	defer c2.Close()
-	id := tcpRegister(c1)
-	defer tcpUnregister(id)
+// wsLoopback serves raw frames over real localhost TCP (kernel-buffered, so
+// pong replies never deadlock the test) and returns a registered client id.
+func wsLoopback(t *testing.T, frames [][]byte) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
 	go func() {
-		// ping with empty payload, then a fragmented text message "hi!"
-		_, _ = c2.Write(wsEncodeControl(0x9, nil))
-		_, _ = c2.Write([]byte{0x01, 2, 'h', 'i'})
-		_, _ = c2.Write([]byte{0x80, 1, '!'})
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		for _, f := range frames {
+			_ = c.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			if _, err := c.Write(f); err != nil {
+				return
+			}
+		}
+		// consume one pong reply (ping test) then linger briefly
+		_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+		var tmp [64]byte
+		_, _ = c.Read(tmp[:])
 	}()
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	id := tcpRegister(c)
+	t.Cleanup(func() { tcpUnregister(id) })
+	return id
+}
+
+func TestWSRecvSkipsPing(t *testing.T) {
+	id := wsLoopback(t, [][]byte{
+		wsEncodeControl(0x9, nil), // ping, empty payload
+		{0x01, 2, 'h', 'i'},       // fragmented text "hi!"
+		{0x80, 1, '!'},
+	})
 	mustRunV25(t, fmt.Sprintf("let r = ws_recv(%d)\nassert(r == \"hi!\")", id))
 }
 
 func TestWSRecvCloseIsError(t *testing.T) {
-	c1, c2 := net.Pipe()
-	defer c1.Close()
-	defer c2.Close()
-	id := tcpRegister(c1)
-	defer tcpUnregister(id)
-	go func() {
-		_, _ = c2.Write(wsEncodeControl(0x8, nil))
-	}()
+	id := wsLoopback(t, [][]byte{wsEncodeControl(0x8, nil)})
 	p, err := frontend.ParseSource(fmt.Sprintf("ws_recv(%d)", id), "test.ks")
 	if err != nil {
 		t.Fatal(err)
