@@ -34,6 +34,25 @@ func RunWebWithWatch(appDir string, port int, watch bool) error {
 	}
 	mux := http.NewServeMux()
 	isr := newISRCache()
+	attachWebRoutes(mux, cfg, watcher, isr, watch)
+	addr := fmt.Sprintf(":%d", port)
+	extra := "SSR + /api/*, ?format=json"
+	if watch {
+		extra += ", --watch SSE keyed patches"
+	}
+	fmt.Printf("ks-fusion web: serving %s at http://localhost%s (%s)\n", cfg.Name, addr, extra)
+	return http.ListenAndServe(addr, mux)
+}
+
+// buildWebMux assembles the web routes (extracted for httptest coverage).
+// It returns the mux plus a stop func for the background ISR loop.
+func buildWebMux(cfg *config.Config, watcher *webWatcher, isr *isrCache, watch bool) (*http.ServeMux, func()) {
+	mux := http.NewServeMux()
+	stop := attachWebRoutes(mux, cfg, watcher, isr, watch)
+	return mux, stop
+}
+
+func attachWebRoutes(mux *http.ServeMux, cfg *config.Config, watcher *webWatcher, isr *isrCache, watch bool) func() {
 	isr.regen = func(route, format string) (string, string, string, bool) {
 		vmJSON, err := renderRoute(cfg, route)
 		if err != nil {
@@ -45,13 +64,7 @@ func RunWebWithWatch(appDir string, port int, watch bool) error {
 		return vmToHTMLWithWatch(vmJSON, route, watch), "text/html; charset=utf-8", vmJSON, true
 	}
 	// background ISR regen (v2.5): refresh entries expiring within 10s, every 5s
-	go func() {
-		tick := time.NewTicker(5 * time.Second)
-		defer tick.Stop()
-		for range tick.C {
-			isr.refreshSoon(10 * time.Second)
-		}
-	}()
+	go isr.startBackground(5*time.Second, 10*time.Second)()
 	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
 		route := r.URL.Query().Get("route")
 		if route == "" {
