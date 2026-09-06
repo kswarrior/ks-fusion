@@ -97,6 +97,13 @@ func tcpLookup(id int) (net.Conn, bool) {
 	return c, ok
 }
 
+// tcpUnregister drops a registry id without closing (tests own the conn).
+func tcpUnregister(id int) {
+	tcpMu.Lock()
+	defer tcpMu.Unlock()
+	delete(tcpConns, id)
+}
+
 func bTCPConnect(in *Interpreter, args []Value) (Value, error) {
 	if err := needArgs("tcp_connect", args, 2, 2); err != nil {
 		return Nil(), err
