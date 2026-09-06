@@ -223,6 +223,11 @@ func main() {
 			fmt.Println("error:", err)
 			os.Exit(1)
 		}
+	case "build-ssg", "ssg":
+		if err := cmdSSG(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
 	case "publish":
 		if err := cmdPublish(os.Args[2:]); err != nil {
 			fmt.Println("error:", err)

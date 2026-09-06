@@ -36,15 +36,18 @@ func cmdVendor(args []string) error {
 func cmdWeb(args []string) error {
 	dir := "."
 	port := 8080
+	watch := false
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
 		case a == "--help" || a == "-h":
-			fmt.Println("usage: fusion run-web [appdir] [--port N]\n  SSR frontend/ as HTML+JSON with hot-reload hint (dev server)")
+			fmt.Println("usage: fusion run-web [appdir] [--port N] [--watch]\n  SSR frontend/ as HTML+JSON (+ /api/*, ?format=json, /events SSE when --watch)")
 			return nil
+		case a == "--watch" || a == "-w":
+			watch = true
 		case a == "--port" || a == "-p":
 			if i+1 >= len(args) {
-				return fmt.Errorf("usage: fusion run-web [appdir] [--port N]")
+				return fmt.Errorf("usage: fusion run-web [appdir] [--port N] [--watch]")
 			}
 			i++
 			var p int
@@ -67,7 +70,36 @@ func cmdWeb(args []string) error {
 			dir = a
 		}
 	}
-	return tools.RunWeb(dir, port)
+	return tools.RunWebWithWatch(dir, port, watch)
+}
+
+func cmdSSG(args []string) error {
+	dir := "."
+	out := ""
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--help" || a == "-h":
+			fmt.Println("usage: fusion build-ssg [appdir] [--out DIR]\n  pre-render routes to HTML+JSON (SSG)")
+			return nil
+		case a == "--out" || a == "-o":
+			if i+1 >= len(args) {
+				return fmt.Errorf("usage: fusion build-ssg [appdir] [--out DIR]")
+			}
+			i++
+			out = args[i]
+		case strings.HasPrefix(a, "--out="):
+			out = strings.TrimPrefix(a, "--out=")
+		case strings.HasPrefix(a, "-"):
+			return fmt.Errorf("unknown flag %q", a)
+		default:
+			if dir != "." {
+				return fmt.Errorf("usage: fusion build-ssg [appdir] (single target only)")
+			}
+			dir = a
+		}
+	}
+	return tools.BuildSSG(dir, out)
 }
 
 func cmdBuildJS(args []string) error {

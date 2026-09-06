@@ -239,16 +239,27 @@ func vmToHTMLWithWatch(vmJSON, route string, watch bool) string {
 			}
 		}
 	}
+	watchScript := ""
+	if watch {
+		watchScript = `<script>
+// v2.3 watch: SSE reload (<100ms aim, full reload v1)
+var es = new EventSource('/events');
+es.onmessage = function(e){ if((e.data||'').indexOf('reload')===0) location.reload(); };
+</script>`
+	}
 	return fmt.Sprintf(`<!doctype html>
 <html><head><meta charset="utf-8"><title>%s</title></head>
 <body>
 <div id="app" data-route="%s"></div>
 <script id="vm" type="application/json">%s</script>
 <script>
-// v2.2 hydrate stub: view-model -> DOM (CSR patch on next render)
+// v2.3 hydrate: view-model -> DOM + use_state/fetch_json CSR
 (function(){
   var vm = JSON.parse(document.getElementById('vm').textContent);
   var app = document.getElementById('app');
+  var __state = {};
+  window.use_state = function(k, init){ if(!(k in __state)) __state[k]=init; return __state[k]; };
+  window.set_state = function(k, v){ __state[k]=v; return v; };
   function render(node, parent){
     if(!node) return;
     var el = document.createElement(node.type === 'page' ? 'div' : (node.type || 'div'));
@@ -259,8 +270,119 @@ func vmToHTMLWithWatch(vmJSON, route string, watch bool) string {
   try{ render(vm, app); }catch(e){ app.textContent = JSON.stringify(vm); }
 })();
 </script>
+%s
 <!-- SSR in %s -->
-</body></html>`, title, route, string(pretty), time.Now().Format(time.RFC3339))
+</body></html>`, title, route, string(pretty), watchScript, time.Now().Format(time.RFC3339))
+}
+
+type webWatcher struct {
+	dir     string
+	mu      chan int
+	ver     int
+	lastMod map[string]time.Time
+}
+
+func newWebWatcher(dir string) *webWatcher {
+	return &webWatcher{dir: dir, mu: make(chan int, 1), lastMod: map[string]time.Time{}}
+}
+
+func (w *webWatcher) version() int { return w.ver }
+
+func (w *webWatcher) snapshot() map[string]time.Time {
+	out := map[string]time.Time{}
+	_ = filepath.Walk(w.dir, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".ks") {
+			out[p] = info.ModTime()
+		}
+		return nil
+	})
+	return out
+}
+
+func (w *webWatcher) loop() {
+	w.lastMod = w.snapshot()
+	for {
+		time.Sleep(400 * time.Millisecond)
+		cur := w.snapshot()
+		changed := len(cur) != len(w.lastMod)
+		if !changed {
+			for k, v := range cur {
+				if old, ok := w.lastMod[k]; !ok || !old.Equal(v) {
+					changed = true
+					break
+				}
+			}
+		}
+		if changed {
+			w.lastMod = cur
+			w.ver++
+		}
+	}
+}
+
+// BuildSSG pre-renders routes to target/ssg/*.html + *.json (v2.3 P5).
+func BuildSSG(appDir, out string) error {
+	cfg, err := config.Load(appDir)
+	if err != nil {
+		return err
+	}
+	if out == "" {
+		out = filepath.Join(cfg.Dir, "target", "ssg")
+	}
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		return err
+	}
+	routes := []string{"/", "/hi"}
+	// add each page file as route
+	if ents, err := os.ReadDir(filepath.Join(cfg.Dir, "frontend", "pages")); err == nil {
+		for _, e := range ents {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".ks") || strings.HasSuffix(e.Name(), "_test.ks") {
+				continue
+			}
+			base := strings.TrimSuffix(e.Name(), ".ks")
+			var r string
+			if base == "home" {
+				r = "/"
+			} else {
+				r = "/" + base
+			}
+			found := false
+			for _, x := range routes {
+				if x == r {
+					found = true
+					break
+				}
+			}
+			if !found {
+				routes = append(routes, r)
+			}
+		}
+	}
+	for _, r := range routes {
+		vmJSON, err := renderRoute(cfg, r)
+		if err != nil {
+			fmt.Printf("ssg skip %s: %v\n", r, err)
+			continue
+		}
+		html := vmToHTMLWithWatch(vmJSON, r, false)
+		name := strings.Trim(r, "/")
+		if name == "" {
+			name = "index"
+		}
+		name = strings.ReplaceAll(name, "/", "_")
+		if err := os.WriteFile(filepath.Join(out, name+".html"), []byte(html), 0o644); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(out, name+".json"), []byte(vmJSON), 0o644); err != nil {
+			return err
+		}
+		fmt.Printf("ssg: %s -> %s.{html,json} (%d bytes)\n", r, filepath.Join(out, name), len(html))
+	}
+	fmt.Printf("ssg ok: %d routes in %s\n", len(routes), out)
+	return nil
 }
 
 // BuildJS transpiles safe .ks subset (pages/components) to JS per-route.
