@@ -162,6 +162,9 @@ func TestCompileV02Typed(t *testing.T) {
 	mustRun(t, "func add(a: int, b: int): int { return a + b }\nassert(add(2, 3) == 5)\n")
 	mustFailRun(t, "let x: int = \"nope\"\n")
 	mustFailRun(t, "func add(a: int): int { return a }\nprint add(\"bad\")\n")
+	// nominal struct/enum annotations: VM skips the check (interpreter
+	// validates); maps must not fail with "wants User, got map".
+	mustRun(t, "let u: User = {name: \"a\"}\nassert(u.name == \"a\")\n")
 }
 
 func TestCompileV02Switch(t *testing.T) {

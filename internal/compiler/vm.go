@@ -766,6 +766,9 @@ func (vm *VM) exec(in Instr) error {
 		if v.Kind == VNil {
 			break // nullable passes
 		}
+		if !isKnownVMType(in.Name) {
+			break // nominal struct/enum: interpreter validates; VM skips
+		}
 		if !vmIsType(v, in.Name) {
 			return fmt.Errorf("wants %s, got %s", in.Name, typeName(v))
 		}
@@ -1099,6 +1102,31 @@ func sliceVal(obj, startV, endV Val) (Val, error) {
 		return StrV(string(runes[s:e])), nil
 	}
 	return Nil(), fmt.Errorf("cannot slice %s (try array or string)", typeName(obj))
+}
+
+// isKnownVMType reports whether typ is a base/union/generic the VM can check.
+// Nominal struct/enum names (e.g. `User`) are interpreter-validated; the VM
+// skips them (nil still passes via the caller).
+func isKnownVMType(typ string) bool {
+	typ = strings.TrimSpace(typ)
+	if strings.Contains(typ, "|") {
+		for _, part := range strings.Split(typ, "|") {
+			if !isKnownVMType(strings.TrimSpace(part)) {
+				return false
+			}
+		}
+		return true
+	}
+	typ = strings.TrimSuffix(typ, "?")
+	if i := strings.Index(typ, "<"); i >= 0 {
+		typ = typ[:i]
+	}
+	switch typ {
+	case "any", "nil", "bool", "int", "float", "number", "string",
+		"array", "map", "func", "chan", "ok", "err":
+		return true
+	}
+	return false
 }
 
 // vmIsType reports whether v matches the `is` type name (subset of the

@@ -470,11 +470,11 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 		c.emit(OpPop, 0, st.Line)
 		return nil
 	case frontend.StmtGo:
-		return fmt.Errorf("line %d: `go` not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
+		return fmt.Errorf("line %d: `go` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
 	case frontend.StmtSleep:
-		return fmt.Errorf("line %d: `sleep` not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
+		return fmt.Errorf("line %d: `sleep` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
 	case frontend.StmtImport:
-		return fmt.Errorf("line %d: `import` not yet supported by compiler v0.1 (runs in interpreter)", st.Line)
+		return fmt.Errorf("line %d: `import` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
 	case frontend.StmtTry:
 		return fmt.Errorf("line %d: `try/catch` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
 	case frontend.StmtSwitch:
@@ -484,7 +484,7 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 	case frontend.StmtDefer:
 		return fmt.Errorf("line %d: `defer` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
 	case frontend.StmtStruct, frontend.StmtEnum:
-		return fmt.Errorf("line %d: `struct`/`enum` declarations run in the interpreter (compiler v0.2 records nominal types at runtime)", st.Line)
+		return fmt.Errorf("line %d: `struct`/`enum` declarations not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
 	}
 	return fmt.Errorf("line %d: unknown statement (compiler v0.2)", st.Line)
 }
