@@ -326,7 +326,7 @@ func vmToHTMLWithWatch(vmJSON, route string, watch bool) string {
 	if watch {
 		watchScript = `<script>
 // v2.5 watch: SSE keyed patches applied as DOM diff (no reload path).
-var es = new EventSource('/events?route=` + encodeURIComponent(route) + `');
+var es = new EventSource('/events?route=' + encodeURIComponent("` + route + `"));
 es.onmessage = function(e){
   try{
     var msg = JSON.parse(e.data);
@@ -343,41 +343,116 @@ es.onmessage = function(e){
 <div id="app" data-route="%s"></div>
 <script id="vm" type="application/json">%s</script>
 <script>
-// v2.4 hydrate: view-model -> DOM + use_state/fetch_json CSR + virtualize >100
+// v2.5 hydrate: keyed 1:1 DOM (data-key) + patch applier (no reload path).
 (function(){
   var vm = JSON.parse(document.getElementById('vm').textContent);
   var app = document.getElementById('app');
   var __state = {};
+  var __byKey = {};
   window.use_state = function(k, init){ if(!(k in __state)) __state[k]=init; return __state[k]; };
   window.set_state = function(k, v){ __state[k]=v; return v; };
-  function render(node, parent, depth){
-    if(!node) return;
-    depth = depth || 0;
-    var el = document.createElement(node.type === 'page' ? 'div' : (node.type || 'div'));
-    if(node.props && node.props.title){ var h=document.createElement('h1'); h.textContent=node.props.title; el.appendChild(h); }
+  window.__banner = function(msg){
+    var b = document.getElementById('fusion-banner');
+    if(!b){ b = document.createElement('div'); b.id = 'fusion-banner'; b.setAttribute('role','alert'); document.body.insertBefore(b, document.body.firstChild); }
+    b.textContent = msg;
+  };
+  function kidsBox(el){
+    var k = el.querySelector(':scope > .kids');
+    if(!k){ k = document.createElement('div'); k.className = 'kids'; el.appendChild(k); }
+    return k;
+  }
+  function paintProps(el, node){
+    var props = node.props || {};
+    var h = el.querySelector(':scope > h1');
+    if(props.title){ if(!h){ h = document.createElement('h1'); el.insertBefore(h, el.firstChild); } h.textContent = props.title; }
+    else if(h){ h.parentNode.removeChild(h); }
+    var s = el.querySelector(':scope > .txt');
+    if(props.text){ if(!s){ s = document.createElement('span'); s.className = 'txt'; el.appendChild(s); } s.textContent = props.text; }
+    else if(s){ s.parentNode.removeChild(s); }
+    for(var pk in props){ if(pk !== 'title' && pk !== 'text'){ el.setAttribute('data-prop-' + pk, String(props[pk])); } }
+  }
+  function build(node){
+    var el = document.createElement('div');
+    el.setAttribute('data-key', node.key);
+    el.setAttribute('data-type', node.type || 'div');
+    paintProps(el, node);
+    var box = kidsBox(el);
+    (__byKey[node.key] = el);
     var kids = node.children || [];
-    // virtualize lists >100 rows (v2.4): render first 100 + expander
     if(kids.length > 100){
+      // virtualize lists >100 rows: first 100 + expander (keyed children preserved)
       var shown = 0;
-      function renderMore(){
+      var moreBtn = document.createElement('button');
+      moreBtn.setAttribute('data-key', node.key + ':more');
+      (function renderMore(){
         var frag = document.createDocumentFragment();
-        for(var i=shown; i<Math.min(shown+100, kids.length); i++){ render(kids[i], frag, depth+1); }
+        for(var i=shown; i<Math.min(shown+100, kids.length); i++){ frag.appendChild(build(kids[i])); }
         shown += 100;
-        el.insertBefore(frag, moreBtn);
+        box.insertBefore(frag, moreBtn);
         if(shown >= kids.length && moreBtn.parentNode) moreBtn.parentNode.removeChild(moreBtn);
         else moreBtn.textContent = 'Show more (' + shown + '/' + kids.length + ')';
-      }
-      var moreBtn = document.createElement('button');
-      moreBtn.onclick = renderMore;
-      renderMore();
-      el.appendChild(moreBtn);
+      })();
+      moreBtn.onclick = function(){ var f = box.querySelectorAll(':scope > div[data-key]').length; for(var i=f; i<Math.min(f+100, kids.length); i++){ box.appendChild(build(kids[i])); } if(box.querySelectorAll(':scope > div[data-key]').length >= kids.length && moreBtn.parentNode) moreBtn.parentNode.removeChild(moreBtn); };
+      box.appendChild(moreBtn);
     } else {
-      kids.forEach(function(c){ render(c, el, depth+1); });
+      kids.forEach(function(c){ box.appendChild(build(c)); });
     }
-    parent.appendChild(el);
+    return el;
   }
-  window.__renderVM = function(v, root){ root.innerHTML=''; render(v, root, 0); };
-  try{ render(vm, app); }catch(e){ app.textContent = JSON.stringify(vm); }
+  function dropKeys(el){
+    if(el.nodeType !== 1) return;
+    if(el.hasAttribute && el.hasAttribute('data-key')) delete __byKey[el.getAttribute('data-key')];
+    var kids = el.children;
+    for(var i=0; i<kids.length; i++) dropKeys(kids[i]);
+  }
+  function applyPatch(ops){
+    ops.forEach(function(op){
+      var el = __byKey[op.key];
+      if(op.op === 'setText' && el){
+        var s = el.querySelector(':scope > .txt');
+        if(!s){ s = document.createElement('span'); s.className = 'txt'; el.appendChild(s); }
+        s.textContent = op.value == null ? '' : String(op.value);
+      } else if(op.op === 'setProp' && el){
+        var props = {}; props[op.prop] = op.value;
+        paintProps(el, {props: props});
+        if(op.value == null) el.removeAttribute('data-prop-' + op.prop);
+      } else if(op.op === 'replace' && el){
+        var fresh = build(op.value);
+        dropKeys(el);
+        el.parentNode.replaceChild(fresh, el);
+      } else if(op.op === 'insert'){
+        var parent = __byKey[op.parent];
+        if(!parent) return;
+        var box = kidsBox(parent);
+        var node = build(op.value);
+        var ref = box.querySelectorAll(':scope > div[data-key]')[op.index];
+        if(ref) box.insertBefore(node, ref); else box.appendChild(node);
+      } else if(op.op === 'remove' && el){
+        dropKeys(el);
+        if(el.parentNode) el.parentNode.removeChild(el);
+      } else if(op.op === 'move' && el){
+        var p = __byKey[op.parent];
+        if(!p) return;
+        var bx = kidsBox(p);
+        var kids = bx.querySelectorAll(':scope > div[data-key]');
+        var ref = kids[op.index];
+        if(ref === el) return;
+        bx.removeChild(el);
+        kids = bx.querySelectorAll(':scope > div[data-key]');
+        ref = kids[op.index];
+        if(ref) bx.insertBefore(el, ref); else bx.appendChild(el);
+      }
+    });
+    document.getElementById('vm').textContent = JSON.stringify(window.__currentVM);
+  }
+  window.__applyPatch = applyPatch;
+  window.__renderVM = function(v, root){
+    root.innerHTML=''; __byKey = {};
+    root.appendChild(build(v));
+    window.__currentVM = v;
+    document.getElementById('vm').textContent = JSON.stringify(v);
+  };
+  try{ window.__renderVM(vm, app); }catch(e){ window.__banner('render failed: ' + e.message); }
 })();
 </script>
 %s
