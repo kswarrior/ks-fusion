@@ -126,6 +126,8 @@ func main() {
 			fmt.Println("error:", err)
 			os.Exit(1)
 		}
+	case "version", "--version", "-V":
+		fmt.Println("ks-fusion", toolVersion)
 	case "help", "--help", "-h":
 		help()
 	default:
@@ -135,8 +137,12 @@ func main() {
 	}
 }
 
+// toolVersion is the toolchain/language version printed by help/version.
+// Keep in sync with docs (README, docs/vs.md, docs/futures.md).
+const toolVersion = "v2.1"
+
 func help() {
-	fmt.Println(`ks-fusion v2.0 (Go)
+	fmt.Println(`ks-fusion v2.1 (Go)
 Commands:
   fusion new [--lib] <dir>   create app (backend/ frontend/ fusion.toml)
                              or library with --lib (src/lib.ks, type="lib")
