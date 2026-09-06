@@ -18,7 +18,8 @@ type Config struct {
 	LibEntry      string            // entry .ks file for libs (default "src/lib.ks")
 	LibName       string            // override published lib name (default = Name)
 	Dependencies  map[string]string // name -> version ("1.0.0") or path dep ("path:../libs/x")
-	Dir           string
+	Dir           string            // app root: entries + path deps resolve relative to here
+	Source        string            // config file that was loaded (for error hints)
 }
 
 // IsLib reports whether this package is a library.
@@ -56,6 +57,7 @@ func parseConfig(data []byte, appDir, sourcePath string) (*Config, error) {
 		FrontendEntry: "frontend/main.ks",
 		LibEntry:      "src/lib.ks",
 		Dir:           appDir,
+		Source:        sourcePath,
 		Dependencies:  map[string]string{},
 	}
 	c.LibName = c.Name
