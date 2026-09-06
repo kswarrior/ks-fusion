@@ -72,6 +72,9 @@ func attachWebRoutes(mux *http.ServeMux, cfg *config.Config, watcher *webWatcher
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		fl, _ := w.(http.Flusher)
+		if fl != nil {
+			fl.Flush() // commit headers so subscribers don't hang
+		}
 		last := watcher.version()
 		var lastSent string
 		tick := time.NewTicker(300 * time.Millisecond)
