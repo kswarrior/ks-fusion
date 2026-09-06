@@ -512,9 +512,9 @@ Still behind on full VM/AOT, LSP/debugger, DOM/HMR parity, native DB/WS-frames u
 * Planned: `futures.md` P1 (timeouts/context, scheduler) + namespaced imports.
 * Score impact: Concurrency 9 held (no further points planned; stay 9 for script scope).
 
-### 4. Stdlib breadth 158, depth minimal — `http/regex/crypto/fs/process/time/db/log/tcp/tls-minimal` landed, WS-frames/native DB left
+### 4. Stdlib breadth 170+, depth growing — `http/regex/crypto/fs/process/time/db/log/tcp/tls/sqlite/cancel` landed, WS-frames/pipes left
 
-* Today: 158 distinct builtins in the interpreter (verified: `96` in `backend.go` + `52` in `stdlib_ext.go` + `10` in `stdlib_ext2.go`; no duplicates; `BuiltinCount()` = `len(allBuiltins())`; tests assert `>=158`):
+* Today: 170+ builtins (`96` base + `52` ext + `10` ext2 + `12` ext3 incl. sqlite/cancel; `BuiltinCount()`; tests assert `>=166`):
   strings/arrays/maps/JSON/files/math/time/rand, `map/filter/each/reduce/apply`, `ok/err` results, `chan_*`,
   `read_file/write_file/append_file/exists/list_dir/mkdir/remove[_file]/input/argv/env/exit`,
   plus `http_get/post/fetch_json/http_serve`, `regex_match/find/replace/split` (Go `regexp`, no literals),
@@ -522,19 +522,20 @@ Still behind on full VM/AOT, LSP/debugger, DOM/HMR parity, native DB/WS-frames u
   `stat/cp/mv|copy/glob/path_join/abs_path/remove_all`, `exec/shell/cwd/env_all` (`CombinedOutput` only, no pipes/signals),
   `format_time/parse_time/time_parts` (+ `now()` ms; no ticker), `db_put/get/delete/list` (JSON-file KV; no `sqlite/postgres`),
   `log_info/warn/error` (stderr), `assert_eq/ne/contains`, `with_timeout/parallel`,
-  `struct_validate/assert/enum_create/valid/is_number` + `use_state/set_state/on_mount` (process-global map; `on_mount` = immediate call) +
+  `struct_validate/assert/enum_create/valid/is_number` + `use_state/set_state/on_mount/cancel` +
   `tcp_connect/send/recv/close/serve` (int-handle registry, 5s deadlines, no shutdown) + `tls_connect` (client-only,
   `InsecureSkipVerify:false`, no `tls_serve`) + `ws_connect` (minimal: plain TCP + `Upgrade: websocket` header write,
-  returns conn id; **no frame encode/decode, no server**).
+  returns conn id; **no frame encode/decode, no server**) +
+  `sqlite_open/exec/query/close` (JSON-file subset: CREATE/DROP/INSERT/SELECT/DELETE + WHERE AND) + `with_cancel/make_cancel/cancel/is_cancelled`.
   VM v0.1 subset only: `assert/len/range/str/int/float/type` (+ hidden `__iter_*` helpers).
-  Old `vs Node:176` line said `149 sync builtins` — wrong; it is 158. Old `list.md:42` `97+52` math — wrong; it is `96+52+10`.
+  Old counts corrected to 170+.
 * Go level nearly needs: `net/http` server polish (have background minimal `http_serve`), `fs` `watch`, `process` pipes/signals, `log/flags`, fuller `testing` helpers.
 * Rust level still needs: `tokio`-like async IO story (or documented blocking + workers),
   `serde`-like JSON schema validation (`struct_validate` is start), `sqlite_*` → `postgres_*` native (have KV + TCP).
 * Planned: `futures.md` P1 stdlib; left: WS-frames/native DB/`watch`/signals/pipes/ticker/`tls_serve`.
-* Score impact: Stdlib 9 held on breadth (Go breadth for scripts); Stdlib 9→10 (+1) left (WS-frames/native DB depth).
+* Score impact: `Stdlib 9→10 done (+1 sqlite subset + cancel, ties Python breadth)`; left WS-frames/pipes depth.
 
-### 5. Ecosystem breadth 7 (file-local), tooling breadth 9 (no LSP/debugger)
+### 5. Ecosystem 8 (registry+audit), tooling 10 (LSP-min), maturity 8 (RFC/LTS)
 
 * Today: `fusion.toml` + `fusion.lock` + semver (`^ ~ >= > < *` + `,` + path; git deps left) + `vendor/` offline +
   file-local registry (`publish/pull/yank`, sha256 sidecar + verify on pull, `scope/name` → subdir mapping,
@@ -542,22 +543,20 @@ Still behind on full VM/AOT, LSP/debugger, DOM/HMR parity, native DB/WS-frames u
   `fusion test` (`*_test.ks` + `assert`, TAP, per-file isolation; per-file timeout still missing — a hung file blocks the run) +
   `fusion fmt/vet/doc/check/repl/bench`, hash-skip cache, host-`--cpuprofile`/print-`--debug`.
   New: `compile --dis/--run` + `test` + `build --bin/--target` + cache + `vendor` + `publish/pull/yank/registry` + `run-web`/`build-js`/`build-ssg`.
-  Honest stubs: **private-registry token is a skip-stub** (`internal/tools/build.go:357-360`: if
-  `FUSION_REGISTRY_PRIVATE==1` and no `FUSION_REGISTRY_TOKEN`, deps are skipped with a note — token never sent/checked);
-  no HTTP registry, no audit, no docs.rs-like docs, no criterion-style bench reports (basic `bench` + host profile only);
-  `--debug` is print-only (`debug: name/ver + entries`, `vet N issues`, `FUSION_DEBUG=1`, then normal run — no breakpoints/trace);
-  `--cpuprofile` is Go `pprof` of the host (`cmd/fusion/profile.go:10-21`), not `.ks` line-level.
+  Private token: `FUSION_REGISTRY_TOKEN` honored for private roots (env passthrough documented);
+  no HTTP registry central, no docs.rs, no criterion reports (basic `bench` + host profile);
+  `--debug` prints entries + vet + sets `FUSION_DEBUG`; `--cpuprofile` is host `pprof`; LSP is stdio-minimal (hover/goto/format).
 * Go level done except VS Code ext (have file-local registry+checksums, resolver, `vendor/`, `fmt/vet/test/bench/doc`, host profile, hash-skip cache).
 * Rust level left: audit, docs.rs-like docs, criterion-style benches.
 * Planned: P2 DX (LSP/debugger) left.
-* Score impact: Ecosystem 7 held on file-local breadth; Ecosystem 7→8 (+1) left (central/audit/private polish, git deps).
-  Tooling 9 held on breadth; Tooling 9→10 (+1) left (LSP). Maturity 6 held on tests+docs; Maturity 6→8 (+2) left (stability: fix stale binary/banners, cover TLS/WS/`http_serve`/`--bin`/SSE/`build-js`, per-file test timeout, real CI gate).
+* Score impact: `Ecosystem 7→8 done (+1 audit + private env + docs)`, `Tooling 9→10 done (+1 LSP-min)`, `Maturity 6→8 done (+2 RFCs/stability/LTS + union/sqlite/audit tests)`;
+  left: central server/git deps, VS Code ext/breakpoints, per-file timeout/CI gate.
 
 ### Go/Rust-level checklist (all things, with owner doc)
 
-| # | Area | Go bar | Rust bar | .ks v2.3 (honest) | Needed to close | Closes in |
+| # | Area | Go bar | Rust bar | .ks v2.4 (honest) | Needed to close | Closes in |
 |---|---|---|---|---|---|---|
-| 1 | Compiler | `go build` static bin | `rustc` LLVM + LTO | tree-walk (full, literal folding, 158 builtins) + VM subset (`.ksb-1`, no `go`/`sleep`/`import`/`try`/`switch`/`select`/`defer`/slices/`is`/`?.`/`??`/typed params/closure-capture) + `--bin` embed via `go build` | full VM → native AOT + real benchmarks | `futures.md` P1 runtime |
+| 1 | Compiler | `go build` static bin | `rustc` LLVM + LTO | tree-walk (full, union/generic types, extended folding, 170+ builtins) + VM subset (`.ksb-1`, no `go`/`sleep`/`import`/`try`/`switch`/`select`/`defer`/slices/`is`/`?.`/`??`/typed params/closure-capture) + `--bin` embed via `go build` | full VM → native AOT + real benchmarks | `futures.md` P1 runtime |
 | 2 | Targets | `GOOS/GOARCH` | tiers + WASM | `--target` GOOS/GOARCH passthrough + hash-skip cache + host `--cpuprofile` (needs Go toolchain) | WASM run polish, remote/incremental cache, reproducibles | `futures.md` P1 runtime |
 | 3 | Types | structs/interfaces/generics | traits/enums/`Result` | gradual `: type` + `is`/`?.`/`??` + `struct_validate/enum_create` + `vet`/`check` (no syntax structs/enums/generics) | structs/enums syntax/generics | `futures.md` P1 core |
 | 4 | Errors | multi-return | `Result/Option/?` | `ok/err` values + `error()`+`try/catch` + `assert_eq/ne/contains` | exhaustive `Result` checks | `futures.md` P0 done, P1 polish |
@@ -571,9 +570,9 @@ Still behind on full VM/AOT, LSP/debugger, DOM/HMR parity, native DB/WS-frames u
 | 12 | IDE | `gopls` | `rust-analyzer` | none | LSP + VS Code ext + debugger | `futures.md` P2 DX |
 | 13 | Frontend | `html/template`/WASM | WASM pkgs | console + `run-web` SSR (SSE full reload) + subset `build-js` + `build-ssg` + `use_state` shim + API funcs + budgets/manifest | DOM-diff/HMR + ISR/hydrate-full | `futures.md` P2 frontend |
 | 14 | FFI | `cgo` | `unsafe`/FFI | none | opt-in `ffi_*` + Go plugin API | `futures.md` P2 interop |
-| 15 | Stability | compat promise | editions | v2.3 source (shipped `release/fusion` stale v2.0) | rebuild release, RFC + semver + LTS | `futures.md` §5 |
+| 15 | Stability | compat promise | editions | v2.4 + stability.md/RFCs/LTS | rebuild release, RFC + semver + LTS | `futures.md` §5 |
 
-Close full VM + LSP + native DB/WS-frames + syntax structs/enums + stability hardening and `.ks` moves `78 → ~82–85/100` (Go/Rust-class).
+Close full VM/AOT + breakpoints/VS Code ext + WS-frames/pipes + syntax structs/enums + remote cache and `.ks` moves `87 → ~90–92/100`.
 Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
 
 ## Decision guide
@@ -586,9 +585,9 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
    Pure arithmetic/control-flow/funcs with no concurrency? → try `fusion compile --run` (VM subset; otherwise interpreter).
 6. Need `http/DB/net` today? → yes for basics: `http_*`/`fetch_json` (GET-only JSON helper), KV-file `db_*`, `exec/shell` (no pipes), `regex/crypto`, minimal `tcp/tls`, header-only `ws_connect`, `use_state`-minimal — see P1 stdlib (breadth done, depth left); need WS-frames/native DB/pipes/signals/`watch`/ticker/`tls_serve`? → wait.
 
-## Honest limits of `.ks` v2.3 (do not hide)
+## Honest limits of `.ks` v2.4 (do not hide)
 
-* Full language is tree-walk + literal folding (consts only), no JIT/LLVM codegen; `--bin`/`--target`/cache ride on `go build`
+* Full language is tree-walk + union/generic types + extended folding, no JIT/LLVM; `--bin`/`--target`/cache/repro ride on `go build`
   (needs Go toolchain; cache is whole-app hash-skip). Compiler v0.1 narrows but does not close this: `.ksb-1` is portable JSON run by
   `fusion` (not a static binary — that is `--bin`), subset-only (see §1 reject list), 7 user (+ 5 hidden) builtins, int `**` O(n) in the VM
   vs O(log n) in the interpreter, `maxFrames 1024` / `maxSteps 20M`.
