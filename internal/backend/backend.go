@@ -3370,6 +3370,49 @@ func sortLess(a, b Value) (bool, error) {
 	return false, fmt.Errorf("sort needs all numbers or all strings, got %s and %s", TypeName(a), TypeName(b))
 }
 
+func isSortedFast(items []Value) bool {
+	for i := 1; i < len(items); i++ {
+		less, err := sortLess(items[i], items[i-1])
+		if err != nil {
+			return false
+		}
+		if less {
+			return false
+		}
+	}
+	return true
+}
+
+// rangeArgs detects `range(...)` calls for loop fast path (v2.4 perf).
+func (in *Interpreter) rangeArgs(env *Env, e *frontend.Expr) (int, int, int, bool) {
+	if e == nil || e.Kind != frontend.ExprCall || e.Callee == nil || e.Callee.Kind != frontend.ExprVar || e.Callee.Name != "range" {
+		return 0, 0, 0, false
+	}
+	vals := make([]int, 0, len(e.Args))
+	for _, a := range e.Args {
+		v, err := in.eval(env, a)
+		if err != nil || v.Kind != VInt {
+			return 0, 0, 0, false
+		}
+		vals = append(vals, v.Int)
+	}
+	var start, end, step int
+	switch len(vals) {
+	case 1:
+		start, end, step = 0, vals[0], 1
+	case 2:
+		start, end, step = vals[0], vals[1], 1
+	case 3:
+		start, end, step = vals[0], vals[1], vals[2]
+		if step == 0 {
+			return 0, 0, 0, false
+		}
+	default:
+		return 0, 0, 0, false
+	}
+	return start, end, step, true
+}
+
 func bSort(in *Interpreter, args []Value) (Value, error) {
 	if err := needArgs("sort", args, 1, 1); err != nil {
 		return Nil(), err
@@ -3381,6 +3424,10 @@ func bSort(in *Interpreter, args []Value) (Value, error) {
 	defer args[0].Arr.Mu.Unlock()
 	items := args[0].Arr.Items
 	if len(items) < 2 {
+		return args[0], nil
+	}
+	// Skip when already sorted (v2.4 perf: O(n) best case for sorted inputs).
+	if isSortedFast(items) {
 		return args[0], nil
 	}
 	// Validate homogeneity once so the sort closure stays error-free
