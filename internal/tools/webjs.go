@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kswarrior/ks-fusion/internal/backend"
@@ -189,6 +190,10 @@ func renderRoute(cfg *config.Config, route string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Nested layouts (v2.4, Next.js analogue): wrap page with layout funcs.
+	// Convention: page vm may carry `layout: "admin"` -> call admin_layout(page);
+	// else if app_layout exists, wrap once (layouts/app.ks). _app.ks wraps all when present.
+	vm = applyLayouts(in, vm)
 	j, err := backend.ValueToJSONable(vm)
 	if err != nil {
 		return "", err
@@ -198,6 +203,62 @@ func renderRoute(cfg *config.Config, route string) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+func applyLayouts(in *backend.Interpreter, vm backend.Value) backend.Value {
+	// explicit layout field wins
+	if name := vmLayoutName(vm); name != "" {
+		if fn, ok := in.Lookup(name + "_layout"); ok {
+			if out, err := in.Call(fn, []backend.Value{vm}); err == nil {
+				return out
+			}
+		}
+	}
+	// _app.ks global wrapper (nested) then app_layout
+	for _, lname := range []string{"_app_layout", "app_layout"} {
+		if fn, ok := in.Lookup(lname); ok {
+			if out, err := in.Call(fn, []backend.Value{vm}); err == nil {
+				// only adopt if looks like view-model (map with type/children)
+				if isViewModel(out) {
+					vm = out
+				}
+			}
+		}
+	}
+	return vm
+}
+
+func vmLayoutName(vm backend.Value) string {
+	j, err := backend.ValueToJSONable(vm)
+	if err != nil {
+		return ""
+	}
+	if m, ok := j.(map[string]any); ok {
+		if l, ok := m["layout"].(string); ok {
+			return l
+		}
+		if props, ok := m["props"].(map[string]any); ok {
+			if l, ok := props["layout"].(string); ok {
+				return l
+			}
+		}
+	}
+	return ""
+}
+
+func isViewModel(v backend.Value) bool {
+	j, err := backend.ValueToJSONable(v)
+	if err != nil {
+		return false
+	}
+	m, ok := j.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, hasType := m["type"]
+	_, hasChildren := m["children"]
+	_, hasKey := m["key"]
+	return hasType || hasChildren || hasKey
 }
 
 func runAPIRoute(cfg *config.Config, name string) (string, error) {
@@ -262,9 +323,18 @@ func vmToHTMLWithWatch(vmJSON, route string, watch bool) string {
 	watchScript := ""
 	if watch {
 		watchScript = `<script>
-// v2.3 watch: SSE reload (<100ms aim, full reload v1)
-var es = new EventSource('/events');
-es.onmessage = function(e){ if((e.data||'').indexOf('reload')===0) location.reload(); };
+// v2.4 watch: SSE HMR patch (no full reload; debounce 1/tick)
+var es = new EventSource('/events?route=` + route + `');
+es.onmessage = function(e){
+  var d = e.data || '';
+  if(d.indexOf('reload')===0){ location.reload(); return; }
+  try{
+    var vm = JSON.parse(d);
+    document.getElementById('vm').textContent = JSON.stringify(vm, null, 2);
+    var app = document.getElementById('app'); app.innerHTML = '';
+    window.__renderVM ? window.__renderVM(vm, app) : location.reload();
+  }catch(err){ location.reload(); }
+};
 </script>`
 	}
 	return fmt.Sprintf(`<!doctype html>
@@ -341,6 +411,69 @@ func (w *webWatcher) loop() {
 			w.ver++
 		}
 	}
+}
+
+// ISR cache (v2.4): route -> rendered body with revalidate TTL.
+type isrEntry struct {
+	body    string
+	ctype   string
+	expires time.Time
+}
+
+type isrCache struct {
+	mu sync.Mutex
+	m  map[string]isrEntry
+}
+
+func newISRCache() *isrCache { return &isrCache{m: map[string]isrEntry{}} }
+
+func isrTTL(vmJSON string) time.Duration {
+	// convention: view-model props.revalidate = seconds (Next.js ISR analogue)
+	var v map[string]any
+	if err := json.Unmarshal([]byte(vmJSON), &v); err != nil {
+		return 0
+	}
+	var props map[string]any
+	if p, ok := v["props"].(map[string]any); ok {
+		props = p
+	} else {
+		props = v
+	}
+	if rv, ok := props["revalidate"]; ok {
+		switch n := rv.(type) {
+		case float64:
+			if n > 0 && n < 86400*30 {
+				return time.Duration(n * float64(time.Second))
+			}
+		}
+	}
+	return 0
+}
+
+func (c *isrCache) get(route, format string) (bool, string, string) {
+	key := route + "?format=" + format
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.m[key]
+	if !ok || time.Now().After(e.expires) {
+		return false, "", ""
+	}
+	return true, e.body, e.ctype
+}
+
+func (c *isrCache) put(route, format, body, vmJSON string) {
+	ttl := isrTTL(vmJSON)
+	if ttl <= 0 {
+		return
+	}
+	key := route + "?format=" + format
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ctype := "text/html; charset=utf-8"
+	if format == "json" {
+		ctype = "application/json"
+	}
+	c.m[key] = isrEntry{body: body, ctype: ctype, expires: time.Now().Add(ttl)}
 }
 
 // BuildSSG pre-renders routes to target/ssg/*.html + *.json (v2.3 P5).
