@@ -1,4 +1,4 @@
-// VM + bundle I/O for the ks-fusion compiler (v0.1 subset).
+// VM + bundle I/O for the ks-fusion compiler (v0.2 expanded subset).
 package compiler
 
 import (
