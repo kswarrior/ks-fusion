@@ -1136,6 +1136,60 @@ func applyAssignOp(old Value, op string, rhs Value) (Value, error) {
 }
 
 func (in *Interpreter) execForIn(env *Env, st *frontend.Stmt) error {
+	// Fast path (v2.4 perf): `for i in range(n)` without array alloc.
+	if start, end, step, ok := in.rangeArgs(env, st.Expr); ok {
+		loopEnv := newEnv(env)
+		two := len(st.Names) == 2
+		// for i in range -> single var; for i, v variant not used with range, treat second as value= index?
+		if step > 0 {
+			for i := start; i < end; i += step {
+				iterEnv := newEnv(loopEnv)
+				if two {
+					in.define(iterEnv, st.Names[0], IntV(i-start))
+					in.define(iterEnv, st.Names[1], IntV(i))
+				} else {
+					in.define(iterEnv, st.Names[0], IntV(i))
+				}
+				if err := in.execStmt(iterEnv, st.Body); err != nil {
+					if ce, ok := err.(*ctrlError); ok {
+						switch ce.kind {
+						case ctrlBreak:
+							return nil
+						case ctrlContinue:
+							continue
+						default:
+							return err
+						}
+					}
+					return err
+				}
+			}
+		} else {
+			for i := start; i > end; i += step {
+				iterEnv := newEnv(loopEnv)
+				if two {
+					in.define(iterEnv, st.Names[0], IntV(start-i))
+					in.define(iterEnv, st.Names[1], IntV(i))
+				} else {
+					in.define(iterEnv, st.Names[0], IntV(i))
+				}
+				if err := in.execStmt(iterEnv, st.Body); err != nil {
+					if ce, ok := err.(*ctrlError); ok {
+						switch ce.kind {
+						case ctrlBreak:
+							return nil
+						case ctrlContinue:
+							continue
+						default:
+							return err
+						}
+					}
+					return err
+				}
+			}
+		}
+		return nil
+	}
 	iter, err := in.eval(env, st.Expr)
 	if err != nil {
 		return err

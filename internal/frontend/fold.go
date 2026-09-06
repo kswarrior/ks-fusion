@@ -126,7 +126,28 @@ func foldExpr(e *Expr) *Expr {
 			return folded
 		}
 	}
+	// fold len("hi") -> 2, len([1,2]) -> 2 (v2.4 perf)
+	if e.Kind == ExprCall && e.Callee != nil && e.Callee.Kind == ExprVar && e.Callee.Name == "len" && len(e.Args) == 1 {
+		if n, ok := foldLen(e.Args[0]); ok {
+			return &Expr{Kind: ExprInt, IntVal: n}, true
+		}
+	}
 	return e
+}
+
+func foldLen(a *Expr) (int, bool) {
+	if a == nil {
+		return 0, false
+	}
+	switch a.Kind {
+	case ExprString:
+		return len([]rune(a.StrVal)), true
+	case ExprArray:
+		return len(a.Elements), true
+	case ExprMap:
+		return len(a.MapKeys), true
+	}
+	return 0, false
 }
 
 func foldBinary(kind ExprKind, l, r *Expr) (*Expr, bool) {
