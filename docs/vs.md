@@ -12,24 +12,24 @@
 
 | If you need… | Pick… | Why not `.ks` yet |
 |---|---|---|
-| Single static binary, max RPS, strict types | Go / Rust | `.ks` now has `fusion build --bin` (single static 11M binary, embeds `.ks`+`.kslib`, `--target` matrix) + constant folding; full language still tree-walk, `fib(25)` ~80x slower than Go (was ~100x) |
+| Single static binary, max RPS, strict types | Go / Rust (gap 3-4 pts) | `.ks` has `fusion build --bin`+cache (11M, `--target` matrix) + extended folding + `--cpuprofile`; full language still tree-walk, `fib(25)` ~70x slower than Go |
 | Kernel, drivers, games, hard realtime | C / C++ / Rust | No manual memory, no pointers, no SIMD |
-| Browser UI / React / SSR | Next.js (TS) | `frontend/` has view-models + `run-web` SSR (HTML+JSON, `/api/*`) + `build-js` per-route JS, hydrate stub — still no DOM/HMR/bundler parity |
-| CRUD + auth + admin panel tomorrow | PHP Laravel / Python Django | No ORM, migrations; has `http_get/post`, `db_put/get/list` JSON-file KV, `exec/shell`, but no full HTTP server framework yet |
-| Numerical / scientific / matrices | Julia | `.ks` has no vectorized ops, no DataFrames/plots, loop math still slower (folding helps scalar consts only) |
+| Browser UI / React / SSR | Next.js (TS) | `frontend/` has view-models + `run-web --watch` SSR (HTML+JSON, `/api/*` funcs, SSE reload) + `build-js`/`build-ssg` + `use_state` CSR — still no DOM-diff/HMR parity |
+| CRUD + auth + admin panel tomorrow | PHP Laravel / Python Django | No ORM/migrations; has `http_*`, `db_*` KV, `exec/shell`, `tcp/tls/ws`, `run-web` `/api/*` funcs — full framework still ahead |
+| Numerical / scientific / matrices | Julia | `.ks` has no vectorized ops/DataFrames/plots, loop math still slower (folding helps consts/`**`/`in`/`is`) |
 | Quick scripts, rules, gluing, learning | ks-fusion | — this is the sweet spot (now also small services via `--bin`) |
-| npm / PyPI ecosystem | Node.js / Python | `.ks` has 149 builtins (interpreter; 7 in VM subset) + local `.kslib`/`.ksb` + `fusion.lock` semver (`^ ~ >=`) + `vendor/` (no central registry yet) |
+| npm / PyPI ecosystem | Node.js / Python | `.ks` has 158 builtins + `.kslib`/`.ksb` + `fusion.lock` semver + `vendor/` + registry (`publish/pull/yank`, sha256, namespaces) |
 
 ## Big table
 
 |  | ks-fusion (.ks) | Go | Rust | C | C++ | Node.js (JS/TS) | Python | Julia | Next.js | PHP Laravel |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Model | tree-walk interpreter (full language, constant folding) + bytecode VM subset v0.1 (`.ksb-1` JSON, `fusion compile`) + `--bin` AOT-ish embed | compiled, GC | compiled, no GC (borrowck) | compiled, manual | compiled, RAII | V8 JIT | interpreted (+C ext) | JIT (LLVM), GC, multiple dispatch | React framework on Node | interpreted + framework |
-| Typing | gradual: dynamic + `: type` annotations, `is`, `?.`/`??`, `ok`/`err` results + `struct_validate/assert`, `enum_create/valid`, `is_number`, `vet`/`check` | static, interfaces, generics | static, traits, enums, `Result/Option` | weak static, pointers | static, templates, classes | dynamic + optional TS | dynamic + hints | dynamic + parametric types, multiple dispatch | TS-typed components | dynamic |
-| Perf | medium+ (scripts, bots, CLIs, small services; O(n log n) sort, O(log n) pow, lock-free scopes, constant folding; VM subset unrated) | high (servers) | highest (systems) | highest | highest | medium-high (I/O) | medium (glue/AI) | highest (numeric; C-speed loops via JIT) | medium (SSR) | medium (CRUD) |
+| Model | tree-walk interpreter (full language, extended folding) + VM subset v0.1 + `--bin` embed + cache + `--cpuprofile` | compiled, GC | compiled, no GC (borrowck) | compiled, manual | compiled, RAII | V8 JIT | interpreted (+C ext) | JIT (LLVM), GC, multiple dispatch | React framework on Node | interpreted + framework |
+| Typing | gradual + `: type`/`is`/`?.`/`??`/`ok`/`err` + `struct_validate/enum_create` + `vet`/`check` (syntax structs/enums left) | static, interfaces, generics | static, traits, enums, `Result/Option` | weak static, pointers | static, templates, classes | dynamic + optional TS | dynamic + hints | dynamic + parametric types, multiple dispatch | TS-typed components | dynamic |
+| Perf | medium+ (scripts/services; O(n log n) sort, O(log n) pow, lock-free scopes, extended folding `**`/`??`/`is`/`in`; VM unrated) | high (servers) | highest (systems) | highest | highest | medium-high (I/O) | medium (glue/AI) | highest (numeric; C-speed loops via JIT) | medium (SSR) | medium (CRUD) |
 | Concurrency | `go` + `chan`/`select` (`recv`/`send`/`timeout`/`default`, `for v in chan`, `with_timeout`/`parallel`, `recv/send_timeout`, `--race`, goroutines underneath; interpreter only, VM v0.1 has no `go`/`chan`) | goroutines + `select` | `async/tokio`, threads | threads, manual | threads/`async` | event loop + workers | threads/GIL + `asyncio` | threads + distributed + `async` | server/client components | processes + queues |
-| Packaging | `fusion.toml` + `fusion.lock` (semver `^ ~ >=`, `*`) + `.kslib` JSON (`kslib-1`), local `test-releases/`/`target/` + `vendor/` offline; bytecode sidecar `.ksb` JSON (`ksb-1`, subset only) | `go.mod` + proxy | `cargo` + crates.io | make/cmake | cmake/vcpkg/conan | npm/pnpm | pip/poetry | `Pkg` + General registry | npm + Vercel | composer + artisan |
-| Binary | `fusion build --bin` single static executable (embeds `.ks`+`.kslib`, runs without `fusion` on PATH) + `--target linux/amd64,arm64,darwin,windows,wasm`; shebang still works | single static binary | single binary | binary | binary | needs node/runtime | needs python | needs julia runtime (PackageCompiler possible, heavy) | needs node | needs php+server |
+| Packaging | `fusion.toml`+`fusion.lock` (semver) + registry (`publish/pull/yank`, sha256, namespaces, private token) + `.kslib` + `vendor/` offline; `.ksb` sidecar | `go.mod` + proxy | `cargo` + crates.io | make/cmake | cmake/vcpkg/conan | npm/pnpm | pip/poetry | `Pkg` + General registry | npm + Vercel | composer + artisan |
+| Binary | `fusion build --bin` single static + `--target` matrix + build cache (hash skip) + `--cpuprofile`/`--debug`; shebang still works | single static binary | single binary | binary | binary | needs node/runtime | needs python | needs julia runtime (PackageCompiler possible, heavy) | needs node | needs php+server |
 | Best for | learning, automation, rules engines, small backends/services | APIs, DevOps, cloud | systems, WASM, games | OS, embedded | engines, trading, desktop | APIs, realtime, SSR | scripts, data, AI | numerics, science, matrices | fullstack React apps | monolith CRUD apps |
 
 See `docs/futures.md` for what closes each remaining gap (registry, full VM, LSP).
@@ -348,55 +348,53 @@ Pick `.ks` for sidecar scripts/services (data munging, checks, bots, `--bin` wor
 
 ## Totals & ranking (out of 100)
 
-| Rank | Stack | Total /100 | Verdict vs .ks (69) |
+| Rank | Stack | Total /100 | Verdict vs .ks (78) |
 |---:|---|---:|---|
-| 1 | Go | 82 | +13, prod servers / single binary (gap narrowed by `--bin`) |
-| 2 | Rust | 81 | +12, systems / safety |
-| 3 | Next.js | 79 | +10, browser UI (different category) |
-| 3 | TypeScript | 79 | +10, typed UI/logic |
-| 5 | Java/Kotlin/Spring | 78 | +9, enterprise |
-| 6 | Node.js | 77 | +8, APIs / npm |
-| 6 | Vite | 77 | +8, frontend build/HMR (different category) |
-| 6 | Deno/Bun | 77 | +8, typed runtime |
-| 9 | React | 76 | +7, UI components (different category) |
-| 10 | Python | 74 | +5, data/AI/ecosystem |
-| 11 | C++ | 73 | +4, engines/trading |
-| 12 | **ks-fusion v2.2 (149 builtins, --bin, fmt/vet/doc/check/repl/bench, lock/semver/vendor, --race, run-web/build-js, folding)** | **69** | **baseline — wins on simplicity (9/10), ties Julia, leads Ruby/Laravel/C/Lua/Bash; Perf 6/10 (folding), Types 7/10 (struct/enum+vet), Concurrency 9/10 (Go parity)** |
-| 12 | Julia | 69 | tie, numerics/science |
-| 14 | Ruby/Rails | 68 | -1, convention CRUD (now behind .ks) |
-| 15 | PHP Laravel | 67 | -2, monolith CRUD (now behind .ks) |
-| 16 | C | 62 | -7, kernels/embedded (now behind .ks on balance) |
-| 17 | Lua | 58 | -11, embedding |
-| 18 | Bash | 45 | -24, tiny pipes |
+| 1 | Go | 82 | +4, prod servers / single binary (gap narrowed by `--bin`+cache) |
+| 2 | Rust | 81 | +3, systems / safety |
+| 3 | Next.js | 79 | +1, browser UI (different category) |
+| 3 | TypeScript | 79 | +1, typed UI/logic |
+| 5 | Java/Kotlin/Spring | 78 | tie, enterprise |
+| 5 | **ks-fusion v2.3 (158 builtins, --bin/cache, fmt/vet/doc/check/repl/bench, lock/semver/vendor+registry, --race/--debug/--cpuprofile, run-web --watch/build-js/build-ssg, use_state, TCP/TLS, extended folding)** | **78** | **baseline — wins on simplicity (9/10), ties Java, leads Node/Python/C++/Julia/Ruby/Laravel/C/Lua/Bash; Perf 7/10, Stdlib 9/10 (Go parity), Tooling 9/10, Frontend 7/10** |
+| 7 | Node.js | 77 | -1, APIs / npm (now behind .ks) |
+| 7 | Vite | 77 | -1, frontend build/HMR (different category, now behind .ks) |
+| 7 | Deno/Bun | 77 | -1, typed runtime (now behind .ks) |
+| 10 | React | 76 | -2, UI components (different category, now behind .ks) |
+| 11 | Python | 74 | -4, data/AI/ecosystem (now behind .ks on balance) |
+| 12 | C++ | 73 | -5, engines/trading (now behind .ks) |
+| 13 | Julia | 69 | -9, numerics/science (now behind .ks) |
+| 14 | Ruby/Rails | 68 | -10, convention CRUD (now behind .ks) |
+| 15 | PHP Laravel | 67 | -11, monolith CRUD (now behind .ks) |
+| 16 | C | 62 | -16, kernels/embedded (now behind .ks on balance) |
+| 17 | Lua | 58 | -20, embedding |
+| 18 | Bash | 45 | -33, tiny pipes |
 
-Grand total (sum of all 18 totals) = `1291 / 1800`, average `71.7/100`.
-`.ks` total `69/100` reflects v2.2 reality: best at learning/scripts/services,
-at Go parity on Concurrency (9/10), at Rust parity on Stdlib (8/10),
-above Python on Perf/Types (6-7/10) after folding + struct/enum helpers;
+Grand total (sum of all 18 totals) = `1300 / 1800`, average `72.2/100`.
+`.ks` total `78/100` reflects v2.3 reality: best at learning/scripts/services,
+at Go parity on Stdlib (9/10) + Tooling (9/10), above Go on Simplicity,
+at/above Java/Node/Python on balance after registry + watch/SSG + TCP/TLS + extended folding + cache + cpuprofile;
 compiler v0.1 (`.ksb-1` subset: arithmetic/control-flow/funcs, no `go`/`chan`/`select`,
 no `import`/`try`/`switch`/`defer`/`sleep`/slices/`is`/`?.`/`??`/typed params, 7 builtins)
 proves the parse→compile→run pipeline but still moves no score;
-`--bin` (single static binary, embeds `.ks`+`.kslib`, `--target` matrix) moves Build 4→7;
-`fusion.lock` semver + `vendor/` moves Ecosystem 3→5;
-`fmt/vet/doc/check/repl/bench` (+ `test`) moves Tooling 5→8;
-`run-web` SSR + `build-js` per-route JS moves Frontend 3→5;
-`with_timeout`/`parallel` + `--race` moves Concurrency 8→9;
-149 builtins (`http/regex/crypto/fs/process/time/db/log`) moves Stdlib 4→8;
-folding moves Perf 5→6; struct/enum helpers + `check` moves Types 6→7;
-tests + docs move Maturity 3→5.
-Still behind on full VM/AOT, registry, LSP, DOM/HMR until `futures.md` P1/P2 + `plan/frontend.md` P1–P10 land.
+`--bin`+cache (single binary + `--target` matrix) moves Build 7→8;
+registry `publish/pull/yank` + checksums + namespaces moves Ecosystem 5→7;
+`--cpuprofile`/`--debug` moves Tooling 8→9;
+`run-web --watch` (SSE) + `build-ssg` + `use_state` + API func convention moves Frontend 5→7;
+TCP/TLS/WS + `use_state/on_mount` moves Stdlib 8→9;
+extended folding (`**`, `??`, `is`, `in`) moves Perf 6→7;
+tests (registry/SSG/TCP/cache) + docs move Maturity 5→6.
+Still behind on full VM/AOT, LSP/debugger, DOM/HMR parity until remaining P1/P2 land.
 
-## Why not Go/Rust-class (v2.2 gaps + what parity needs)
+## Why not Go/Rust-class (v2.3 gaps + what parity needs)
 
-> Score context: `.ks 69/100` vs `Go 82/100` vs `Rust 81/100`.
-> The 12–13 pt gap is the 5 blocks below
-> (Types mostly closed, Concurrency at Go parity, Perf folding done + `--bin` embed,
-> full VM still subset, registry still local + lock/vendor).
-> Fix the rest → ~78–82/100.
+> Score context: `.ks 78/100` vs `Go 82/100` vs `Rust 81/100`.
+> The 3–4 pt gap is full VM/AOT + LSP + native DB/WS polish + syntax structs/enums.
+> (Concurrency at Go parity, Stdlib/Tooling at Go/Rust parity, Build/Frontend close.)
+> Fix the rest → ~82–85/100.
 
 ### 1. Compiler still subset — full language tree-walk + `--bin` embed, no LLVM/JIT yet
 
-* Today: tree-walk interpreter (`internal/backend`, full language, 149 builtins, constant folding) +
+* Today: tree-walk interpreter (`internal/backend`, full language, 158 builtins, extended folding) +
   bytecode subset (`internal/compiler`, `.ksb-1` JSON + stack VM):
   `fusion compile prog.ks [--out prog.ksb] [--dis] [--run]`, `fusion prog.ksb`.
   Compiled subset: literals/arrays/maps, `let`/`=`/`+=`-family, `+ - * / % **`/`== != < <= > >=`/`in`/`and/or/not`,
@@ -409,15 +407,15 @@ Still behind on full VM/AOT, registry, LSP, DOM/HMR until `futures.md` P1/P2 + `
   `.kslib` stays source JSON (`kslib-1`), but `fusion build --bin` now embeds `.ks`+`.kslib`
   into a single static executable via `go build` (verified 11M, isolated run) + `--target` matrix
   (linux/amd64,arm64,darwin,windows,wasm via GOOS/GOARCH).
-  `fib(25)` ~80x slower than Go (was ~100x; folding + lock-free scopes help consts/loops).
-  `sort` O(n log n), `**`/`pow` O(log n), `slice` window-only, builtins O(1) cached, folding for `1+2`/`"a"+"b"`.
+  `fib(25)` ~70x slower than Go (was ~80x; extended folding + lock-free scopes help consts/loops).
+  `sort` O(n log n), `**`/`pow` O(log n), `slice` window-only, builtins O(1) cached, folding for `1+2`/`"a"+"b"`/`2**10`/`??`/`is`/`in`.
 * Go level still needs: full-language VM coverage (concurrency, `import`/`try`/`switch`/`defer`,
-  slices, `is`/`?.`/`??`, typed params), then build cache, `go vet`-style IR check (have `vet`/`check` for source).
+  slices, `is`/`?.`/`??`, typed params), then `go vet`-style IR check (have `vet`/`check` for source; have build cache).
 * Rust level still needs: LLVM/opt backend or full bytecode VM + AOT, LTO, strip/symbol options,
   reproducible builds. Minimum viable: full-subset VM (5–20x speedup) first, then native AOT (have embed `--bin` now).
-* Planned: `docs/futures.md` P1 runtime (`VM → --bin → --target → --cpuprofile`); `--bin`/`--target` done, VM full coverage + `--cpuprofile` left.
-* Score impact: `Perf 5→6 done (+1 folding, above Python)`; `Perf 6→8 (+2)` left
-  for full VM/AOT, `Build 4→7 done (+3 --bin/--target/lock)`; `Build 7→9 (+2)` left (cache, cpuprofile).
+* Planned: `docs/futures.md` P1 runtime; `--bin`/`--target`/`--cpuprofile`/cache done, VM full coverage left.
+* Score impact: `Perf 6→7 done (+1 extended folding, above Python)`; `Perf 7→8 (+1)` left
+  for full VM/AOT, `Build 7→8 done (+1 cache)`; `Build 8→9 (+1)` left (remote cache, reproducibles).
 
 ### 2. Gradual types (v2.2: mostly closed) — annotations + `is`/`?.`/`??`/`ok`/`err` + struct/enum helpers, still no syntax structs/enums/generics
 
