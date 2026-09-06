@@ -325,17 +325,15 @@ func vmToHTMLWithWatch(vmJSON, route string, watch bool) string {
 	watchScript := ""
 	if watch {
 		watchScript = `<script>
-// v2.4 watch: SSE HMR patch (no full reload; debounce 1/tick)
-var es = new EventSource('/events?route=` + route + `');
+// v2.5 watch: SSE keyed patches applied as DOM diff (no reload path).
+var es = new EventSource('/events?route=` + encodeURIComponent(route) + `');
 es.onmessage = function(e){
-  var d = e.data || '';
-  if(d.indexOf('reload')===0){ location.reload(); return; }
   try{
-    var vm = JSON.parse(d);
-    document.getElementById('vm').textContent = JSON.stringify(vm, null, 2);
-    var app = document.getElementById('app'); app.innerHTML = '';
-    window.__renderVM ? window.__renderVM(vm, app) : location.reload();
-  }catch(err){ location.reload(); }
+    var msg = JSON.parse(e.data);
+    if(msg.ops){ window.__applyPatch ? window.__applyPatch(msg.ops) : window.__banner('patch runtime missing'); }
+    else if(msg.vm){ window.__renderVM ? window.__renderVM(msg.vm, document.getElementById('app')) : window.__banner('render runtime missing'); }
+    else if(msg.reload){ window.__banner('stale client: refresh to update'); }
+  }catch(err){ window.__banner('update failed: ' + err.message); }
 };
 </script>`
 	}
