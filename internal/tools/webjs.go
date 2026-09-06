@@ -645,6 +645,47 @@ func (c *isrCache) get(route, format string) (bool, string, string) {
 	return true, e.body, e.ctype
 }
 
+// getStale returns the entry even when expired (serve-stale-while-revalidate).
+func (c *isrCache) getStale(route, format string) (string, string, bool) {
+	key := route + "?format=" + format
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.m[key]
+	if !ok {
+		return "", "", false
+	}
+	return e.body, e.ctype, true
+}
+
+// kickRefresh triggers one async refresh of key unless already running.
+func (c *isrCache) kickRefresh(route, format string) {
+	key := route + "?format=" + format
+	c.mu.Lock()
+	if c.refreshing[key] || c.regen == nil {
+		c.mu.Unlock()
+		return
+	}
+	c.refreshing[key] = true
+	regen := c.regen
+	c.mu.Unlock()
+	go func() {
+		defer func() {
+			c.mu.Lock()
+			delete(c.refreshing, key)
+			c.mu.Unlock()
+		}()
+		body, ctype, vmJSON, ok := regen(route, format)
+		if !ok {
+			return
+		}
+		if ttl := isrTTL(vmJSON); ttl > 0 {
+			c.mu.Lock()
+			c.m[key] = isrEntry{body: body, ctype: ctype, expires: time.Now().Add(ttl)}
+			c.mu.Unlock()
+		}
+	}()
+}
+
 func (c *isrCache) put(route, format, body, vmJSON string) {
 	ttl := isrTTL(vmJSON)
 	if ttl <= 0 {
