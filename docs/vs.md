@@ -53,12 +53,12 @@ Simplicity + Build/Deploy + Frontend + Maturity = 100`.
 | Concurrency | 8 | 9 | 8 | 5 | 7 | 7 | 5 | 7 | 6 | 4 |
 | Stdlib | 4 | 9 | 8 | 6 | 8 | 8 | 10 | 8 | 8 | 8 |
 | Ecosystem | 3 | 8 | 8 | 6 | 7 | 10 | 10 | 7 | 10 | 8 |
-| Tooling | 4 | 9 | 9 | 7 | 8 | 9 | 8 | 7 | 9 | 8 |
+| Tooling | 5 | 9 | 9 | 7 | 8 | 9 | 8 | 7 | 9 | 8 |
 | Simplicity | 9 | 7 | 5 | 4 | 4 | 7 | 10 | 7 | 6 | 8 |
 | Build/Deploy | 4 | 10 | 9 | 8 | 8 | 6 | 5 | 5 | 7 | 6 |
 | Frontend | 3 | 5 | 6 | 2 | 4 | 8 | 5 | 4 | 10 | 7 |
 | Maturity | 3 | 9 | 8 | 9 | 9 | 9 | 10 | 7 | 8 | 8 |
-| **Total /100** | **49** | **82** | **81** | **62** | **73** | **77** | **74** | **69** | **79** | **67** |
+| **Total /100** | **50** | **82** | **81** | **62** | **73** | **77** | **74** | **69** | **79** | **67** |
 
 Extra stacks (same rubric): `TypeScript 79`, `Java/Kotlin/Spring 78`,
 `Vite 77`, `Deno/Bun 77`, `React 76`, `Lua 58`, `Ruby/Rails 68`, `Bash 45`.
@@ -310,7 +310,7 @@ Do not reimplement React in `.ks` — explicit non-goal in `futures.md`.
 **Score: ks-fusion 49/100 vs Vite 77/100 — Vite wins by 28 (different category).**
 
 Vite = instant HMR dev server + `esbuild`/Rollup bundler + plugin ecosystem.
-`fusion` = `new/run/build/launch` (+ `compile --dis/--run` subset) for `.ks` only,
+`fusion` = `new/run/build/launch` (+ `compile --dis/--run` subset, `test` TAP runner) for `.ks` only,
 no HMR, no bundling, no CSS/DOM. P0 adds the file layout (`pages/components/layouts/store`)
 and `fusion new` scaffolds it, but no watcher/bundler yet.
 
@@ -463,16 +463,17 @@ still behind everywhere else until `futures.md` P0/P1 + `plan/frontend.md` P1–
 ### 5. No ecosystem — local file search only, no registry/resolver/LSP
 
 * Today: `fusion.toml` + newest local `test-releases/<name>-<ver>.kslib` wins,
-  no lockfile, no semver range, no `fmt/vet/test/bench/doc/repl/LSP/debugger/profiler`.
+  no lockfile, no semver range, no `fmt/vet/bench/doc/repl/LSP/debugger/profiler` —
+  but `fusion test` exists (`*_test.ks` + `assert`, TAP, per-file isolation), so
+  Tooling is 5/10 (was 4 before the runner; `fmt`/`vet` still missing).
   New since v2.1 text: `fusion compile --dis/--run` + `fusion prog.ksb` (disassembler,
-  save/load roundtrip) — first tooling beyond `new/run/build`, Tooling stays 4/10 until
-  `fmt/vet/test` land.
+  save/load roundtrip) + `fusion test`.
 * Go level needs: proxy-style registry + checksums, `fusion.lock`, `^/~ />=` resolver,
   `vendor/`, `fusion fmt/vet/test/bench/doc`, `cpuprofile`, VS Code ext.
 * Rust level needs: `cargo publish/yank`, namespaces (`scope/name`), yank + audit,
   docs.rs-like docs, criterion-style benches.
 * Planned: `futures.md` P0 tooling + P2 registry/DX.
-* Score impact: `Ecosystem 3→8 (+5)`, `Tooling 4→9 (+5)`, `Maturity 3→8 (+5)`.
+* Score impact: `Ecosystem 3→8 (+5)`, `Tooling 5→9 (+4 left; test done)`, `Maturity 3→8 (+5)`.
 
 ### Go/Rust-level checklist (all things, with owner doc)
 
@@ -488,7 +489,7 @@ still behind everywhere else until `futures.md` P0/P1 + `plan/frontend.md` P1–
 | 8 | Stdlib OS | `os/exec` | `std::process` | `sleep/exit` only (+ files/`argv`/`env`/`input`) | `exec`/pipes/signals, full `fs` | `futures.md` P1 stdlib |
 | 9 | Data | `encoding/*` | `serde` | `json_*` only | schema validation, `regex`, `crypto`, `sqlite/postgres` | `futures.md` P1 stdlib |
 | 10 | Packages | proxy + `go.sum` | crates.io + lock | local newest-wins (`.kslib`); `.ksb` is per-file, not a package | registry + `fusion.lock` + semver + vendor | `futures.md` P0+P2 |
-| 11 | Tooling | `fmt/vet/test/bench/pprof` | `clippy/fmt/bench` | `new/run/build` + `compile --dis/--run` (subset) | `fmt/vet/test/bench/doc/repl` | `futures.md` P0+P2 DX |
+| 11 | Tooling | `fmt/vet/test/bench/pprof` | `clippy/fmt/bench` | `new/run/build/launch` + `compile --dis/--run` (subset) + `test` (`*_test.ks`, TAP) | `fmt/vet/test/bench/doc/repl` | `futures.md` P0+P2 DX |
 | 12 | IDE | `gopls` | `rust-analyzer` | none | LSP + VS Code ext + debugger | `futures.md` P2 DX |
 | 13 | Frontend | `html/template`/WASM | WASM pkgs | console `frontend/` | `--web` reload + `--js` subset + React/Vite/Next.js pattern | `futures.md` P2 frontend |
 | 14 | FFI | `cgo` | `unsafe`/FFI | none | opt-in `ffi_*` + Go plugin API | `futures.md` P2 interop |
