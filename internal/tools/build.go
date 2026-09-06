@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kswarrior/ks-fusion/internal/config"
 )
@@ -377,17 +378,16 @@ func BuildBin(appDir, out, target string) error {
 		}
 		embeds = append(embeds, binEmbedded{Rel: filepath.ToSlash(rel), Data: string(data)})
 	}
-	// generate main.go
-	tmpDir, err := os.MkdirTemp("", "fusion-bin-*")
-	if err != nil {
+	// generate main.go inside module (internal/ import rule: must build within module)
+	modRoot := findModuleRoot()
+	tmpName := fmt.Sprintf("tmp-fusion-bin-%d", time.Now().UnixNano())
+	tmpDir := filepath.Join(modRoot, tmpName)
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
 		return err
 	}
 	defer os.RemoveAll(tmpDir)
 	gen := buildBinMain(cfg.Name, string(tomlData), embeds, cfg.BackendEntry, cfg.FrontendEntry)
 	if err := os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte(gen), 0o644); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module fusionbin\n\ngo 1.24\nrequire github.com/kswarrior/ks-fusion v0.0.0\nreplace github.com/kswarrior/ks-fusion => "+findModuleRoot()+"\n"), 0o644); err != nil {
 		return err
 	}
 	if out == "" {
@@ -400,17 +400,8 @@ func BuildBin(appDir, out, target string) error {
 	if err != nil {
 		return err
 	}
-	// tidy first (resolve replace -> local path)
-	tidy := exec.Command("go", "mod", "tidy")
-	tidy.Dir = tmpDir
-	tidy.Env = os.Environ()
-	tidy.Stdout = os.Stdout
-	tidy.Stderr = os.Stderr
-	if err := tidy.Run(); err != nil {
-		return fmt.Errorf("go mod tidy failed: %w", err)
-	}
-	cmd := exec.Command("go", "build", "-o", absOut, ".")
-	cmd.Dir = tmpDir
+	cmd := exec.Command("go", "build", "-o", absOut, "./"+tmpName)
+	cmd.Dir = modRoot
 	env := os.Environ()
 	if target != "" && target != "host" {
 		goos, goarch := parseTarget(target)
