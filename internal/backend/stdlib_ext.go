@@ -1001,7 +1001,7 @@ func bStructValidate(in *Interpreter, args []Value) (Value, error) {
 		if !ok {
 			return BoolV(false), nil
 		}
-		if !matchesTypeNullable(v, typVal.Str) {
+		if !in.matchesTypeNullable(v, typVal.Str) {
 			return BoolV(false), nil
 		}
 	}

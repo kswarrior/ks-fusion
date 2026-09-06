@@ -1045,10 +1045,10 @@ func (p *parser) parseStructOrEnum() (*Stmt, error) {
 	kw := p.next() // struct | enum
 	nameTok := p.peek()
 	if nameTok.K != tIdent {
-		return "", p.errf(nameTok, "bad %s: want `Name`, got %q", kw.Lit, nameTok.Lit)
+		return nil, p.errf(nameTok, "bad %s: want `Name`, got %q", kw.Lit, nameTok.Lit)
 	}
 	if !isNominalType(nameTok.Lit) {
-		return "", p.errf(nameTok, "bad %s name %q: want Capitalized (e.g. `User`)", kw.Lit, nameTok.Lit)
+		return nil, p.errf(nameTok, "bad %s name %q: want Capitalized (e.g. `User`)", kw.Lit, nameTok.Lit)
 	}
 	p.next()
 	name := nameTok.Lit

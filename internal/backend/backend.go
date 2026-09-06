@@ -3219,7 +3219,7 @@ func bIsType(in *Interpreter, args []Value) (Value, error) {
 	if args[1].Kind != VString {
 		return Nil(), fmt.Errorf("is_type wants (value, type-string), got (..., %s)", TypeName(args[1]))
 	}
-	if !validType(args[1].Str) {
+	if !validTypeIn(args[1].Str, in) {
 		return Nil(), fmt.Errorf("unknown type %q (want nil|bool|int|float|number|string|array|map|func|chan|any|ok|err)", args[1].Str)
 	}
 	return BoolV(in.matchesTypeStrict(args[0], args[1].Str)), nil
@@ -3232,7 +3232,7 @@ func bAssertType(in *Interpreter, args []Value) (Value, error) {
 	if args[1].Kind != VString {
 		return Nil(), fmt.Errorf("assert_type wants (value, type-string), got (..., %s)", TypeName(args[1]))
 	}
-	if !validType(args[1].Str) {
+	if !validTypeIn(args[1].Str, in) {
 		return Nil(), fmt.Errorf("unknown type %q (want nil|bool|int|float|number|string|array|map|func|chan|any|ok|err)", args[1].Str)
 	}
 	if !in.matchesTypeStrict(args[0], args[1].Str) {
