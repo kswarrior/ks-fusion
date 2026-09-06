@@ -119,8 +119,8 @@ func TestExecPipesSplit(t *testing.T) {
 	mustRunV25(t, `
 let r = exec_pipes("sh", ["-c", "echo out; echo err 1>&2"], nil)
 assert(r.code == 0)
-assert(r.stdout == "out\\n")
-assert(r.stderr == "err\\n")
+assert(r.stdout == "out\n")
+assert(r.stderr == "err\n")
 let e = exec_pipes("sh", ["-c", "cat"], "hello stdin")
 assert(e.stdout == "hello stdin")
 assert(e.code == 0)
@@ -132,7 +132,7 @@ func TestSpawnWaitKill(t *testing.T) {
 let id = spawn("sh", ["-c", "echo hi"])
 let r = proc_wait(id)
 assert(r.code == 0)
-assert(r.stdout == "hi\\n")
+assert(r.stdout == "hi\n")
 `)
 	mustRunV25(t, `
 let id = spawn("sh", ["-c", "sleep 30"])
