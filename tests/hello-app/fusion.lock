@@ -1,0 +1,10 @@
+{
+  "packages": [
+    {
+      "name": "hello-lib",
+      "version": "test-releases/hello-lib-0.1.0.kslib",
+      "path": "test-releases/hello-lib-0.1.0.kslib"
+    }
+  ],
+  "version": 1
+}
