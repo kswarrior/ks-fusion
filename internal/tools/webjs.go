@@ -44,6 +44,7 @@ func RunWebWithWatch(appDir string, port int, watch bool) error {
 		w.Header().Set("Connection", "keep-alive")
 		fl, _ := w.(http.Flusher)
 		last := watcher.version()
+		var lastSent string
 		tick := time.NewTicker(300 * time.Millisecond)
 		defer tick.Stop()
 		for {
@@ -52,12 +53,21 @@ func RunWebWithWatch(appDir string, port int, watch bool) error {
 				return
 			case <-tick.C:
 				if v := watcher.version(); v != last {
-					// HMR patch (v2.4): send fresh view-model, client patches DOM
-					if vmJSON, err := renderRoute(cfg, route); err == nil {
-						// debounce: 1 render/tick already via 300ms poll
-						fmt.Fprintf(w, "data: %s\n\n", vmJSON)
+					// HMR patch (v2.5): keyed server diff, client patches DOM.
+					vmJSON, err := renderRoute(cfg, route)
+					if err != nil {
+						// render broken: tell the client to banner, never force-reload
+						fmt.Fprintf(w, "data: %s\n\n", `{"reload":true}`)
+					} else if lastSent == "" {
+						fmt.Fprintf(w, "data: %s\n\n", `{"vm":`+vmJSON+`}`)
+						lastSent = vmJSON
+					} else if ops, derr := DiffViewModels(lastSent, vmJSON); derr != nil {
+						fmt.Fprintf(w, "data: %s\n\n", `{"vm":`+vmJSON+`}`)
+						lastSent = vmJSON
 					} else {
-						fmt.Fprintf(w, "data: reload %d\n\n", v)
+						opsJSON, _ := json.Marshal(ops)
+						fmt.Fprintf(w, "data: %s\n\n", `{"ops":`+string(opsJSON)+`,"vm":`+vmJSON+`}`)
+						lastSent = vmJSON
 					}
 					if fl != nil {
 						fl.Flush()
@@ -330,8 +340,8 @@ var es = new EventSource('/events?route=' + encodeURIComponent("` + route + `"))
 es.onmessage = function(e){
   try{
     var msg = JSON.parse(e.data);
-    if(msg.ops){ window.__applyPatch ? window.__applyPatch(msg.ops) : window.__banner('patch runtime missing'); }
-    else if(msg.vm){ window.__renderVM ? window.__renderVM(msg.vm, document.getElementById('app')) : window.__banner('render runtime missing'); }
+    if(msg.ops && msg.vm && window.__applyPatch){ window.__applyPatch(msg.ops); window.__currentVM = msg.vm; document.getElementById('vm').textContent = JSON.stringify(msg.vm); }
+    else if(msg.vm && window.__renderVM){ window.__renderVM(msg.vm, document.getElementById('app')); }
     else if(msg.reload){ window.__banner('stale client: refresh to update'); }
   }catch(err){ window.__banner('update failed: ' + err.message); }
 };
@@ -413,9 +423,16 @@ es.onmessage = function(e){
         if(!s){ s = document.createElement('span'); s.className = 'txt'; el.appendChild(s); }
         s.textContent = op.value == null ? '' : String(op.value);
       } else if(op.op === 'setProp' && el){
-        var props = {}; props[op.prop] = op.value;
-        paintProps(el, {props: props});
-        if(op.value == null) el.removeAttribute('data-prop-' + op.prop);
+        if(op.prop === 'title'){
+          var h = el.querySelector(':scope > h1');
+          if(op.value == null){ if(h) h.parentNode.removeChild(h); }
+          else { if(!h){ h = document.createElement('h1'); el.insertBefore(h, el.firstChild); } h.textContent = String(op.value); }
+        } else if(op.prop === 'text'){
+          var t = el.querySelector(':scope > .txt');
+          if(op.value == null){ if(t) t.parentNode.removeChild(t); }
+          else { if(!t){ t = document.createElement('span'); t.className = 'txt'; el.appendChild(t); } t.textContent = String(op.value); }
+        } else if(op.value == null){ el.removeAttribute('data-prop-' + op.prop); }
+        else { el.setAttribute('data-prop-' + op.prop, String(op.value)); }
       } else if(op.op === 'replace' && el){
         var fresh = build(op.value);
         dropKeys(el);
@@ -443,7 +460,6 @@ es.onmessage = function(e){
         if(ref) bx.insertBefore(el, ref); else bx.appendChild(el);
       }
     });
-    document.getElementById('vm').textContent = JSON.stringify(window.__currentVM);
   }
   window.__applyPatch = applyPatch;
   window.__renderVM = function(v, root){
