@@ -153,7 +153,7 @@ What the `.ks` 87 does and does not mean (read before citing 87; v2.5 evidence f
   React/Vite HMR-diff still ahead.
 - Maturity 8 = “release v2.5 + CI gate + hardening” (v2.5 evidence §E7):
   `release/fusion` rebuilt (`ks-fusion v2.5`), per-file `fusion test --timeout`
-  (`main.go:1093` `runTestFileTimeout`), repeat-safe TCP
+  (`main.go:1098` `runTestFileTimeout`), repeat-safe TCP
   (`stdlib_ext2_test.go:32` port 0 + `tcp_shutdown`; `-count=3` green),
   CI gate (`ci.sh`: vet + `go test` + repeat + fmt + vet/check).
   Still: TLS/WS-server/`--bin`/`--target` E2E gaps remain. 8 holds.

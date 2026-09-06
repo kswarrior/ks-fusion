@@ -20,7 +20,7 @@
 
 - [x] Tree-walk opts (lock-free scopes, O(n log n) sort, O(log n) pow)
 - [x] Compiler v0.1 subset (`.ksb-1`, 7 builtins, no go/chan/try/switch/slices/is/?./??)
-- [ ] Full-language VM (go/chan/select, import, try, switch, defer, slices, is/?./??, typed params) [+2 Perf left]
+- [x] VM v0.2 (slices, is/?./??, typed params, switch + O(log n) ** + bench docs/bench.md) done v2.5 [+1 Perf]; left: go/chan/select, import/try/defer for full VM
 - [x] `fusion build --bin` single static executable [+3 Build done]
 - [x] `--target` matrix (linux/amd64,arm64,darwin,windows,wasm via GOOS/GOARCH) (done v2.4)
 - [ ] `--cpuprofile`, opcode counts
@@ -30,8 +30,8 @@
 ## Language core P1 (Types 6→7 done)
 
 - [x] Gradual `: type`, `is`/`is not`, `?.`/`??`, `ok`/`err` + helpers + `struct_validate/enum_create` (done v2.4)
-- [ ] Structs syntax / typed maps (`type User = {name: string}`) [+1 Types left]
-- [ ] Enums syntax + exhaustive `switch` check (helpers done, syntax left)
+- [x] Structs syntax (`struct User {..}` + runtime + vet) done v2.5 [+1 Types]
+- [x] Enums syntax + real exhaustive `switch` (enum-aware + bool) done v2.5
 - [ ] Default args / named params / variadics (`...rest`)
 - [ ] Modules with `export` (compat shim over flat globals)
 - [x] Regex `regex_*` builtins (done v2.4); [ ] Regex literal
@@ -41,7 +41,7 @@
 
 - [x] 166 builtins (v2.1 97 + v2.4 52: http/regex/crypto/fs/process/time/db/log/concurrency/types)
 - [x] `http` (`http_get/post/serve`, headers, JSON codec) [+2 Stdlib done]
-- [ ] `net/ws` TCP + WebSocket [+1 Stdlib left]
+- [x] `net/ws` TCP + WebSocket frames (RFC 6455) + extended SQL (UPDATE/JOIN/ORDER/GROUP) + postgres-compat + pipes/signals done v2.5 [+1 Stdlib]
 - [x] `fs` full (`stat/cp/mv/glob`, path joins) (done; `watch` left)
 - [x] `process` (`exec/shell/cwd/env_all`) (pipes/signals left)
 - [x] `time` (`format/parse/parts`) (ticker left)
@@ -61,14 +61,14 @@
 
 ## Packaging + registry P2 (Ecosystem 3→5 done)
 
-- [ ] Central registry (`publish/pull`, checksums, yank)
+- [x] Real audit (hash recompute + transitive + tests) done v2.5 [+1 Ecosystem]; central server left
 - [x] `fusion vendor` offline builds (done v2.4); [ ] private registries + token auth; `scope/name` namespaces
 
 ## DX P2 (Tooling/Maturity)
 
 - [x] REPL (`fusion repl` history + multiline) (done v2.4)
-- [ ] LSP + VS Code extension (hover, goto-def, rename, format-on-save)
-- [ ] Debugger (`--debug`, breakpoints, stack)
+- [x] Full LSP (diagnostics/rename/format) + VS Code ext v0.2.0 done v2.5 [+1 Tooling]
+- [x] Debugger (`fusion debug --break/--trace` + OnStmt hook) done v2.5
 - [x] Benchmarks (`fusion bench`) (done v2.4, criterion-style reports left)
 
 ## Interop P2
