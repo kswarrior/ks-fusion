@@ -1,14 +1,16 @@
 # ks-fusion vs Others
 
-> ks-fusion `v2.1`: gradual-typed interpreted `.ks` language, toolchain written in Go.
+> ks-fusion `v2.1` + compiler `v0.1`: gradual-typed `.ks` language, toolchain written in Go.
 > Easy like Python, concurrency like Go, packaging like Rust.
+> Interpreter runs the full language (97 builtins); `fusion compile` adds a
+> portable bytecode subset (`.ksb-1` JSON + stack VM) for straight-line logic.
 > This doc is honest about where `.ks` wins and where it loses.
 
 ## TL;DR
 
 | If you need… | Pick… | Why not `.ks` yet |
 |---|---|---|
-| Single static binary, max RPS, strict types | Go / Rust | `.ks` is tree-walk interpreted, gradual-typed, ~100x slower on `fib(25)` (sort/pow optimized, scopes lock-free) |
+| Single static binary, max RPS, strict types | Go / Rust | `.ks` runs on tree-walk interpreter (full language) + VM subset (`fusion compile` v0.1); `fib(25)` ~100x slower than Go (sort/pow optimized, scopes lock-free) |
 | Kernel, drivers, games, hard realtime | C / C++ / Rust | No manual memory, no pointers, no SIMD |
 | Browser UI / React / SSR | Next.js (TS) | `frontend/main.ks` is console logic today, not DOM |
 | CRUD + auth + admin panel tomorrow | PHP Laravel / Python Django | No ORM, migrations, HTTP server stdlib yet |
@@ -19,15 +21,17 @@
 
 |  | ks-fusion (.ks) | Go | Rust | C | C++ | Node.js (JS/TS) | Python | Next.js | PHP Laravel |
 |---|---|---|---|---|---|---|---|---|---|
-| Model | interpreted tree-walk (Go) | compiled, GC | compiled, no GC (borrowck) | compiled, manual | compiled, RAII | V8 JIT | interpreted (+C ext) | React framework on Node | interpreted + framework |
+| Model | tree-walk interpreter (full language) + bytecode VM subset v0.1 (`.ksb-1` JSON, `fusion compile`) | compiled, GC | compiled, no GC (borrowck) | compiled, manual | compiled, RAII | V8 JIT | interpreted (+C ext) | React framework on Node | interpreted + framework |
 | Typing | gradual: dynamic + `: type` annotations, `is`, `?.`/`??`, `ok`/`err` results | static, interfaces, generics | static, traits, enums, `Result/Option` | weak static, pointers | static, templates, classes | dynamic + optional TS | dynamic + hints | TS-typed components | dynamic |
-| Perf | medium (scripts, bots, CLIs; O(n log n) sort, O(log n) pow, lock-free scopes) | high (servers) | highest (systems) | highest | highest | medium-high (I/O) | medium (glue/AI) | medium (SSR) | medium (CRUD) |
-| Concurrency | `go` + `chan`/`select` (`recv`/`send`/`timeout`/`default`, `for v in chan`, goroutines underneath) | goroutines + `select` | `async/tokio`, threads | threads, manual | threads/`async` | event loop + workers | threads/GIL + `asyncio` | server/client components | processes + queues |
-| Packaging | `fusion.toml` + `.kslib` JSON (`kslib-1`), local `test-releases/`/`target/` | `go.mod` + proxy | `cargo` + crates.io | make/cmake | cmake/vcpkg/conan | npm/pnpm | pip/poetry | npm + Vercel | composer + artisan |
-| Binary | needs `fusion` on PATH (shebang), no `--bin` yet | single static binary | single binary | binary | binary | needs node/runtime | needs python | needs node | needs php+server |
+| Perf | medium (scripts, bots, CLIs; interpreter O(n log n) sort, O(log n) pow, lock-free scopes; VM v0.1 subset claims no speedup yet) | high (servers) | highest (systems) | highest | highest | medium-high (I/O) | medium (glue/AI) | medium (SSR) | medium (CRUD) |
+| Concurrency | `go` + `chan`/`select` (`recv`/`send`/`timeout`/`default`, `for v in chan`, goroutines underneath; interpreter only, VM v0.1 has no `go`/`chan`) | goroutines + `select` | `async/tokio`, threads | threads, manual | threads/`async` | event loop + workers | threads/GIL + `asyncio` | server/client components | processes + queues |
+| Packaging | `fusion.toml` + `.kslib` JSON (`kslib-1`), local `test-releases/`/`target/`; bytecode sidecar `.ksb` JSON (`ksb-1`, subset only) | `go.mod` + proxy | `cargo` + crates.io | make/cmake | cmake/vcpkg/conan | npm/pnpm | pip/poetry | npm + Vercel | composer + artisan |
+| Binary | needs `fusion` on PATH (shebang), no `--bin` yet (`fusion compile` emits portable `.ksb`, still run by `fusion`) | single static binary | single binary | binary | binary | needs node/runtime | needs python | needs node | needs php+server |
 | Best for | learning, automation, rules engines, small backends | APIs, DevOps, cloud | systems, WASM, games | OS, embedded | engines, trading, desktop | APIs, realtime, SSR | scripts, data, AI | fullstack React apps | monolith CRUD apps |
 
 See `docs/futures.md` for what closes each gap (`--bin`, `http_*`, registry, `--js`).
+`fusion compile` (`internal/compiler`, `.ksb-1` + `fusion prog.ksb` + `--dis`/`--run`)
+is step one of the `futures.md` P1 runtime plan; scoring below is unchanged until it covers the full language.
 
 ## How scoring works (out of 100)
 
