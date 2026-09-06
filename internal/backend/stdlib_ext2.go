@@ -76,6 +76,10 @@ var tcpMu sync.Mutex
 var tcpConns = map[int]net.Conn{}
 var tcpNext = 1
 
+// tcpListeners tracks `tcp_serve` listeners by bound port so tests and
+// long-running programs can shut them down (repeat-safe `go test -count=N`).
+var tcpListeners = map[int]net.Listener{}
+
 func tcpRegister(c net.Conn) int {
 	tcpMu.Lock()
 	defer tcpMu.Unlock()
