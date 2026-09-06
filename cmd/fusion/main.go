@@ -667,6 +667,129 @@ func launchEntryError(cfg *config.Config, side, entry, abs string, err error) er
 	return fmt.Errorf("launch %s: %s entry %q not found at %s (config %s lives in %s; keep the config in the app root so relative entries resolve): %w", cfg.Source, side, entry, abs, cfg.Source, cfg.Dir, err)
 }
 
+// cmdTest runs `*_test.ks` files with `assert` and reports TAP.
+// `fusion test [target]`: target is a dir (default ".", searched recursively)
+// or a single .ks file. Each file runs in a fresh interpreter (no shared
+// globals between files); any parse error, failed assert, or uncaught error
+// marks that file `not ok`. Exit is non-zero when any file fails.
+func cmdTest(args []string) error {
+	target := "."
+	for _, a := range args {
+		switch a {
+		case "--help", "-h":
+			fmt.Println(`usage: fusion test [target]
+  target: dir (default ".", runs every *_test.ks underneath) or a single .ks file
+  each file runs isolated; output is TAP (ok / not ok + 1..N plan)`)
+			return nil
+		default:
+			if strings.HasPrefix(a, "-") {
+				return fmt.Errorf("unknown flag %q (usage: fusion test [target])", a)
+			}
+			if target != "." {
+				return fmt.Errorf("usage: fusion test [target] (single target only)")
+			}
+			target = a
+		}
+	}
+	files, err := collectTestFiles(target)
+	if err != nil {
+		return err
+	}
+	if len(files) == 0 {
+		return fmt.Errorf("no *_test.ks files under %s", target)
+	}
+	fmt.Println("TAP version 13")
+	failed := 0
+	for i, f := range files {
+		name := displayPath(f)
+		if err := runTestFile(f); err != nil {
+			fmt.Printf("not ok %d - %s (%v)\n", i+1, name, err)
+			failed++
+			continue
+		}
+		fmt.Printf("ok %d - %s\n", i+1, name)
+	}
+	fmt.Printf("1..%d\n", len(files))
+	if failed > 0 {
+		return fmt.Errorf("test failed: %d of %d files failed", failed, len(files))
+	}
+	return nil
+}
+
+// collectTestFiles returns sorted *_test.ks paths for a dir (recursive)
+// or the single file itself.
+func collectTestFiles(target string) ([]string, error) {
+	fi, err := os.Stat(target)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.IsDir() {
+		if !strings.HasSuffix(target, ".ks") {
+			return nil, fmt.Errorf("not a .ks file: %s", target)
+		}
+		return []string{target}, nil
+	}
+	var out []string
+	walkErr := filepath.Walk(target, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(info.Name(), "_test.ks") {
+			out = append(out, path)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	sortStrings(out)
+	return out, nil
+}
+
+// runTestFile parses + runs one test file in a fresh interpreter.
+// baseDir is the nearest ancestor holding fusion.toml (so app-root-relative
+// imports work from nested test files), else the file's own directory.
+func runTestFile(path string) error {
+	prog, err := frontend.ParseFile(path)
+	if err != nil {
+		return err
+	}
+	return backend.RunWithDir(prog, testAppRoot(path))
+}
+
+// testAppRoot finds the app dir for a test file: nearest ancestor with
+// fusion.toml, else the file's directory.
+func testAppRoot(path string) string {
+	abs := path
+	if !filepath.IsAbs(abs) {
+		if a, err := filepath.Abs(abs); err == nil {
+			abs = a
+		}
+	}
+	dir := filepath.Dir(abs)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "fusion.toml")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return filepath.Dir(abs)
+		}
+		dir = parent
+	}
+}
+
+// displayPath shows a path relative to CWD when possible (stable TAP names).
+func displayPath(path string) string {
+	if rel, err := filepath.Rel(".", path); err == nil && !strings.HasPrefix(rel, "..") {
+		return filepath.ToSlash(rel)
+	}
+	return path
+}
+
 func cmdCompile(args []string) error {
 	src := ""
 	out := ""
