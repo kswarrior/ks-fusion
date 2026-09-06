@@ -664,13 +664,42 @@ func cmdRun(dir string) error {
 }
 
 func cmdRunWithRace(dir string, race bool) error {
+	return cmdRunWithRaceProfile(dir, race, "", false)
+}
+
+func cmdRunWithRaceProfile(dir string, race bool, cpuprofile string, debug bool) error {
 	cfg, err := config.Load(dir)
 	if err != nil {
 		return err
 	}
+	if cpuprofile != "" {
+		f, err := os.Create(cpuprofile)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		if err := startCPUProfile(f); err != nil {
+			return err
+		}
+		defer stopCPUProfile()
+		fmt.Println("cpuprofile: writing to", cpuprofile)
+	}
+	if debug {
+		fmt.Printf("debug: %s v%s\n", cfg.Name, cfg.Version)
+		for _, e := range []string{cfg.BackendEntry, cfg.FrontendEntry} {
+			p := e
+			fmt.Printf("debug: entry %s\n", p)
+		}
+		if issues, err := tools.VetTarget(dir, false); err == nil {
+			fmt.Printf("debug: vet %d issues\n", len(issues))
+			for _, is := range issues {
+				fmt.Println("debug:", is.String())
+			}
+		}
+		os.Setenv("FUSION_DEBUG", "1")
+	}
 	if race {
 		fmt.Println("race: enabled (Go race detector via `go run -race ./cmd/fusion run` + logical chan checks)")
-		// logical pre-check: vet concurrency-relevant rules
 		if issues, err := tools.VetTarget(dir, false); err == nil {
 			errs := 0
 			for _, is := range issues {
@@ -687,6 +716,9 @@ func cmdRunWithRace(dir string, race bool) error {
 	err = runWithConfig(cfg, true, true)
 	if race {
 		fmt.Println("race: ok (no logical races detected; for full Go data-race run: go run -race ./cmd/fusion run " + dir + ")")
+	}
+	if cpuprofile != "" {
+		fmt.Println("cpuprofile: done", cpuprofile)
 	}
 	return err
 }
