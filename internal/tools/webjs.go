@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -343,20 +345,40 @@ es.onmessage = function(e){
 <div id="app" data-route="%s"></div>
 <script id="vm" type="application/json">%s</script>
 <script>
-// v2.3 hydrate: view-model -> DOM + use_state/fetch_json CSR
+// v2.4 hydrate: view-model -> DOM + use_state/fetch_json CSR + virtualize >100
 (function(){
   var vm = JSON.parse(document.getElementById('vm').textContent);
   var app = document.getElementById('app');
   var __state = {};
   window.use_state = function(k, init){ if(!(k in __state)) __state[k]=init; return __state[k]; };
   window.set_state = function(k, v){ __state[k]=v; return v; };
-  function render(node, parent){
+  function render(node, parent, depth){
     if(!node) return;
+    depth = depth || 0;
     var el = document.createElement(node.type === 'page' ? 'div' : (node.type || 'div'));
     if(node.props && node.props.title){ var h=document.createElement('h1'); h.textContent=node.props.title; el.appendChild(h); }
-    if(node.children){ node.children.forEach(function(c){ render(c, el); }); }
+    var kids = node.children || [];
+    // virtualize lists >100 rows (v2.4): render first 100 + expander
+    if(kids.length > 100){
+      var shown = 0;
+      function renderMore(){
+        var frag = document.createDocumentFragment();
+        for(var i=shown; i<Math.min(shown+100, kids.length); i++){ render(kids[i], frag, depth+1); }
+        shown += 100;
+        el.insertBefore(frag, moreBtn);
+        if(shown >= kids.length && moreBtn.parentNode) moreBtn.parentNode.removeChild(moreBtn);
+        else moreBtn.textContent = 'Show more (' + shown + '/' + kids.length + ')';
+      }
+      var moreBtn = document.createElement('button');
+      moreBtn.onclick = renderMore;
+      renderMore();
+      el.appendChild(moreBtn);
+    } else {
+      kids.forEach(function(c){ render(c, el, depth+1); });
+    }
     parent.appendChild(el);
   }
+  window.__renderVM = function(v, root){ root.innerHTML=''; render(v, root, 0); };
   try{ render(vm, app); }catch(e){ app.textContent = JSON.stringify(vm); }
 })();
 </script>
@@ -555,7 +577,11 @@ func BuildJS(appDir, out string) error {
 	if err != nil {
 		return fmt.Errorf("no frontend/pages in %s: %w", cfg.Dir, err)
 	}
-	sizes := map[string]int{}
+	type manifestEntry struct {
+		Size int    `json:"size"`
+		SHA  string `json:"sha256"`
+	}
+	manifest := map[string]manifestEntry{}
 	for _, e := range ents {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".ks") {
 			continue
@@ -576,21 +602,32 @@ func BuildJS(appDir, out string) error {
 		dst := filepath.Join(out, route+".js")
 		// minify analogue: trim lines, drop comments/blank
 		min := minifyJS(js)
+		// content-hash incremental cache (v2.4): skip write when unchanged
+		sum := sha256.Sum256([]byte(min))
+		hexsum := hex.EncodeToString(sum[:])
+		if old, err := os.ReadFile(dst); err == nil {
+			osum := sha256.Sum256(old)
+			if hex.EncodeToString(osum[:]) == hexsum {
+				fmt.Printf("build-js: %s unchanged (%d bytes, %s)\n", e.Name(), len(min), hexsum[:12])
+				manifest[route] = manifestEntry{Size: len(min), SHA: hexsum}
+				continue
+			}
+		}
 		if err := os.WriteFile(dst, []byte(min), 0o644); err != nil {
 			return err
 		}
-		sizes[route] = len(min)
-		fmt.Printf("build-js: %s -> %s (%d bytes)\n", e.Name(), dst, len(min))
+		manifest[route] = manifestEntry{Size: len(min), SHA: hexsum}
+		fmt.Printf("build-js: %s -> %s (%d bytes, %s)\n", e.Name(), dst, len(min), hexsum[:12])
 		if len(min) > 250*1024 {
 			return fmt.Errorf("budget fail: route %s JS %d bytes > 250KB", route, len(min))
 		} else if len(min) > 100*1024 {
 			fmt.Printf("warn: route %s JS %d bytes > 100KB budget\n", route, len(min))
 		}
 	}
-	// manifest
-	man, _ := json.MarshalIndent(sizes, "", "  ")
+	// manifest (sizes + content hashes)
+	man, _ := json.MarshalIndent(manifest, "", "  ")
 	_ = os.WriteFile(filepath.Join(out, "manifest.json"), append(man, '\n'), 0o644)
-	fmt.Printf("build-js ok: %d routes in %s\n", len(sizes), out)
+	fmt.Printf("build-js ok: %d routes in %s\n", len(manifest), out)
 	return nil
 }
 
