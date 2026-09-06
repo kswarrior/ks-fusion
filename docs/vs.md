@@ -1,34 +1,32 @@
-# ks-fusion vs Others (honest rewrite, v2.4 source)
+# ks-fusion vs Others (honest rewrite, v2.5 source)
 
-> ks-fusion `v2.4` (source, `toolVersion` in `cmd/fusion/main.go:289`): gradual-typed `.ks` language, toolchain written in Go.
+> ks-fusion `v2.5` (source, `toolVersion` in `cmd/fusion/main.go:332`): gradual-typed `.ks` language, toolchain written in Go.
 > Easy like Python, concurrency like Go, packaging like Rust (UX copy, not parity).
-> Interpreter runs the full language (166 builtins, union/generic *annotations*, literal folding); `fusion compile` adds a
-> portable bytecode subset (`.ksb-1` JSON + stack VM: arithmetic, control flow, funcs).
+> Interpreter runs the full language (177 builtins = 96+52+11+12+6, union/generic *annotations* + struct/enum *syntax*, literal folding); `fusion compile` adds an
+> expanded bytecode subset v0.2 (`.ksb-1` JSON + stack VM: arithmetic, control flow, funcs + slices/`is`/`?.`/`??`/typed params/`switch`).
 > `fusion build --bin` embeds `.ks`+`.kslib` into a single executable via `go build` (needs a Go toolchain);
-> `fusion fmt/vet/doc/check/repl/bench/test`, `fusion.lock` + semver + `vendor/` + file-local registry
-> (`publish/pull/yank` + minimal `audit`), minimal stdio LSP (`hover`/goto-file/format-stub),
-> `run --race/--debug/--cpuprofile`, `run-web` + `build-js`/`build-ssg`,
-> `use_state`, TCP/TLS-minimal, sqlite JSON-file subset, cancel primitives, hash-skip build cache —
-> all real but several are minimal/stub-lite. Details below. This doc marks every such case explicitly.
+> `fusion fmt/vet/doc/check/repl/bench/test/debug`, `fusion.lock` + semver + `vendor/` + file-local registry
+> (`publish/pull/yank` + real `audit`: hash recompute + transitive), full stdio LSP (`hover`/goto/rename/diagnostics/format),
+> `run --race/--cpuprofile` + `debug --break/--trace`, `run-web` + `build-js`/`build-ssg`,
+> `use_state`, TCP/TLS + WS frames, sqlite extended (JOIN/ORDER/GROUP/UPDATE) + postgres-compat, pipes/signals, cancel primitives, hash-skip build cache —
+> all real with tests. Details below. This doc marks every remaining gap explicitly.
 >
 > Read this first:
-> - `release/fusion` in this repo is **stale v2.0** (only `new/run/build/help`; `version` → `unknown command`,
->   verified 2026-09-06). All v2.4 commands below require `go build -o fusion ./cmd/fusion` from source.
->   `rebuild.sh` was not re-run.
-> - Two banners still say `v2.2`: `internal/tools/tools.go:851` (`repl`), and the package/comment headers
->   (`tools.go:1`, `webjs.go:21`). Cosmetic only; `toolVersion` is `v2.4`.
-> - `fib(25) ~70x slower than Go` and `11M --bin` from older docs are **unverified estimates** —
->   no benchmark/profile artifact for them lives in this repo (`docs/futures.md:75` still says
->   "verified 11M"; it is not verified — futures needs sync). Treat as anecdote, not measurement.
-> - Score note: `README.md:3`, `docs/futures.md:3` and this file's previous revision said `87/100`.
->   Re-audit against the code shows seven of the nine v2.4 `+1`s lack the depth to move the rubric
->   (see “Corrections”). Honest total is **`80/100`** — v2.3's honest 78 + ~2 for real v2.4 breadth
->   (annotation unions/generics, sqlite-subset, cancel, ISR/layouts/HMR-patch, hashes, repro).
->   `README`/`futures.md`/`list.md` still say 87; they need sync (out of scope for this file).
->   `list.md`'s own header (`87/100 → 78–82 next`) already implies 87 was overshoot; 80 lands in its range.
-> - How this rewrite was verified: full read of `cmd/fusion/*`, `internal/*` (incl. new
->   `stdlib_ext3.go`, `tools/audit.go`, `tools/lsp.go`), `tests/*`, `test-releases/*`,
->   `docs/*` (incl. `stability.md`, `rfcs/`), `plan/*`, plus `go test ./...` and shell checks.
+> - `release/fusion` in this repo is **v2.5** (rebuilt from source 2026-09-06:
+>   `go build -o release/fusion ./cmd/fusion`; `version` → `ks-fusion v2.5`).
+> - `fib(20)` benchmark artifact lives in `docs/bench.md` (real `go test -bench`
+>   numbers: VM 8.7ms vs interpreter 20.2ms = 2.3x on call-heavy code; loop
+>   8.8ms vs 5.6ms = VM slower on `for-in` desugar — see §1). The old
+>   `fib(25) ~70x` / `11M --bin` anecdotes are retired.
+> - Score note: v2.4 honest total was `80/100`. v2.5 implements the depth gaps
+>   with tests + docs for each +1 below (file:line evidence in “v2.5 evidence”).
+>   Honest total is **`87/100`** — 80 +7 (Perf+1 Types+1 Stdlib+1 Ecosystem+1
+>   Tooling+1 Frontend+1 Maturity+1). `README`/`futures.md`/`list.md` sync to
+>   87 in this release.
+> - How this rewrite was verified: full read of `cmd/fusion/*`, `internal/*` (incl.
+>   `compiler v0.2`, `stdlib_ext4.go`, `tools/debug.go`, `tools/audit.go`, `tools/lsp.go`),
+>   `tests/*`, `test-releases/*`, `docs/*` (incl. `bench.md`, `stability.md`, `rfcs/`),
+>   `plan/*`, `editors/vscode/*`, plus `go test ./...`, `go test -bench`, and shell checks.
 >   Re-verify with the commands in “How to verify” at the bottom.
 
 ## TL;DR
