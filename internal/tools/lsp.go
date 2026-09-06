@@ -34,6 +34,30 @@ type lspResponse struct {
 	Params  any    `json:"params,omitempty"`
 }
 
+var openDocs = struct {
+	mu sync.Mutex
+	m  map[string]string
+}{m: map[string]string{}}
+
+func setOpenDoc(uri, text string) {
+	openDocs.mu.Lock()
+	defer openDocs.mu.Unlock()
+	openDocs.m[uri] = text
+}
+
+func dropOpenDoc(uri string) {
+	openDocs.mu.Lock()
+	defer openDocs.mu.Unlock()
+	delete(openDocs.m, uri)
+}
+
+func getOpenDoc(uri string) (string, bool) {
+	openDocs.mu.Lock()
+	defer openDocs.mu.Unlock()
+	s, ok := openDocs.m[uri]
+	return s, ok
+}
+
 func RunLSP() error {
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
@@ -41,6 +65,11 @@ func RunLSP() error {
 	defer out.Flush()
 	respond := func(id any, result any) {
 		b, _ := json.Marshal(lspResponse{JSONRPC: "2.0", ID: id, Result: result})
+		fmt.Fprintf(out, "Content-Length: %d\r\n\r\n%s", len(b), b)
+		out.Flush()
+	}
+	notify := func(method string, params any) {
+		b, _ := json.Marshal(lspResponse{JSONRPC: "2.0", Method: method, Params: params})
 		fmt.Fprintf(out, "Content-Length: %d\r\n\r\n%s", len(b), b)
 		out.Flush()
 	}
@@ -84,8 +113,8 @@ func RunLSP() error {
 		switch req.Method {
 		case "initialize":
 			respond(req.ID, map[string]any{"capabilities": map[string]any{
-				"hoverProvider": true, "definitionProvider": true,
-				"documentFormattingProvider": true,
+				"textDocumentSync": 1, "hoverProvider": true, "definitionProvider": true,
+				"documentFormattingProvider": true, "renameProvider": true,
 			}, "serverInfo": map[string]any{"name": "fusion-lsp", "version": "v2.4"}})
 		case "initialized":
 			// no-op
@@ -94,6 +123,47 @@ func RunLSP() error {
 			return nil
 		case "exit":
 			return nil
+		case "textDocument/didOpen":
+			var p struct {
+				TextDocument struct {
+					URI  string `json:"uri"`
+					Text string `json:"text"`
+				} `json:"textDocument"`
+			}
+			_ = json.Unmarshal(req.Params, &p)
+			setOpenDoc(p.TextDocument.URI, p.TextDocument.Text)
+			notify("textDocument/publishDiagnostics", diagnosticsParams(p.TextDocument.URI))
+		case "textDocument/didChange":
+			var p struct {
+				TextDocument struct {
+					URI string `json:"uri"`
+				} `json:"textDocument"`
+				ContentChanges []struct {
+					Text string `json:"text"`
+				} `json:"contentChanges"`
+			}
+			_ = json.Unmarshal(req.Params, &p)
+			if len(p.ContentChanges) > 0 {
+				setOpenDoc(p.TextDocument.URI, p.ContentChanges[len(p.ContentChanges)-1].Text)
+			}
+			notify("textDocument/publishDiagnostics", diagnosticsParams(p.TextDocument.URI))
+		case "textDocument/didClose":
+			var p struct {
+				TextDocument struct {
+					URI string `json:"uri"`
+				} `json:"textDocument"`
+			}
+			_ = json.Unmarshal(req.Params, &p)
+			dropOpenDoc(p.TextDocument.URI)
+			notify("textDocument/publishDiagnostics", map[string]any{"uri": p.TextDocument.URI, "diagnostics": []any{}})
+		case "textDocument/didSave":
+			var p struct {
+				TextDocument struct {
+					URI string `json:"uri"`
+				} `json:"textDocument"`
+			}
+			_ = json.Unmarshal(req.Params, &p)
+			notify("textDocument/publishDiagnostics", diagnosticsParamsSaved(p.TextDocument.URI))
 		case "textDocument/hover":
 			var p struct {
 				TextDocument struct {
@@ -119,7 +189,31 @@ func RunLSP() error {
 			_ = json.Unmarshal(req.Params, &p)
 			respond(req.ID, definitionFor(p.TextDocument.URI, p.Position.Line, p.Position.Character))
 		case "textDocument/formatting":
-			respond(req.ID, []any{})
+			var p struct {
+				TextDocument struct {
+					URI string `json:"uri"`
+				} `json:"textDocument"`
+			}
+			_ = json.Unmarshal(req.Params, &p)
+			respond(req.ID, formattingEdits(p.TextDocument.URI))
+		case "textDocument/rename":
+			var p struct {
+				TextDocument struct {
+					URI string `json:"uri"`
+				} `json:"textDocument"`
+				Position struct {
+					Line      int `json:"line"`
+					Character int `json:"character"`
+				} `json:"position"`
+				NewName string `json:"newName"`
+			}
+			_ = json.Unmarshal(req.Params, &p)
+			edits, err := renameEdits(p.TextDocument.URI, p.Position.Line, p.Position.Character, p.NewName)
+			if err != nil {
+				respond(req.ID, map[string]any{"error": err.Error()})
+				break
+			}
+			respond(req.ID, map[string]any{"changes": edits})
 		default:
 			if req.ID != nil {
 				respond(req.ID, nil)
