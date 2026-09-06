@@ -193,7 +193,8 @@ var (
 	reDrop   = regexp.MustCompile(`(?i)^\s*DROP\s+TABLE\s+(IF\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*;?\s*$`)
 	reInsert = regexp.MustCompile(`(?i)^\s*INSERT\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)\s*;?\s*$`)
 	reDelete = regexp.MustCompile(`(?i)^\s*DELETE\s+FROM\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+WHERE\s+(.+?))?\s*;?\s*$`)
-	reSelect = regexp.MustCompile(`(?i)^\s*SELECT\s+(.*?)\s+FROM\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+WHERE\s+(.+?))?\s*;?\s*$`)
+	reUpdate = regexp.MustCompile(`(?i)^\s*UPDATE\s+([A-Za-z_][A-Za-z0-9_]*)\s+SET\s+(.+?)(?:\s+WHERE\s+(.+?))?\s*;?\s*$`)
+	reSelect = regexp.MustCompile(`(?i)^\s*SELECT\s+(.*?)\s+FROM\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+JOIN\s+([A-Za-z_][A-Za-z0-9_]*)\s+ON\s+(.+?))?(?:\s+WHERE\s+(.+?))?(?:\s+GROUP\s+BY\s+([A-Za-z_][A-Za-z0-9_]*))?(?:\s+ORDER\s+BY\s+([A-Za-z_][A-Za-z0-9_.]*)(?:\s+(ASC|DESC))?)?(?:\s+LIMIT\s+(\d+))?(?:\s+OFFSET\s+(\d+))?\s*;?\s*$`)
 )
 
 func sqliteExecStmt(db *sqliteDB, sql string) (int, error) {
@@ -245,6 +246,31 @@ func sqliteExecStmt(db *sqliteDB, sql string) (int, error) {
 		}
 		db.tables[t] = kept
 		return del, nil
+	}
+	if m := reUpdate.FindStringSubmatch(s); m != nil {
+		t, setClause, where := m[1], m[2], m[3]
+		rows := db.tables[t]
+		assigns, err := parseSetClause(setClause)
+		if err != nil {
+			return 0, err
+		}
+		n := 0
+		for _, r := range rows {
+			if strings.TrimSpace(where) != "" {
+				ok, err := evalWhere(r, where)
+				if err != nil {
+					return 0, err
+				}
+				if !ok {
+					continue
+				}
+			}
+			for k, v := range assigns {
+				r[k] = v
+			}
+			n++
+		}
+		return n, nil
 	}
 	// SELECT via exec returns count (use query for rows)
 	if reSelect.MatchString(s) {
