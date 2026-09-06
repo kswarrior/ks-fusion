@@ -113,7 +113,16 @@ const (
 	StmtSwitch
 	StmtSelect
 	StmtDefer
+	StmtStruct
+	StmtEnum
 )
+
+// StructField is one `name: type` field of a `struct` declaration.
+type StructField struct {
+	Name string
+	Type string
+	Line int
+}
 
 // SwitchCase is one `case`/`default` branch of a switch statement.
 type SwitchCase struct {
@@ -167,6 +176,10 @@ type Stmt struct {
 	Op      string // assign op: = += -= *= /= %=
 	Line    int
 	SleepMs int // kept for compat: set when sleep arg is int literal
+	// Struct/enum declarations (v2.5): Name is the type name;
+	// Fields holds struct `name: type` pairs, Variants holds enum members.
+	Fields   []StructField
+	Variants []string
 }
 
 // Program is a parsed .ks file.
@@ -884,9 +897,26 @@ func (p *parser) parseLet() (*Stmt, error) {
 	return &Stmt{Kind: StmtLet, Name: nameTok.Lit, Expr: e, TypeAnn: typeAnn, Line: lt.Line}, nil
 }
 
+// isNominalType reports whether s looks like a user-declared type name
+// (`struct`/`enum` declarations, v2.5): Capitalized identifier, optionally
+// with union `|` / generic `<>` structure around nominal parts. The backend
+// (and vet) verify that nominals are actually declared; the parser only
+// checks the shape so forward references parse.
+func isNominalType(s string) bool {
+	if s == "" {
+		return false
+	}
+	c := s[0]
+	return (c >= 'A' && c <= 'Z')
+}
+
 // validTypeNames is the set of type annotation / `is` names.
 // v2.4: unions (`int|string`), generics (`array<int>`, `map<string,int>`) + base names.
+// v2.5: nominal struct/enum names (Capitalized idents, possibly in unions/generics).
 func validTypeName(s string) bool {
+	if isNominalType(s) {
+		return true
+	}
 	// union: every part must be valid
 	if containsPipe(s) {
 		for _, part := range splitPipe(s) {
