@@ -287,12 +287,101 @@ func toFloat(v Value) float64 {
 }
 
 func validType(name string) bool {
+	// unions + generics (v2.4): int|string, array<int>, map<string,int>
+	if hasTopPipe(name) {
+		for _, part := range splitTopPipe(name) {
+			if !validType(part) {
+				return false
+			}
+		}
+		return true
+	}
+	if base, args, ok := parseTypeGeneric(name); ok {
+		switch base {
+		case "array":
+			return len(args) == 1 && validType(args[0])
+		case "map":
+			return len(args) == 2 && validType(args[0]) && validType(args[1])
+		}
+		return false
+	}
 	switch name {
 	case "nil", "bool", "int", "float", "number", "string",
 		"array", "map", "func", "chan", "any", "ok", "err":
 		return true
 	}
 	return false
+}
+
+func hasTopPipe(s string) bool {
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '<':
+			depth++
+		case '>':
+			depth--
+		case '|':
+			if depth == 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func splitTopPipe(s string) []string {
+	var out []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '<':
+			depth++
+		case '>':
+			depth--
+		case '|':
+			if depth == 0 {
+				out = append(out, strings.TrimSpace(s[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	out = append(out, strings.TrimSpace(s[start:]))
+	return out
+}
+
+func parseTypeGeneric(s string) (string, []string, bool) {
+	idx := -1
+	for i := 0; i < len(s); i++ {
+		if s[i] == '<' {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 || !strings.HasSuffix(s, ">") {
+		return "", nil, false
+	}
+	base := strings.TrimSpace(s[:idx])
+	inner := s[idx+1 : len(s)-1]
+	var args []string
+	depth := 0
+	start := 0
+	for i := 0; i < len(inner); i++ {
+		switch inner[i] {
+		case '<':
+			depth++
+		case '>':
+			depth--
+		case ',':
+			if depth == 0 {
+				args = append(args, strings.TrimSpace(inner[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	args = append(args, strings.TrimSpace(inner[start:]))
+	return base, args, true
 }
 
 func isOkValue(v Value) bool {
@@ -317,6 +406,51 @@ func isErrValue(v Value) bool {
 }
 
 func matchesTypeStrict(v Value, typ string) bool {
+	// unions (v2.4)
+	if hasTopPipe(typ) {
+		for _, part := range splitTopPipe(typ) {
+			if matchesTypeStrict(v, part) {
+				return true
+			}
+		}
+		return false
+	}
+	// generics (v2.4): array<T>, map<string,T>
+	if base, args, ok := parseTypeGeneric(typ); ok {
+		switch base {
+		case "array":
+			if v.Kind != VArray || len(args) != 1 {
+				return false
+			}
+			v.Arr.Mu.RLock()
+			defer v.Arr.Mu.RUnlock()
+			for _, e := range v.Arr.Items {
+				if e.Kind == VNil {
+					continue // nullable elements pass
+				}
+				if !matchesTypeStrict(e, args[0]) {
+					return false
+				}
+			}
+			return true
+		case "map":
+			if v.Kind != VMap || len(args) != 2 {
+				return false
+			}
+			v.Map.Mu.RLock()
+			defer v.Map.Mu.RUnlock()
+			for _, e := range v.Map.Vals {
+				if e.Kind == VNil {
+					continue
+				}
+				if !matchesTypeStrict(e, args[1]) {
+					return false
+				}
+			}
+			return true
+		}
+		return false
+	}
 	switch typ {
 	case "any":
 		return true
