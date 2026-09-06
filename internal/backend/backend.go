@@ -492,6 +492,31 @@ func RunFile(path string) error {
 	return RunWithDir(p, dir)
 }
 
+// SetBaseDir sets import base dir (for embedding/web).
+func (in *Interpreter) SetBaseDir(dir string) { in.baseDir = dir }
+
+// Lookup finds a global (or builtin) by name.
+func (in *Interpreter) Lookup(name string) (Value, bool) {
+	// search globals chain
+	for env := in.globals; env != nil; env = env.Parent {
+		if v, ok := env.Vars[name]; ok {
+			return v, true
+		}
+	}
+	if b, ok := builtinByName(name); ok {
+		return Value{Kind: VBuiltin, Builtin: b}, true
+	}
+	return Nil(), false
+}
+
+// Call invokes a func value (exported for web/embedding).
+func (in *Interpreter) Call(fn Value, args []Value) (Value, error) {
+	return in.callValue(fn, args)
+}
+
+// ValueToJSONable converts a Value to JSON-encodable Go value (exported for web).
+func ValueToJSONable(v Value) (any, error) { return valueToJSON(v) }
+
 // ExecProgram runs program statements in globals (exported for imports/embedding).
 func (in *Interpreter) ExecProgram(p *frontend.Program) error {
 	for _, st := range p.Statements {
