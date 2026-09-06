@@ -52,16 +52,17 @@
   `select { case v = recv(c) / recv(c) / send(c, v) / timeout(ms) / default }`
   (blocks until one case is ready, ready cases win uniformly at random,
   `break` ends the `select`, `ch = nil` disables a case).
-  Left: `fusion run --race`, structured `with_timeout`/cancel.
-* [ ] `fusion fmt` (canonical formatter) + `fusion vet` (unused var, bad arity lint).
+  Done v2.2: `fusion run --race` + `with_timeout`/`parallel`.
+* [x] `fusion fmt` (canonical formatter) + `fusion vet` (unused var, bad arity lint). Done v2.2:
+  `fusion fmt [target] [--check]`, `fusion vet [target] [--deny-warns]`, `fusion check`, `fusion doc`, `fusion repl`, `fusion bench`.
 * [x] `fusion test` runner: `*_test.ks` with `assert`, exit-code + TAP output. Done:
   `fusion test [target]` (dir recursive or single file), per-file isolation, app-root
   imports via nearest `fusion.toml`. Left: per-file timeout.
-* [ ] `fusion doc` from `#` comments.
+* [x] `fusion doc` from `#` comments. Done v2.2: `fusion doc [target] [--out FILE]`.
 * [ ] Namespaced imports: `import "hello-lib" as hl` / `hl.greet()`.
   Today: flat globals, prefix your functions.
-* [ ] `fusion.lock` + real semver resolver (`^0.1.0`, `>=`, path + git deps).
-  Today: newest `test-releases/<name>-<ver>.kslib` wins.
+* [x] `fusion.lock` + real semver resolver (`^0.1.0`, `>=`, path + git deps). Done v2.2:
+  `^ ~ >= > < *` + `fusion.lock` + `fusion vendor`. Left: git deps, central registry.
 * [x] Error values (`Result`-style) as alternative to `error(msg)` abort +
   `try/catch`. Keep both. Done v2.1: `ok(v)/err(e)`, `is_ok/is_err`,
   `unwrap/unwrap_or`, `v is ok/err`.
@@ -70,19 +71,20 @@
 
 * [ ] Bytecode compiler + VM (drop tree-walk hot loop, 5–20x speedup target).
   Keep `RunFile` / shebang behavior identical.
-* [ ] `fusion build --bin` → single static executable (embed VM + bytecode,
-  like `go build`). Today output is source JSON or parse-check only.
-* [ ] Cross-compile: `--target linux/amd64,arm64,darwin,windows,wasm`.
+* [x] `fusion build --bin` → single static executable (embed `.ks`+`.kslib`,
+  like `go build`). Done v2.2: `fusion build --bin [-o FILE] [--target OS/ARCH]`, verified 11M isolated run.
+* [x] Cross-compile: `--target linux/amd64,arm64,darwin,windows,wasm`. Done v2.2 (GOOS/GOARCH passthrough).
 * [ ] Profiler hooks: `fusion run --cpuprofile`, opcode counts.
 * [x] Tree-walk opts done v2.1 (Perf 4→5): lock-free single-threaded scopes
   (`conc` flag, no RWMutex/mutex per lookup/`fail` until first `go`), halved
   env allocs (func body runs in callEnv; if/while/for/switch/try reuse Block
   scope), O(1) builtin cache, string+string fast path, O(n log n) `sort`
   (was insertion O(n²)), O(log n) int `**`/`pow`, window-only `slice`/`bSlice`.
-  Left: constant folding, full local-slot lookup, string-builder concat.
-* [ ] Optimizations (remaining): constant folding, local-slot lookup (replace scope-chain
+  Done v2.2 (Perf 5→6): constant folding (`1+2`→`3`, `"a"+"b"`→`"ab"`, `frontend/fold.go`, idempotent, tested).
+  Left: full local-slot lookup, string-builder concat.
+* [ ] Optimizations (remaining): local-slot lookup (replace scope-chain
   scan on hot paths), string-builder concat fast path.
-* [ ] WASM target: run `.ks` in browser / edge workers.
+* [ ] WASM target polish: run `.ks` in browser / edge workers (`--target wasm` builds, runtime polish left).
 
 ### P1 — language core
 
