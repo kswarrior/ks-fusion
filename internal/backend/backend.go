@@ -2397,7 +2397,7 @@ func builtinByName(name string) (*BuiltinObj, bool) {
 }
 
 func allBuiltins() []*BuiltinObj {
-	return []*BuiltinObj{
+	base := []*BuiltinObj{
 		{Name: "len", Fn: bLen},
 		{Name: "str", Fn: bStr},
 		{Name: "int", Fn: bInt},
@@ -2495,6 +2495,7 @@ func allBuiltins() []*BuiltinObj {
 		{Name: "unwrap", Fn: bUnwrap},
 		{Name: "unwrap_or", Fn: bUnwrapOr},
 	}
+	return append(base, extraBuiltins()...)
 }
 
 // Process-wide builtin cache: built once, reused by every interpreter.
