@@ -2290,19 +2290,22 @@ func (in *Interpreter) eval(env *Env, e *frontend.Expr) (Value, error) {
 // resolveIsType extracts the type name for `x is T` without requiring
 // `T` to be a bound variable: ident `int` means "int", string "int"
 // means "int", nil means "nil", otherwise eval and require a string.
+// Nominal struct/enum names declared in this interpreter also resolve.
 func (in *Interpreter) resolveIsType(env *Env, e *frontend.Expr) (string, error) {
 	if e == nil {
-		return "", fmt.Errorf("is wants a type name (nil|bool|int|float|number|string|array|map|func|chan|any|ok|err)")
+		return "", fmt.Errorf("is wants a type name")
 	}
 	switch e.Kind {
 	case frontend.ExprVar:
-		if !validType(e.Name) {
-			return "", fmt.Errorf("unknown type %q (want nil|bool|int|float|number|string|array|map|func|chan|any|ok|err)", e.Name)
+		if !validTypeIn(e.Name, in) {
+			// Not a type: is it a bound variable holding a type string?
+			// Fall through to eval so `let t = "int"` + `x is t` keeps working.
+			break
 		}
 		return e.Name, nil
 	case frontend.ExprString:
-		if !validType(e.StrVal) {
-			return "", fmt.Errorf("unknown type %q (want nil|bool|int|float|number|string|array|map|func|chan|any|ok|err)", e.StrVal)
+		if !validTypeIn(e.StrVal, in) {
+			return "", fmt.Errorf("unknown type %q", e.StrVal)
 		}
 		return e.StrVal, nil
 	case frontend.ExprNil:
@@ -2315,14 +2318,14 @@ func (in *Interpreter) resolveIsType(env *Env, e *frontend.Expr) (string, error)
 	if v.Kind != VString {
 		return "", fmt.Errorf("is wants a type name string, got %s", TypeName(v))
 	}
-	if !validType(v.Str) {
-		return "", fmt.Errorf("unknown type %q (want nil|bool|int|float|number|string|array|map|func|chan|any|ok|err)", v.Str)
+	if !validTypeIn(v.Str, in) {
+		return "", fmt.Errorf("unknown type %q", v.Str)
 	}
 	return v.Str, nil
 }
 
 // checkFuncArgs enforces gradual param types (nil passes, like `let x: T`).
-func checkFuncArgs(fn *FuncObj, args []Value) error {
+func (in *Interpreter) checkFuncArgs(fn *FuncObj, args []Value) error {
 	for i, p := range fn.Params {
 		if i >= len(fn.ParamTypes) {
 			break
@@ -2334,7 +2337,7 @@ func checkFuncArgs(fn *FuncObj, args []Value) error {
 		if i >= len(args) {
 			break
 		}
-		if err := checkTypeNullable(args[i], want, "param "+p); err != nil {
+		if err := in.checkTypeNullable(args[i], want, "param "+p); err != nil {
 			if fn.Name != "" {
 				return fmt.Errorf("function %q: %v", fn.Name, err)
 			}
@@ -2344,11 +2347,11 @@ func checkFuncArgs(fn *FuncObj, args []Value) error {
 	return nil
 }
 
-func checkFuncReturn(fn *FuncObj, ret Value) error {
+func (in *Interpreter) checkFuncReturn(fn *FuncObj, ret Value) error {
 	if fn.ReturnType == "" || fn.ReturnType == "any" {
 		return nil
 	}
-	if err := checkTypeNullable(ret, fn.ReturnType, "return"); err != nil {
+	if err := in.checkTypeNullable(ret, fn.ReturnType, "return"); err != nil {
 		if fn.Name != "" {
 			return fmt.Errorf("function %q: %v", fn.Name, err)
 		}
