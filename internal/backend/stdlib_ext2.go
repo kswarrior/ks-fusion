@@ -23,6 +23,7 @@ func extraBuiltinsV23() []*BuiltinObj {
 		{Name: "tcp_recv", Fn: bTCPRecv},
 		{Name: "tcp_close", Fn: bTCPClose},
 		{Name: "tcp_serve", Fn: bTCPServe},
+		{Name: "tcp_shutdown", Fn: bTCPShutdown},
 		{Name: "tls_connect", Fn: bTLSConnect},
 		{Name: "ws_connect", Fn: bWSConnect},
 	}
@@ -191,10 +192,14 @@ func bTCPServe(in *Interpreter, args []Value) (Value, error) {
 	}
 	port := args[0].Int
 	handler := args[1]
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		return Nil(), err
 	}
+	bound := ln.Addr().(*net.TCPAddr).Port
+	tcpMu.Lock()
+	tcpListeners[bound] = ln
+	tcpMu.Unlock()
 	go func() {
 		for {
 			c, err := ln.Accept()
@@ -207,7 +212,28 @@ func bTCPServe(in *Interpreter, args []Value) (Value, error) {
 			}(id)
 		}
 	}()
-	return IntV(port), nil
+	return IntV(bound), nil
+}
+
+// bTCPShutdown closes a `tcp_serve` listener so the port is reusable
+// (repeat-safe tests, clean shutdown). Unknown ports are an error.
+func bTCPShutdown(in *Interpreter, args []Value) (Value, error) {
+	if err := needArgs("tcp_shutdown", args, 1, 1); err != nil {
+		return Nil(), err
+	}
+	if args[0].Kind != VInt {
+		return Nil(), fmt.Errorf("tcp_shutdown wants port int, got %s", TypeName(args[0]))
+	}
+	tcpMu.Lock()
+	ln, ok := tcpListeners[args[0].Int]
+	if ok {
+		delete(tcpListeners, args[0].Int)
+	}
+	tcpMu.Unlock()
+	if !ok {
+		return Nil(), fmt.Errorf("tcp_shutdown: no listener on port %d", args[0].Int)
+	}
+	return Nil(), ln.Close()
 }
 
 func bTLSConnect(in *Interpreter, args []Value) (Value, error) {

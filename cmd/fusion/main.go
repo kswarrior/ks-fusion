@@ -980,19 +980,39 @@ func launchEntryError(cfg *config.Config, side, entry, abs string, err error) er
 // marks that file `not ok`. Exit is non-zero when any file fails.
 func cmdTest(args []string) error {
 	target := "."
-	for _, a := range args {
-		switch a {
-		case "--help", "-h":
-			fmt.Println(`usage: fusion test [target]
+	timeoutSecs := 30
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--help" || a == "-h":
+			fmt.Println(`usage: fusion test [target] [--timeout SECS]
   target: dir (default ".", runs every *_test.ks underneath) or a single .ks file
-  each file runs isolated; output is TAP (ok / not ok + 1..N plan)`)
+  each file runs isolated; output is TAP (ok / not ok + 1..N plan)
+  --timeout SECS: per-file timeout in seconds (default 30, 0 = no timeout);
+  a timed-out file is reported `+"`not ok`"+` and the run continues`)
 			return nil
+		case a == "--timeout":
+			if i+1 >= len(args) {
+				return fmt.Errorf("usage: fusion test [target] [--timeout SECS]")
+			}
+			i++
+			n, err := strconv.Atoi(args[i])
+			if err != nil || n < 0 {
+				return fmt.Errorf("bad --timeout %q: want seconds >= 0", args[i])
+			}
+			timeoutSecs = n
+		case strings.HasPrefix(a, "--timeout="):
+			n, err := strconv.Atoi(strings.TrimPrefix(a, "--timeout="))
+			if err != nil || n < 0 {
+				return fmt.Errorf("bad --timeout %q: want seconds >= 0", a)
+			}
+			timeoutSecs = n
 		default:
 			if strings.HasPrefix(a, "-") {
-				return fmt.Errorf("unknown flag %q (usage: fusion test [target])", a)
+				return fmt.Errorf("unknown flag %q (usage: fusion test [target] [--timeout SECS])", a)
 			}
 			if target != "." {
-				return fmt.Errorf("usage: fusion test [target] (single target only)")
+				return fmt.Errorf("usage: fusion test [target] [--timeout SECS] (single target only)")
 			}
 			target = a
 		}
@@ -1008,7 +1028,7 @@ func cmdTest(args []string) error {
 	failed := 0
 	for i, f := range files {
 		name := displayPath(f)
-		if err := runTestFile(f); err != nil {
+		if err := runTestFileTimeout(f, timeoutSecs); err != nil {
 			fmt.Printf("not ok %d - %s (%v)\n", i+1, name, err)
 			failed++
 			continue
@@ -1059,11 +1079,33 @@ func collectTestFiles(target string) ([]string, error) {
 // baseDir is the nearest ancestor holding fusion.toml (so app-root-relative
 // imports work from nested test files), else the file's own directory.
 func runTestFile(path string) error {
+	return runTestFileTimeout(path, 0)
+}
+
+// runTestFileTimeout runs one test file with a per-file timeout.
+// timeoutSecs <= 0 means no timeout. A timed-out file returns an error and
+// the TAP run continues with the next file. Note: a hung interpreter
+// goroutine cannot be force-stopped, so it is abandoned (leaked) after the
+// timeout fires; `go test` unit tests must not hang instead.
+func runTestFileTimeout(path string, timeoutSecs int) error {
 	prog, err := frontend.ParseFile(path)
 	if err != nil {
 		return err
 	}
-	return backend.RunWithDir(prog, testAppRoot(path))
+	if timeoutSecs <= 0 {
+		return backend.RunWithDir(prog, testAppRoot(path))
+	}
+	type result struct{ err error }
+	ch := make(chan result, 1)
+	go func() {
+		ch <- result{backend.RunWithDir(prog, testAppRoot(path))}
+	}()
+	select {
+	case r := <-ch:
+		return r.err
+	case <-time.After(time.Duration(timeoutSecs) * time.Second):
+		return fmt.Errorf("timeout after %ds (per-file --timeout)", timeoutSecs)
+	}
 }
 
 // testAppRoot finds the app dir for a test file: nearest ancestor with

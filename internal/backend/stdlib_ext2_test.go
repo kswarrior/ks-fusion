@@ -25,21 +25,34 @@ func TestV23State(t *testing.T) {
 }
 
 func TestV23TCP(t *testing.T) {
-	// tcp_serve + connect/send/recv roundtrip on localhost
+	// tcp_serve + connect/send/recv roundtrip on localhost.
+	// Port 0 asks the OS for a free port; tcp_serve returns the bound
+	// port and tcp_shutdown releases it, so `go test -count=N` is repeat-safe.
 	mustRunV23(t, `
-let port = 18765
-let srv = tcp_serve(port, func(id) {
+let port = tcp_serve(0, func(id) {
   let msg = tcp_recv(id, 64)
   tcp_send(id, "echo:" + msg)
   tcp_close(id)
 })
+assert(port > 0)
 sleep(100)
 let c = tcp_connect("127.0.0.1", port)
 tcp_send(c, "hi")
 let r = tcp_recv(c, 64)
 assert(r == "echo:hi")
 tcp_close(c)
+tcp_shutdown(port)
 `)
+}
+
+func TestTCPShutdownUnknown(t *testing.T) {
+	p, err := frontend.ParseSource(`tcp_shutdown(1)`, "test.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(p); err == nil {
+		t.Fatal("want error for unknown listener port")
+	}
 }
 
 func TestV23BuiltinCount(t *testing.T) {
