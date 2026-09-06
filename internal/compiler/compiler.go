@@ -1,22 +1,24 @@
 // Package compiler is the ks-fusion ahead-of-time step toward Go/Rust parity.
 //
-// v0.1 (subset): .ks source -> portable bytecode (.ksb-1, JSON) -> stack VM.
-// It proves the pipeline (parse -> compile -> save -> load -> run) without
-// reimplementing the full tree-walk runtime yet.
+// v0.2 (expanded subset): .ks source -> portable bytecode (.ksb-1, JSON) -> stack VM.
+// It proves the pipeline (parse -> compile -> save -> load -> run) and now
+// covers slices, `is`/`?.`/`??`, typed params/lets (runtime-checked, nilable),
+// and `switch` (desugared to an Eq-chain, first match wins).
 //
 // Supported subset (everything else is a clear compile error, still runs
 // in the interpreter):
 //
 //	literals: nil bool int float string, arrays, maps (string keys)
-//	vars: let, =, += -= *= /= %= (var + index targets)
-//	exprs: + - * / % **, == != < <= > >=, in, and or not/!, unary -
-//	calls: user funcs + builtins (assert len range str int float type)
+//	vars: let (+ `: type` check), =, += -= *= /= %= (var + index targets)
+//	exprs: + - * / % **, == != < <= > >=, in, is, ??, and or not/!, unary -,
+//	       a[i]/m.key (incl. `?.` safe), a[l:r] slices
+//	calls: user funcs (+ typed params) + builtins (assert len range str int float type)
 //	index: a[i], m.key, m["k"], s[i]
 //	stmts: print, if/else, while, for-in (array/map/string), for-c,
-//	       func/return, break/continue, blocks
+//	       func/return (+ typed params), break/continue, switch, blocks
 //
-// Not yet: go/chan/select, import, try/catch, switch, defer, sleep, slices,
-// closures capturing outer locals, methods mutating shared state.
+// Not yet: go/chan/select, import, try/catch, defer, sleep,
+// closures capturing outer locals, struct/enum declarations.
 package compiler
 
 import (
@@ -244,9 +246,10 @@ type loopCtx struct {
 }
 
 type funcCtx struct {
-	fn     *Func
-	locals []local
-	depth  int
+	fn         *Func
+	locals     []local
+	depth      int
+	returnType string
 }
 
 type compiler struct {
@@ -973,7 +976,7 @@ func (c *compiler) compileFuncDefTyped(name string, params, paramTypes []string,
 	c.funcs = append(c.funcs, fn)
 	idx := len(c.funcs) - 1
 	// compile body in new frame
-	c.frames = append(c.frames, &funcCtx{fn: fn})
+	c.frames = append(c.frames, &funcCtx{fn: fn, returnType: returnType})
 	for _, p := range params {
 		c.defineLocal(p)
 	}
