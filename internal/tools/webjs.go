@@ -1713,7 +1713,7 @@ func BuildSSG(appDir, out string) error {
 			fmt.Printf("ssg skip %s: %v\n", r, err)
 			continue
 		}
-		html := vmToHTMLWithWatch(vmJSON, r, false)
+		html := vmToHTMLWithWatchDir(vmJSON, r, false, cfg.Dir)
 		name := strings.Trim(r, "/")
 		if name == "" {
 			name = "index"
