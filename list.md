@@ -71,7 +71,7 @@
 - [x] Debugger (`fusion debug --break/--trace` + OnStmt hook, non-interactive) done v2.5 [holds Tooling 9]
 - [x] `.ks`-line profiler (`fusion profile [--top N]`, exact per-line counts) done v2.6 [holds Tooling 9; time-profiling left]
 - [x] Vendor-aware build cache (vendor swaps bust it) + `fusion build --bin --strip` (`-ldflags "-s -w"`) done v2.6 [holds Build 8]
-- [x] `--bin` E2E (`TestBuildBinE2E`) + in-repo CI (`.github/workflows/ci.yml`) + hygiene (`retest.log` removed) done v2.6 [+1 Maturity 8→9; TLS-server E2E left]
+- [x] `--bin` E2E (`TestBuildBinE2E`: plain + `--strip`, both run; stripped asserts smaller) + hygiene (`retest.log` removed, `.gitignore` for `--bin` temp dirs, vet fix) done v2.6 [+1 Maturity 8→9; TLS-server E2E left; `.github` gate stays in `ci.sh` — workflows are deployment-managed here]
 - [x] Benchmarks (`fusion bench`) (done v2.4, criterion-style reports left)
 
 ## Interop P2
