@@ -382,7 +382,7 @@ Commands:
    fusion yank <name[@ver]> [--remove]  yank registry version
    fusion registry            list registry packages
    fusion run-web [appdir] [--port N] [--watch]  SSR + /api/* + SSE HMR patch
-   fusion build-js [appdir] [--out DIR]  transpile pages to JS per-route + hashes
+    fusion build-js [appdir] [--out DIR] [--strict|--no-strict]  transpile pages to JS per-route + hashes (STRICT default)
    fusion build-ssg [appdir] [--out DIR]  pre-render routes to HTML+JSON (ISR)
    fusion audit [appdir]      check lock vs registry (yanked/updates/checksums)
    fusion lsp                 LSP (hover/goto-def/rename/diagnostics/format/completion) for VS Code

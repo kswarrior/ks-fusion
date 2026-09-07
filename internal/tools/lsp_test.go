@@ -166,3 +166,74 @@ func TestLSPCompletionWorkspaceFuncs(t *testing.T) {
 		t.Fatalf("want workspace func greet_foo, got %d items", len(items))
 	}
 }
+
+func TestLSPSavedDiagnosticsIncludesVet(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "fusion.toml"), []byte("[package]\nname = \"r\"\nversion = \"0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fe := filepath.Join(dir, "frontend")
+	if err := os.MkdirAll(fe, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := filepath.Join(fe, "a.ks")
+	src := "let h = \"<b>\"\nset_html(h)\n"
+	if err := os.WriteFile(a, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	uri := "file://" + filepath.ToSlash(a)
+	params := diagnosticsParamsSaved(uri)
+	diags := params["diagnostics"].([]any)
+	foundVet := false
+	for _, d := range diags {
+		m := d.(map[string]any)
+		if m["source"] == "fusion-vet" {
+			foundVet = true
+			r := m["range"].(map[string]any)
+			start := r["start"].(map[string]any)
+			end := r["end"].(map[string]any)
+			if end["character"] == 0 {
+				t.Fatalf("want non-zero whole-line range, got %v", r)
+			}
+			if start["line"] != end["line"] {
+				t.Fatalf("want single-line range, got %v", r)
+			}
+			if m["severity"] != 1 {
+				t.Fatalf("frontend-set-html is error, want severity 1, got %v", m["severity"])
+			}
+		}
+	}
+	if !foundVet {
+		t.Fatalf("want fusion-vet diagnostic on save, got %v", diags)
+	}
+}
+
+func TestLSPSavedDiagnosticsAppAware(t *testing.T) {
+	// multi-file frontend with imports must not false-positive unknown-var/arity
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "fusion.toml"), []byte("[package]\nname = \"r\"\nversion = \"0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fe := filepath.Join(dir, "frontend")
+	if err := os.MkdirAll(fe, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lib := filepath.Join(fe, "lib.ks")
+	main := filepath.Join(fe, "main.ks")
+	if err := os.WriteFile(lib, []byte("func shared_fn(x) {\n return x\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(main, []byte("import \"frontend/lib.ks\"\nprint shared_fn(1)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	uri := "file://" + filepath.ToSlash(main)
+	params := diagnosticsParamsSaved(uri)
+	diags := params["diagnostics"].([]any)
+	for _, d := range diags {
+		m := d.(map[string]any)
+		msg := m["message"].(string)
+		if m["source"] == "fusion-vet" && (len(msg) >= 10 && (contains(msg, "unknown-var") || contains(msg, "arity"))) {
+			t.Fatalf("app-aware vet must not false-positive cross-file, got %v", diags)
+		}
+	}
+}

@@ -13,7 +13,10 @@ Language support for `.ks` files backed by `fusion lsp` (this repo:
 
 - Hover over top-level funcs + builtins, goto-definition (file + line),
   rename across the app root, format-on-save via `fusion fmt` rules.
-- Diagnostics: parse errors on type, `fusion vet` issues on save.
+- Diagnostics: parse errors on type, `fusion vet` issues on save
+  (client sends `textDocument/didSave` + `willSave`; server runs app-aware
+  `VetTarget` with whole-line ranges — previously `didSave` was never sent
+  so vet-on-save was unreachable).
 
 ## Limits (honest)
 

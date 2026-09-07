@@ -45,7 +45,11 @@
 - [x] P1.0 Example tests: add `tests/hello-app/frontend/pages/home_test.ks`
   (`assert(home_page({}).key == "home")`) + `store/app_test.ks` (`assert(is_ok(app_fetch_user()))`).
 - [ ] P1.1 `fmt`: implement printer from `frontend` AST + `--check`; run on repo until clean.
-- [ ] P1.2 `vet`: AST walkers for 6 rules above; `cmd/fusion` wiring + `--deny-warns`.
+- [x] P1.2 `vet`: AST walkers for 6 rules above; `cmd/fusion` wiring + `--deny-warns`.
+  P0 STRICT done: `frontend-env` (IsError, hardened block-comment/string/`env (` handling,
+  ROUTE exception), `frontend-set-html` (non-literal ban, AST), `frontend-key`
+  (missing key + index-key via for-in vars, AST) are `check` errors; LSP save
+  diagnostics use app-aware `VetTarget` with whole-line ranges.
 - [x] P1.3 `test`: discovery + runner + TAP + timeout; wire `launch` env (`ROUTE`) passthrough.
   Done except per-file timeout (documented limitation: a hung file blocks the run).
 - [ ] P1.4 CI gate: README + help text; `vet` + `test` run in CI script; `vs.md` Tooling 4→7 note.

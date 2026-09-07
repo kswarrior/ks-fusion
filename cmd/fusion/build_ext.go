@@ -112,20 +112,34 @@ func cmdSSG(args []string) error {
 func cmdBuildJS(args []string) error {
 	dir := "."
 	out := ""
+	strict := true
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
 		case a == "--help" || a == "-h":
-			fmt.Println("usage: fusion build-js [appdir] [--out DIR]\n  transpile safe .ks subset to JS per-route (split/shake/minify analogue)")
+			fmt.Println("usage: fusion build-js [appdir] [--out DIR] [--strict|--no-strict]\n  transpile safe .ks subset to JS per-route (split/shake/minify analogue)\n  STRICT (default): fail on unsupported constructs with file:line (for-c, select, go, ...).\n  --strict=false keeps v2.2 lenient output (// unsupported comments, null).")
 			return nil
 		case a == "--out" || a == "-o":
 			if i+1 >= len(args) {
-				return fmt.Errorf("usage: fusion build-js [appdir] [--out DIR]")
+				return fmt.Errorf("usage: fusion build-js [appdir] [--out DIR] [--strict|--no-strict]")
 			}
 			i++
 			out = args[i]
 		case strings.HasPrefix(a, "--out="):
 			out = strings.TrimPrefix(a, "--out=")
+		case a == "--strict":
+			strict = true
+		case a == "--no-strict" || a == "--strict=false":
+			strict = false
+		case strings.HasPrefix(a, "--strict="):
+			v := strings.TrimPrefix(a, "--strict=")
+			if v == "true" || v == "1" {
+				strict = true
+			} else if v == "false" || v == "0" {
+				strict = false
+			} else {
+				return fmt.Errorf("bad --strict=%q (want true/false)", v)
+			}
 		case strings.HasPrefix(a, "-"):
 			return fmt.Errorf("unknown flag %q", a)
 		default:
@@ -135,7 +149,7 @@ func cmdBuildJS(args []string) error {
 			dir = a
 		}
 	}
-	return tools.BuildJS(dir, out)
+	return tools.BuildJSWithOptions(dir, out, tools.BuildJSOptions{Strict: strict})
 }
 
 func cmdPublish(args []string) error {

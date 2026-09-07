@@ -1,6 +1,11 @@
 package frontend
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestParseLetPrint(t *testing.T) {
 	p, err := ParseSource("let x = 10\nprint x", "test.ks")
@@ -357,5 +362,224 @@ func TestParseUnionGenericType(t *testing.T) {
 	}
 	if p.Statements[1].TypeAnn != "array<int>" {
 		t.Fatalf("want array<int>, got %q", p.Statements[1].TypeAnn)
+	}
+}
+
+func TestParseStructEnum(t *testing.T) {
+	p, err := ParseSource("struct User { name: string, age: int }", "t.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Statements[0].Kind != StmtStruct || p.Statements[0].Name != "User" {
+		t.Fatalf("bad struct: %+v", p.Statements[0])
+	}
+	if len(p.Statements[0].Fields) != 2 || p.Statements[0].Fields[0].Name != "name" || p.Statements[0].Fields[1].Type != "int" {
+		t.Fatalf("bad struct fields: %+v", p.Statements[0].Fields)
+	}
+	q, err := ParseSource("enum Color { Red, Green, Blue }", "t.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.Statements[0].Kind != StmtEnum || len(q.Statements[0].Variants) != 3 {
+		t.Fatalf("bad enum: %+v", q.Statements[0])
+	}
+	for _, bad := range []string{
+		"struct User { name: string, name: int }",
+		"enum Color { Red, Red }",
+		"struct user { name: string }",
+		"enum color { Red }",
+		"struct User {}",
+		"enum Empty {}",
+	} {
+		if _, err := ParseSource(bad, "t.ks"); err == nil {
+			t.Fatalf("want error for %q", bad)
+		}
+	}
+	if _, err := ParseSource("struct User { name: string, name: int }", "t.ks"); err == nil || !strings.Contains(err.Error(), "duplicate struct field") {
+		t.Fatalf("want duplicate struct field error, got %v", err)
+	}
+	if _, err := ParseSource("enum Color { Red, Red }", "t.ks"); err == nil || !strings.Contains(err.Error(), "duplicate enum variant") {
+		t.Fatalf("want duplicate enum variant error, got %v", err)
+	}
+	if _, err := ParseSource("struct user { name: string }", "t.ks"); err == nil || !strings.Contains(err.Error(), "Capitalized") {
+		t.Fatalf("want Capitalized error, got %v", err)
+	}
+}
+
+func TestParseFileAndExprAndLineNumbers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hello.ks")
+	if err := os.WriteFile(path, []byte("let x = 1\nprint x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := ParseFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Statements) != 2 || p.Statements[0].Kind != StmtLet {
+		t.Fatalf("bad ParseFile: %+v", p.Statements)
+	}
+	if p.Path != path {
+		t.Fatalf("want path %q, got %q", path, p.Path)
+	}
+	if _, err := ParseFile(filepath.Join(dir, "missing.ks")); err == nil {
+		t.Fatal("want error for missing file")
+	}
+	e, err := ParseExpr("1 + 2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Kind != ExprAdd {
+		t.Fatalf("want add, got %+v", e)
+	}
+	if _, err := ParseExpr("1 +"); err == nil {
+		t.Fatal("want error for bad expr")
+	}
+	if _, err := ParseSource("let = 5", "test.ks"); err == nil || !strings.Contains(err.Error(), "test.ks:1:") {
+		t.Fatalf("want :1: line number, got %v", err)
+	}
+	if _, err := ParseSource("let x = 1\nlet = 5", "test.ks"); err == nil || !strings.Contains(err.Error(), ":2:") {
+		t.Fatalf("want :2: line number, got %v", err)
+	}
+}
+
+func TestParseSafeIndexAndSliceErrors(t *testing.T) {
+	p, err := ParseSource("print a?.[0]\n", "t.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var idx *Expr
+	if len(p.Statements[0].Exprs) > 0 {
+		idx = p.Statements[0].Exprs[0]
+	} else {
+		idx = p.Statements[0].Expr
+	}
+	if idx.Kind != ExprIndex || !idx.Safe {
+		t.Fatalf("want safe ?.[], got %+v", idx)
+	}
+	for _, src := range []string{"print a?.[1:2]\n", "print a?.[:2]\n"} {
+		_, err := ParseSource(src, "t.ks")
+		if err == nil || !strings.Contains(err.Error(), "slice with `?.` not supported") {
+			t.Fatalf("want ?. slice error for %q, got %v", src, err)
+		}
+	}
+	for _, src := range []string{"print a[1:2:3]\n", "let a = [1,2]\nprint a[0:2:1]\n"} {
+		_, err := ParseSource(src, "t.ks")
+		if err == nil || !strings.Contains(err.Error(), "slice stride not supported") {
+			t.Fatalf("want stride error for %q, got %v", src, err)
+		}
+	}
+}
+
+func TestParseDeferDeferAndGoDefer(t *testing.T) {
+	if _, err := ParseSource("defer defer print \"x\"\n", "t.ks"); err == nil || !strings.Contains(err.Error(), "defer defer is not allowed") {
+		t.Fatalf("want defer-defer reject, got %v", err)
+	}
+	// Frontend allows `go defer ...` (backend/compiler rejects `go`); assert parse ok.
+	p, err := ParseSource("go defer print \"hi\"\n", "t.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Statements[0].Kind != StmtGo || p.Statements[0].Inner == nil || p.Statements[0].Inner.Kind != StmtDefer {
+		t.Fatalf("want go-defer parse ok, got %+v", p.Statements[0])
+	}
+}
+
+func TestParseTryFinallyOnlyAndSwitchSelectErrors(t *testing.T) {
+	p, err := ParseSource("try {\n print 1\n} finally {\n print 2\n}\n", "t.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Statements[0].Kind != StmtTry || p.Statements[0].CaBody != nil || p.Statements[0].FinBody == nil {
+		t.Fatalf("want try-finally-only, got %+v", p.Statements[0])
+	}
+	if _, err := ParseSource("try {\n print 1\n}\n", "t.ks"); err == nil || !strings.Contains(err.Error(), "try needs") {
+		t.Fatalf("want bare try error, got %v", err)
+	}
+	if _, err := ParseSource("switch x {\n}\n", "t.ks"); err == nil || !strings.Contains(err.Error(), "switch needs at least one") {
+		t.Fatalf("want empty switch error, got %v", err)
+	}
+	if _, err := ParseSource("select {\n}\n", "t.ks"); err == nil || !strings.Contains(err.Error(), "select needs at least one") {
+		t.Fatalf("want empty select error, got %v", err)
+	}
+	if _, err := ParseSource("switch x {\n default { print 1 }\n default { print 2 }\n}\n", "t.ks"); err == nil || !strings.Contains(err.Error(), "duplicate default in switch") {
+		t.Fatalf("want dup default error, got %v", err)
+	}
+	if _, err := ParseSource("switch x {\n default { print 1 }\n case 1 { print 2 }\n}\n", "t.ks"); err == nil || !strings.Contains(err.Error(), "default must be the last branch") {
+		t.Fatalf("want default-first error, got %v", err)
+	}
+}
+
+func TestParseEdgeErrors(t *testing.T) {
+	for _, src := range []string{"let s = \"hi\n", "let s = 'hi\n"} {
+		if _, err := ParseSource(src, "t.ks"); err == nil || !strings.Contains(err.Error(), "unterminated string") {
+			t.Fatalf("want unterminated string for %q, got %v", src, err)
+		}
+	}
+	if _, err := ParseSource("let a = [1, 2\n", "t.ks"); err == nil || !strings.Contains(err.Error(), "want `,` or `]`") {
+		t.Fatalf("want unterminated array error, got %v", err)
+	}
+	if _, err := ParseSource("let m = {a: 1\n", "t.ks"); err == nil || !strings.Contains(err.Error(), "want `,` or `}`") {
+		t.Fatalf("want unterminated map error, got %v", err)
+	}
+	// for-c with empty init/cond/post: `for ;; { }`
+	fc, err := ParseSource("for ;; {\n print 1\n}\n", "t.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fc.Statements[0].Kind != StmtForC || fc.Statements[0].Init != nil || fc.Statements[0].Post != nil {
+		t.Fatalf("want empty for-c, got %+v", fc.Statements[0])
+	}
+	if fc.Statements[0].Expr == nil || fc.Statements[0].Expr.Kind != ExprBool || !fc.Statements[0].Expr.BoolVal {
+		t.Fatalf("want true cond for empty for-c, got %+v", fc.Statements[0].Expr)
+	}
+	// let x:type defaults to nil (nullable)
+	lp, err := ParseSource("let x: int\n", "t.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lp.Statements[0].TypeAnn != "int" || lp.Statements[0].Expr == nil || lp.Statements[0].Expr.Kind != ExprNil {
+		t.Fatalf("want nil default typed let, got %+v", lp.Statements[0])
+	}
+	// 1-level nesting ok, deeper fails (parser supports one nested <> level)
+	if _, err := ParseSource("let a: array<int> = [1]\n", "t.ks"); err != nil {
+		t.Fatalf("want 1-level generic ok: %v", err)
+	}
+	if _, err := ParseSource("let a: array<array<int>> = [[1]]\n", "t.ks"); err != nil {
+		t.Fatalf("want nested generic ok: %v", err)
+	}
+	if _, err := ParseSource("let a: array<array<array<int>>> = [[[1]]]\n", "t.ks"); err == nil {
+		t.Fatal("want error for 2-level nested generic")
+	}
+	if _, err := ParseSource("let x: Base<int> = 1\n", "t.ks"); err == nil || !strings.Contains(err.Error(), "invalid generic type") {
+		t.Fatalf("want invalid generic error, got %v", err)
+	}
+	if _, err := ParseSource("print a ? b\n", "t.ks"); err == nil || !strings.Contains(err.Error(), "unexpected `?`") {
+		t.Fatalf("want bare ? error, got %v", err)
+	}
+}
+
+func TestParseImportAs(t *testing.T) {
+	// Bare import still parses with empty alias (backwards compat).
+	b, err := ParseSource("import \"lib.ks\"\n", "t.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Statements[0].Kind != StmtImport || b.Statements[0].StrVal != "lib.ks" || b.Statements[0].Alias != "" {
+		t.Fatalf("bad bare import: %+v", b.Statements[0])
+	}
+	// Minimal `as` alias: frontend-only, backend ignores (flat globals remain).
+	p, err := ParseSource("import \"lib.ks\" as hl\n", "t.ks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Statements) != 1 || p.Statements[0].Kind != StmtImport {
+		t.Fatalf("want single import stmt, got %+v", p.Statements)
+	}
+	if p.Statements[0].StrVal != "lib.ks" || p.Statements[0].Alias != "hl" {
+		t.Fatalf("bad import-as: %+v", p.Statements[0])
+	}
+	if _, err := ParseSource("import \"lib.ks\" as \n", "t.ks"); err == nil {
+		t.Fatal("want error for missing alias")
 	}
 }

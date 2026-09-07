@@ -60,7 +60,8 @@
   imports via nearest `fusion.toml`. Left: per-file timeout.
 * [x] `fusion doc` from `#` comments. Done v2.4: `fusion doc [target] [--out FILE]`.
 * [ ] Namespaced imports: `import "hello-lib" as hl` / `hl.greet()`.
-  Today: flat globals, prefix your functions.
+  Today: flat globals, prefix your functions (frontend parses `as hl` into
+  `StmtImport.Alias` but backend still ignores it — no namespacing yet).
 * [x] `fusion.lock` + real semver resolver (`^0.1.0`, `>=`, path + git deps). Done v2.4:
   `^ ~ >= > < *` + `fusion.lock` + `fusion vendor`. Done v2.4: registry `publish/pull/yank` + sha256 + namespaces + private token. Left: git deps, audit.
 * [x] Error values (`Result`-style) as alternative to `error(msg)` abort +
@@ -91,9 +92,13 @@
 * [x] `chan` iteration `for v in ch` (drains until close, Go `range` semantics)
   + `recv_timeout/send_timeout/chan_closed` helpers. Done v2.1.
   Left: `select/sleep` deadline contexts, buffered-chan semantics docs.
-* [ ] Structs / typed maps: `type User = {name: string, age: int}` (optional static check).
-  Today v2.1 has primitive `: type` annotations only.
-* [ ] Enums + exhaustive `switch` check.
+* [x] Structs: `struct User { name: string, age: int }` syntax (v2.5) + union
+  (`int|string`) / generic (`array<int>`, `map<string,int>`) annotations +
+  runtime validation (`struct_validate`, nominal `is`); vet exhaustive done.
+  Left: `type User = {...}` alias spelling, methods.
+* [x] Enums + exhaustive `switch` check: `enum Color { Red, Green, Blue }`
+  (v2.5) + enum-aware vet (missing-variant names, `default` rescues, bool
+  true/false).
 * [x] `?.` nil-safe access + `??` default operator. Done v2.1
   (`a?.b`/`a?.[i]` missing → `nil`, `a ?? b` nil-only short-circuit;
   replaces `get(m,k,default)` for nil-safety).

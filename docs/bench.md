@@ -63,3 +63,51 @@ Remaining interpreter-only (run with `fusion run`, not `fusion compile`):
 "runs in interpreter" error (`compiler.go:compileStmt`).
 
 See `docs/vs.md` §1 for the full v0.3 subset list + reject table.
+
+## Frontend (P4 HMR perf + budgets, 2026-09-07)
+
+Reproduce: `go test ./internal/tools/ -bench 'BenchmarkRender|BenchmarkDiff|BenchmarkBuildJS|BenchmarkHMR' -run XXX`
+(Benches live in `internal/tools/webbench_test.go`; HMR debounce/cache tests are `TestHMR*` in `internal/tools/hmr_test.go`.)
+
+Measured on `linux/amd64`, Intel Xeon Platinum 8573C (cloud box, treat as ≈±30%):
+
+| Bench | ns/op | What it measures |
+|---|---|---|
+| `BenchmarkRenderRouteRoot` (`/` hello-app) | ~270k (~0.27ms) | full `renderRouteWithStatusUncached` incl. cached-parse exec (TTFR path) |
+| `BenchmarkRenderRouteHi` (`/hi`) | ~197k (~0.20ms) | full render `/hi` |
+| `BenchmarkRenderRouteUser` (`/user/7`) | ~204k (~0.20ms) | full render dynamic `user_page` with `props.id="7"` (P1 path) |
+| `BenchmarkHMRTickCached` (`/`, no change) | ~59k (~0.059ms) | debounced SSE tick: frontend mtime-hash + route-cache hit, no exec |
+| `BenchmarkDiffLarge200` (200-child, 1 change) | ~691k (~0.69ms) | `DiffViewModels` keyed patch (worst-case virtualized list) |
+| `BenchmarkBuildJS` (3 routes, same out) | ~275k (~0.28ms/call) | `BuildJS` parse+emit+hash; writes skipped by content-hash when unchanged |
+
+Approx HMR tick cost: typical small page = cached tick (~0.06ms) + small diff (µs) ≈ **~0.06ms**;
+worst case full re-render + 200-child diff ≈ 0.27ms + 0.69ms ≈ **~0.96ms**.
+Both are ~100x under the **HMR <100ms** budget (`plan/frontend.md:98-99`).
+Slow ticks (>100ms) log via `fmt.Printf` only when `FUSION_DEBUG_HMR=1`
+(`internal/tools/webperf_p4.go:maybeLogSlowHMRTick`, watch mode) to avoid noise.
+
+TTFR: `X-Render-Time` header is always set on `/` responses (preserved on 404);
+render itself is ~0.2–0.3ms, so **TTFR <1s** holds by ~3000x locally.
+TTFR >1s logs only when `FUSION_DEBUG_HMR=1` (`maybeLogSlowTTFR`).
+
+Route JS sizes from manifest (budgets warn >100KB / fail >250KB, enforced in
+`internal/tools/buildjs_p3.go`, unchanged):
+
+- hello-app (`fusion build-js tests/hello-app`): `404.js` 492B, `hi.js` 426B,
+  `index.js` 881B, `user_[id].js` 586B — all ~100x under warn.
+- bench temp fixture (3 minimal pages): `hi.js` 318B, `index.js` 344B,
+  `user_[id].js` 396B.
+
+P4 implementation notes (`internal/tools/webperf_p4.go`, `webjs.go`):
+
+- Debounce 1 render/tick: `/events` checks `watcher.version()` once per
+  `sseTickInterval` (300ms, `TODO WS push`); multiple mtime bumps in the same
+  window coalesce into one `renderRoute`+`DiffViewModels` per route.
+- Per-route cache `route -> {vmJSON, status, mtimeHash}` (content-hash analogue):
+  unchanged routes (e.g. backend-only change) skip re-exec on tick.
+- Incremental parse `path -> {prog, mtime, size}`: only changed files re-parse;
+  new files miss, deletes pruned. Failures never cached.
+- Poll `webWatchPollInterval` stays 400ms (`TODO WS/fsnotify`).
+- Invariants kept: never `location.reload` (banner on render error),
+  P1 `user_[id]` routing props, hydrate JS (`__hydrate`/`__applyPatch`/etc.)
+  untouched; virtualize >100 rows unchanged.

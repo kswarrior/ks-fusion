@@ -170,6 +170,7 @@ type Stmt struct {
 	Cases       []*SwitchCase
 	SelectCases []*SelectCase // select branches
 	StrVal      string        // import path
+	Alias       string        // import alias (`import "x" as h`), "" = none; backend ignores (flat globals remain)
 	Catch   string // try: catch variable ("" = none)
 	CaBody  *Stmt  // try: catch body (nil = no catch)
 	FinBody *Stmt  // try: finally body (nil = none)
@@ -1618,7 +1619,19 @@ func (p *parser) parseImport() (*Stmt, error) {
 		return nil, p.errf(t, "bad import: want `import \"file.ks\"`, got %q", t.Lit)
 	}
 	p.next()
-	return &Stmt{Kind: StmtImport, StrVal: t.Lit, Line: it.Line}, nil
+	// Minimal `as` alias (frontend-only): `import "x" as h` parses to
+	// StmtImport with Alias set; backend ignores alias (flat globals remain).
+	alias := ""
+	if p.peek().K == tIdent && p.peek().Lit == "as" {
+		p.next() // as
+		at := p.peek()
+		if at.K != tIdent {
+			return nil, p.errf(at, "bad import alias: want `import \"x\" as name`, got %q", at.Lit)
+		}
+		alias = at.Lit
+		p.next()
+	}
+	return &Stmt{Kind: StmtImport, StrVal: t.Lit, Alias: alias, Line: it.Line}, nil
 }
 
 func (p *parser) parseTry() (*Stmt, error) {

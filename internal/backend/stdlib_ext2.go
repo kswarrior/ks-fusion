@@ -71,6 +71,24 @@ func bOnMount(in *Interpreter, args []Value) (Value, error) {
 	return in.callValue(args[0], []Value{})
 }
 
+// SnapshotGlobalState returns a copy of the use_state map as JSON-encodable
+// Go values for SSR embed (web hydrate-full). It is additive only: interpreter
+// immediate semantics for console/run are unchanged (on_mount still calls
+// immediately; use_state/set_state still hit the process-global map).
+func SnapshotGlobalState() map[string]any {
+	globalStateMu.RLock()
+	defer globalStateMu.RUnlock()
+	out := make(map[string]any, len(globalState))
+	for k, v := range globalState {
+		j, err := valueToJSON(v)
+		if err != nil {
+			continue
+		}
+		out[k] = j
+	}
+	return out
+}
+
 // --- TCP (ints as handles via registry) ---
 
 var tcpMu sync.Mutex

@@ -54,7 +54,7 @@ func cmdVet(args []string) error {
 		case a == "--deny-warns":
 			denyWarns = true
 		case a == "--help" || a == "-h":
-			fmt.Println("usage: fusion vet [target] [--deny-warns]\n  vet .ks: unused let, arity, unknown var, frontend env()")
+			fmt.Println("usage: fusion vet [target] [--deny-warns]\n  vet .ks: unused let, arity, unknown var, frontend env()/set_html/key (errors)")
 			return nil
 		case strings.HasPrefix(a, "-"):
 			return fmt.Errorf("unknown flag %q (usage: fusion vet [target] [--deny-warns])", a)
@@ -135,7 +135,7 @@ func cmdCheck(args []string) error {
 	for _, a := range args {
 		switch {
 		case a == "--help" || a == "-h":
-			fmt.Println("usage: fusion check [target]\n  strict check: parse + arity + :type + is narrowing (vet errors)")
+			fmt.Println("usage: fusion check [target]\n  strict check: parse + arity + :type + is narrowing + frontend env/set_html/key (vet errors)")
 			return nil
 		case strings.HasPrefix(a, "-"):
 			return fmt.Errorf("unknown flag %q", a)

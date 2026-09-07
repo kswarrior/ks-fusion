@@ -120,10 +120,16 @@ func foldExpr(e *Expr) *Expr {
 			return folded
 		}
 	}
-	// fold unary not/-/! on literals
-	if (e.Kind == ExprNot || e.Kind == ExprNeg) && e.Left != nil && isLit(e.Left) {
-		if folded, ok := foldUnary(e.Kind, e.Left); ok {
-			return folded
+	// fold unary not/-/! on literals (parser stores operand in Right)
+	if e.Kind == ExprNot || e.Kind == ExprNeg {
+		operand := e.Right
+		if operand == nil {
+			operand = e.Left // compat: never set by parser, kept for safety
+		}
+		if operand != nil && isLit(operand) {
+			if folded, ok := foldUnary(e.Kind, operand); ok {
+				return folded
+			}
 		}
 	}
 	// fold len("hi") -> 2, len([1,2]) -> 2 (v2.4 perf)

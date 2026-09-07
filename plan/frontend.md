@@ -24,7 +24,7 @@ myapp/
     main.ks                    # entry: route table + layout only
     pages/home.ks              # "/"       -> func home_page(props): map
     pages/hi.ks                # "/hi"     -> func hi_page(props): map
-    pages/user_[id].ks         # "/user/7" -> dynamic segment (manual if first)
+    pages/user_[id].ks         # "/user/7" -> func user_page(props) with props.id (P1 STRICT implemented)
     components/header.ks       # func header_render(props): map
     layouts/app.ks             # func app_layout(page): map
     store/app.ks               # state + fetch/decode, no view code
@@ -52,6 +52,7 @@ myapp/
 ## 3. Phased roadmap P0–P10 (exit = concrete check)
 
 - P0 Conventions: layout above + naming rules. Exit: review OK on hello-app.
+  (P1 DONE: `user_[id].ks`→`user_page` with props `{id,path,query,params}`, 404 fallback, SSG skips dynamic; see `TestRouting*`.)
 - P1 Type-check & vet: `fusion check` strict + `as` imports + `vet` bans
   (non-literal `set_html`, index keys) + structs/enums for props. Exit: CI green.
 - P2 SSR + HMR dev server: `fusion run --web` SSR on change + WebSocket patch, no full reload.
@@ -60,6 +61,10 @@ myapp/
   Exit: SSR page becomes interactive, fetches data.
 - P4 Bundler: `fusion build --js` per-route transpile/split/shake/minify.
   Exit: `/` + `/hi` load as static HTML+JS without `fusion`.
+  (P3 DONE: STRICT `--strict` default fail w/ file:line, `--strict=false` lenient; dep-graph all frontend/**/*.ks except main.ks,
+  per-route BFS used-func closure + tree-shake, dynamic `user_[id].ks`→`user_[id].js` w/ comment, CSS passthrough
+  `frontend/styles/*.css`→`target/js/styles/` + manifest `styles` link hint, budgets warn>100KB/fail>250KB, sha-skip + manifest sizes/hashes;
+  see `internal/tools/buildjs_test.go` TestBuildJS*.)
 - P5 SSG: `build --ssg` pre-renders JSON+HTML to `target/`. Exit: cached serve works.
 - P6 API routes: `backend/api/*.ks` → `/api/*` JSON. Exit: `fetch("/api/user")` returns map.
 - P7 Budgets: warn >100KB, fail >250KB per route; log sizes. Exit: warnings in build output.

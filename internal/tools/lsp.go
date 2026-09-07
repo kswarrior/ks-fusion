@@ -392,43 +392,75 @@ func diagnosticsParams(uri string) map[string]any {
 }
 
 // diagnosticsParamsSaved re-reads the file from disk (post-save) and adds
-// vet issues on top of parse diagnostics.
+// vet issues on top of parse diagnostics. Uses app-aware VetTarget (not
+// single VetFile) so multi-file frontend/ with imports does not false-positive
+// on unknown-var/arity; falls back to VetFile when outside an app root.
 func diagnosticsParamsSaved(uri string) map[string]any {
 	base := diagnosticsParams(uri)
 	diags := base["diagnostics"].([]any)
 	path := uriToPath(uri)
 	if path != "" {
-		if issues, err := VetFile(path); err == nil {
-			for _, is := range issues {
-				sev := 2
-				if is.IsError {
-					sev = 1
-				}
-				line := is.Line - 1
-				if line < 0 {
-					line = 0
-				}
-				diags = append(diags, map[string]any{
-					"range": map[string]any{
-						"start": map[string]any{"line": line, "character": 0},
-						"end":   map[string]any{"line": line, "character": 0},
-					},
-					"severity": sev,
-					"source":   "fusion-vet",
-					"message":  is.Rule + ": " + is.Msg,
-				})
+		issues := savedVetIssues(path)
+		// whole-line ranges need on-disk line lengths
+		var lines []string
+		if data, err := os.ReadFile(path); err == nil {
+			lines = strings.Split(string(data), "\n")
+		}
+		for _, is := range issues {
+			sev := 2
+			if is.IsError {
+				sev = 1
 			}
+			line := is.Line - 1
+			if line < 0 {
+				line = 0
+			}
+			endChar := 0
+			if line >= 0 && line < len(lines) {
+				endChar = len(lines[line])
+			}
+			diags = append(diags, map[string]any{
+				"range": map[string]any{
+					"start": map[string]any{"line": line, "character": 0},
+					"end":   map[string]any{"line": line, "character": endChar},
+				},
+				"severity": sev,
+				"source":   "fusion-vet",
+				"message":  is.Rule + ": " + is.Msg,
+			})
 		}
 	}
 	base["diagnostics"] = diags
 	return base
 }
 
+// savedVetIssues vets the enclosing app root and filters to path, so
+// cross-file globals/imports resolve (no false unknown-var/arity).
+func savedVetIssues(path string) []VetIssue {
+	root := appRootFor(path)
+	if _, err := os.Stat(filepath.Join(root, "fusion.toml")); err == nil {
+		if issues, err := VetTarget(root, false); err == nil {
+			clean := filepath.Clean(path)
+			var out []VetIssue
+			for _, is := range issues {
+				if filepath.Clean(is.File) == clean {
+					out = append(out, is)
+				}
+			}
+			return out
+		}
+	}
+	if issues, err := VetFile(path); err == nil {
+		return issues
+	}
+	return nil
+}
+
 // parseDiagnostics parses text and returns one diagnostic per syntax error.
 func parseDiagnostics(uri, text string) []any {
 	if _, err := frontend.ParseSource(text, uriToPath(uri)); err != nil {
 		return []any{map[string]any{
-			"range":    errorLineRange(err),
+			"range":    errorLineRangeWithText(err, text),
 			"severity": 1,
 			"source":   "fusion-parse",
 			"message":  err.Error(),
@@ -440,15 +472,26 @@ func parseDiagnostics(uri, text string) []any {
 // errorLineRange extracts `path:line:` from frontend errors (1-based) into a
 // 0-based LSP range; unknown lines map to line 0.
 func errorLineRange(err error) any {
+	return errorLineRangeWithText(err, "")
+}
+
+func errorLineRangeWithText(err error, text string) any {
 	line := 0
 	if m := diagnosticLineRe.FindStringSubmatch(err.Error()); m != nil {
 		if n, aerr := strconv.Atoi(m[1]); aerr == nil && n > 0 {
 			line = n - 1
 		}
 	}
+	endChar := 0
+	if text != "" {
+		lines := strings.Split(text, "\n")
+		if line >= 0 && line < len(lines) {
+			endChar = len(lines[line])
+		}
+	}
 	return map[string]any{
 		"start": map[string]any{"line": line, "character": 0},
-		"end":   map[string]any{"line": line, "character": 0},
+		"end":   map[string]any{"line": line, "character": endChar},
 	}
 }
 

@@ -15,11 +15,12 @@
 //	       a[i]/m.key (incl. `?.` safe), a[l:r] slices
 //	calls: user funcs (+ typed params) + builtins (assert len range str int float type)
 //	index: a[i], m.key, m["k"], s[i]
-//	stmts: print, if/else, while, for-in (array/map/string), for-c,
-//	       func/return (+ typed params), break/continue, switch, blocks
+//	stmts: print, sleep, if/else, while, for-in (array/map/string/range-int),
+//	       for-c, func/return (+ typed params), break/continue, switch,
+//	       try/catch (no finally), blocks
 //
-// Not yet: go/chan/select, import, try/catch, defer, sleep,
-// closures capturing outer locals, struct/enum declarations.
+// Not yet (clear error, runs in interpreter): go/chan/select, import, defer,
+// struct/enum declarations, try/finally, closures capturing outer locals.
 package compiler
 
 import (

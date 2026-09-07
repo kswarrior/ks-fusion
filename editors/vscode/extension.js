@@ -75,6 +75,17 @@ function activate(context) {
     send({ method: 'textDocument/didClose', params: { textDocument: { uri: doc.uri.toString() } } });
     diagCollection.delete(doc.uri);
   }));
+  // vet-on-save: server runs app-aware VetTarget in diagnosticsParamsSaved.
+  // Without this, `textDocument/didSave` never fired and save diagnostics
+  // were unreachable (README claimed vet-on-save).
+  context.subscriptions.push(vscode.workspace.onDidSaveTextDocument((doc) => {
+    if (doc.languageId !== 'ks') return;
+    send({ method: 'textDocument/didSave', params: { textDocument: { uri: doc.uri.toString() } } });
+  }));
+  context.subscriptions.push(vscode.workspace.onWillSaveTextDocument((e) => {
+    if (!e.document || e.document.languageId !== 'ks') return;
+    send({ method: 'textDocument/willSave', params: { textDocument: { uri: e.document.uri.toString() }, reason: e.reason } });
+  }));
 
   // hover
   context.subscriptions.push(vscode.languages.registerHoverProvider('ks', {

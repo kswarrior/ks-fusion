@@ -4,8 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"html"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -77,7 +80,12 @@ func attachWebRoutes(mux *http.ServeMux, cfg *config.Config, watcher *webWatcher
 		}
 		last := watcher.version()
 		var lastSent string
-		tick := time.NewTicker(300 * time.Millisecond)
+		// P4: sseTickInterval kept at 300ms (TODO WS push). Debounce: at most
+		// one renderRoute+Diff per tick per route — multiple watcher.version
+		// bumps within the same tick window coalesce into this single render
+		// (last=ver after the tick). Unchanged routes additionally hit the
+		// per-route render cache inside renderRoute (content-hash analogue).
+		tick := time.NewTicker(sseTickInterval)
 		defer tick.Stop()
 		for {
 			select {
@@ -86,7 +94,9 @@ func attachWebRoutes(mux *http.ServeMux, cfg *config.Config, watcher *webWatcher
 			case <-tick.C:
 				if v := watcher.version(); v != last {
 					// HMR patch (v2.5): keyed server diff, client patches DOM.
+					tickStart := time.Now()
 					vmJSON, err := renderRoute(cfg, route)
+					maybeLogSlowHMRTick(tickStart, route)
 					if err != nil {
 						// render broken: tell the client to banner, never force-reload
 						fmt.Fprintf(w, "data: %s\n\n", `{"reload":true}`)
@@ -149,10 +159,25 @@ func attachWebRoutes(mux *http.ServeMux, cfg *config.Config, watcher *webWatcher
 			_, _ = w.Write([]byte(staleBody))
 			return
 		}
-		vmJSON, err := renderRoute(cfg, r.URL.Path)
+		// P1: pass full path+query so page funcs receive props {path, query, params}.
+		fullRoute := r.URL.Path
+		if r.URL.RawQuery != "" {
+			fullRoute += "?" + r.URL.RawQuery
+		}
+		vmJSON, status, err := renderRouteWithStatus(cfg, fullRoute)
 		el := time.Since(start)
 		w.Header().Set("X-Render-Time", el.String())
+		maybeLogSlowTTFR(start, fullRoute)
 		if err != nil {
+			// 404 (unknown route, no 404_page): JSON error body, status 404.
+			// X-Render-Time already set above and preserved.
+			if isNotFound(err) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				body, _ := json.Marshal(map[string]string{"error": err.Error()})
+				_, _ = w.Write(body)
+				return
+			}
 			// serve stale on render failure when available (no error page flip)
 			if staleBody, staleType, ok := isr.getStale(r.URL.Path, format); ok {
 				w.Header().Set("X-Cache", "STALE")
@@ -166,84 +191,371 @@ func attachWebRoutes(mux *http.ServeMux, cfg *config.Config, watcher *webWatcher
 		if r.URL.Query().Get("format") == "json" {
 			w.Header().Set("Content-Type", "application/json")
 			isr.put(r.URL.Path, "json", vmJSON, vmJSON)
+			if status == http.StatusNotFound {
+				w.WriteHeader(http.StatusNotFound)
+			}
 			_, _ = w.Write([]byte(vmJSON))
 			return
 		}
 		html := vmToHTMLWithWatch(vmJSON, r.URL.Path, watch)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		isr.put(r.URL.Path, "html", html, vmJSON)
+		if status == http.StatusNotFound {
+			w.WriteHeader(http.StatusNotFound)
+		}
 		_, _ = w.Write([]byte(html))
 	})
 	// background ISR regen (v2.5): refresh entries expiring within 10s, every 5s
 	return isr.startBackground(5*time.Second, 10*time.Second)
 }
 
+// routeNotFoundError signals HTTP 404 (unknown route, no 404_page).
+// Distinct from 500 render errors so handlers return 404 + JSON body.
+type routeNotFoundError struct {
+	route string
+	msg   string
+}
+
+func (e *routeNotFoundError) Error() string { return e.msg }
+
+func isNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var nf *routeNotFoundError
+	if errors.As(err, &nf) {
+		return true
+	}
+	// Backwards compat: pre-P1 "unknown route" errors are 404, not 500.
+	if strings.Contains(err.Error(), "unknown route") {
+		return true
+	}
+	return false
+}
+
+// Routing table (P1 STRICT, user_[id].ks convention approved):
+//
+//	File                        -> Func        -> Route         -> Props
+//	frontend/pages/home.ks      -> home_page   -> /             -> {path, query, params:{}}
+//	frontend/pages/hi.ks        -> hi_page     -> /hi           -> {path, query, params:{}}
+//	frontend/pages/user_[id].ks -> user_page   -> /user/7       -> {id:"7", path:"/user/7", query:{...}, params:{id:"7"}}
+//	frontend/pages/foo_[bar].ks -> foo_page    -> /foo/<bar>    -> {bar:...} (generalized)
+//	/<name>                     -> <name>_page -> /<name>       -> {path, query, params:{}}
+//	/user/* (no user_[id].ks)   -> home_page   -> /user/*       -> backwards-compat fallback (200)
+//	unknown                     -> 404_page    -> (any)         -> {path, query, params} with HTTP 404
+//	unknown (no 404_page)       -> 404 error                   -> JSON {"error":...} with HTTP 404
+//
+// Choice documented: file `foo_[bar].ks` defines func `foo_page` (NOT
+// `foo_[bar]_page`), matching the existing `home.ks` -> `home_page` pattern
+// (file stem minus dynamic suffix + "_page"). Nested [id] folders deferred.
+func splitRouteQuery(route string) (path, rawQuery string) {
+	if route == "" {
+		return "/", ""
+	}
+	if i := strings.Index(route, "?"); i >= 0 {
+		p := route[:i]
+		q := route[i+1:]
+		if p == "" {
+			p = "/"
+		}
+		return p, q
+	}
+	return route, ""
+}
+
+func normalizePath(p string) string {
+	if p == "" {
+		return "/"
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	for len(p) > 1 && strings.HasSuffix(p, "/") {
+		p = strings.TrimSuffix(p, "/")
+	}
+	for strings.Contains(p, "//") {
+		p = strings.ReplaceAll(p, "//", "/")
+	}
+	return p
+}
+
+func parseQueryMap(rawQuery string) map[string]string {
+	out := map[string]string{}
+	if rawQuery == "" {
+		return out
+	}
+	// Include ALL query keys verbatim (including format=json): format still
+	// controls HTML-vs-JSON response in the handler, but remains visible in
+	// props.query for transparency. First value wins (matches /api/ behavior).
+	if vals, err := url.ParseQuery(rawQuery); err == nil {
+		for k, vs := range vals {
+			if len(vs) > 0 {
+				out[k] = vs[0]
+			} else {
+				out[k] = ""
+			}
+		}
+		return out
+	}
+	for _, part := range strings.Split(rawQuery, "&") {
+		if part == "" {
+			continue
+		}
+		kv := strings.SplitN(part, "=", 2)
+		k := kv[0]
+		v := ""
+		if len(kv) == 2 {
+			v = kv[1]
+		}
+		if uk, err := url.QueryUnescape(k); err == nil {
+			k = uk
+		}
+		if uv, err := url.QueryUnescape(v); err == nil {
+			v = uv
+		}
+		if _, exists := out[k]; !exists {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// parseDynamicFile parses a pages-dir stem like "user_[id]" into
+// prefix "user", param "id", func "user_page". ok=false if not dynamic.
+func parseDynamicFile(base string) (prefix, param, funcName string, ok bool) {
+	idx := strings.Index(base, "_[")
+	if idx < 0 {
+		return "", "", "", false
+	}
+	prefix = base[:idx]
+	rest := base[idx+2:]
+	end := strings.Index(rest, "]")
+	if end < 0 {
+		return "", "", "", false
+	}
+	param = rest[:end]
+	if prefix == "" || param == "" {
+		return "", "", "", false
+	}
+	if strings.Contains(param, "/") || strings.Contains(param, "[") {
+		return "", "", "", false
+	}
+	cleanPrefix := strings.ReplaceAll(prefix, "-", "_")
+	return prefix, param, cleanPrefix + "_page", true
+}
+
+// findDynamicRoute scans frontend/pages for foo_[bar].ks whose prefix matches
+// seg0 (dash-insensitive). Returns func foo_page + param name.
+func findDynamicRoute(pagesDir, seg0 string) (funcName, paramName string, ok bool) {
+	ents, err := os.ReadDir(pagesDir)
+	if err != nil {
+		return "", "", false
+	}
+	cleanSeg := strings.ReplaceAll(seg0, "-", "_")
+	for _, e := range ents {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".ks") {
+			continue
+		}
+		base := strings.TrimSuffix(e.Name(), ".ks")
+		prefix, param, fn, isDyn := parseDynamicFile(base)
+		if !isDyn {
+			continue
+		}
+		if strings.ReplaceAll(prefix, "-", "_") == cleanSeg {
+			return fn, param, true
+		}
+	}
+	return "", "", false
+}
+
+func unescapeSegment(s string) string {
+	if u, err := url.PathUnescape(s); err == nil {
+		return u
+	}
+	return s
+}
+
+func buildPropsValue(path string, query, params map[string]string) backend.Value {
+	qm := map[string]backend.Value{}
+	for k, v := range query {
+		qm[k] = backend.StrV(v)
+	}
+	pm := map[string]backend.Value{}
+	for k, v := range params {
+		pm[k] = backend.StrV(v)
+	}
+	top := map[string]backend.Value{
+		"path":   backend.StrV(path),
+		"query":  backend.MapV(qm),
+		"params": backend.MapV(pm),
+	}
+	// Flatten path params top-level for convenience (props.id).
+	for k, v := range params {
+		if _, exists := top[k]; !exists {
+			top[k] = backend.StrV(v)
+		}
+	}
+	return backend.MapV(top)
+}
+
+// lookup404Func returns the 404 handler func value.
+// Tries "404_page" per spec, then "notfound_page" alias.
+// NOTE: `func 404_page` is currently a .ks parse error (identifiers may not
+// start with a digit: `want '(', got "404"`), so the alias is the working
+// path until the parser allows leading-digit idents. Both are tried.
+func lookup404Func(in *backend.Interpreter) (backend.Value, bool) {
+	if fn, ok := in.Lookup("404_page"); ok {
+		return fn, true
+	}
+	if fn, ok := in.Lookup("notfound_page"); ok {
+		return fn, true
+	}
+	return backend.Value{}, false
+}
+
 func renderRoute(cfg *config.Config, route string) (string, error) {
-	// Load store + components + pages on demand, run home_page/hi_page via interpreter.
+	vmJSON, _, err := renderRouteWithStatus(cfg, route)
+	return vmJSON, err
+}
+
+// renderRouteWithStatus renders route (which may include "?a=1&b=2").
+// Returns (vmJSON, httpStatus, error): status is 200 on page hit,
+// 404 when the 404_page fallback rendered, error is non-nil only on failure
+// (404 error when no page nor 404_page, 500 otherwise).
+//
+// P4: per-route render cache (route -> {vmJSON, status, mtimeHash}) so
+// unchanged routes skip re-exec on HMR ticks (content-hash incremental
+// cache analogue). Failures are never cached. Incremental parse reuses
+// cached progs for unchanged files (mtime+size).
+func renderRouteWithStatus(cfg *config.Config, route string) (string, int, error) {
+	dir := cfg.Dir
+	// P4: list once, hash exec set, check route cache before executing.
+	allFiles := listFrontendFiles(dir)
+	execFiles := execFrontendFiles(dir, allFiles)
+	hash := frontendMtimeHash(execFiles)
+	if vmJSON, status, ok := routeCacheGet(dir, route, hash); ok {
+		return vmJSON, status, nil
+	}
+	vmJSON, status, err := renderRouteWithStatusUncached(cfg, route, allFiles)
+	if err != nil {
+		return "", status, err
+	}
+	routeCachePut(dir, route, hash, vmJSON, status)
+	// Prune deleted files from the parse cache (correctness on deletes).
+	live := map[string]bool{}
+	for _, f := range allFiles {
+		live[f] = true
+	}
+	pruneFrontendParseCache(filepath.Join(dir, "frontend"), live)
+	return vmJSON, status, nil
+}
+
+// renderRouteWithStatusUncached is the original render path (parse via
+// incremental cache, exec fresh). allFiles may be nil (then it lists).
+func renderRouteWithStatusUncached(cfg *config.Config, route string, allFiles []string) (string, int, error) {
+	// Load store + components + pages on demand, run page funcs via interpreter.
 	// Simple: parse frontend/main.ks deps? Instead directly run page funcs.
 	dir := cfg.Dir
+	rawPath, rawQuery := splitRouteQuery(route)
+	path := normalizePath(rawPath)
+	queryMap := parseQueryMap(rawQuery)
 	// collect all frontend .ks files to load into one interpreter
-	var files []string
-	_ = filepath.Walk(filepath.Join(dir, "frontend"), func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".ks") {
-			files = append(files, path)
-		}
-		return nil
-	})
+	files := allFiles
+	if files == nil {
+		files = listFrontendFiles(dir)
+	}
 	sort.Strings(files)
 	in := backend.New()
-	// set ROUTE env for main.ks compat
-	_ = os.Setenv("ROUTE", route)
+	// set ROUTE env for main.ks compat (path only, no query)
+	_ = os.Setenv("ROUTE", path)
 	for _, f := range files {
 		// skip main.ks (it runs route table with prints); load libs only
 		if filepath.Base(f) == "main.ks" && filepath.Dir(f) == filepath.Join(dir, "frontend") {
 			continue
 		}
-		data, err := os.ReadFile(f)
+		// P4 incremental parse: reuse cached prog when mtime+size match.
+		prog, err := getCachedFrontendProgram(f, f)
 		if err != nil {
-			continue
-		}
-		prog, err := frontend.ParseSource(string(data), f)
-		if err != nil {
-			return "", err
+			if os.IsNotExist(err) {
+				continue
+			}
+			// Preserve original behaviour: unreadable files are skipped,
+			// parse errors fail the render.
+			if _, statErr := os.Stat(f); statErr != nil {
+				continue
+			}
+			return "", http.StatusInternalServerError, err
 		}
 		// exec with baseDir so imports inside work
 		// use ExecProgram directly to keep same interpreter globals
 		in.SetBaseDir(dir)
 		if err := in.ExecProgram(prog); err != nil {
-			return "", fmt.Errorf("%s: %w", f, err)
+			return "", http.StatusInternalServerError, fmt.Errorf("%s: %w", f, err)
 		}
 	}
-	// pick page func
+	// pick page func + path params (P1 dynamic routing)
 	funcName := "home_page"
-	if route == "/hi" {
-		funcName = "hi_page"
-	} else if strings.HasPrefix(route, "/user/") {
+	params := map[string]string{}
+	if path == "/" {
 		funcName = "home_page"
-	} else if route != "/" {
-		// try dynamic: /<name> -> <name>_page
-		clean := strings.Trim(route, "/")
-		clean = strings.ReplaceAll(clean, "-", "_")
-		clean = strings.ReplaceAll(clean, "/", "_")
-		funcName = clean + "_page"
+	} else {
+		trimmed := strings.Trim(path, "/")
+		segs := strings.Split(trimmed, "/")
+		if len(segs) == 1 {
+			clean := strings.ReplaceAll(segs[0], "-", "_")
+			funcName = clean + "_page"
+		} else if len(segs) == 2 {
+			first, second := segs[0], unescapeSegment(segs[1])
+			if fn, paramName, ok := findDynamicRoute(filepath.Join(dir, "frontend", "pages"), first); ok {
+				// /user/7 with user_[id].ks -> user_page with {id:"7"}
+				funcName = fn
+				params = map[string]string{paramName: second}
+			} else if first == "user" {
+				// backwards compat: /user/* falls back to home_page when
+				// no user_[id].ks exists (200, not 404).
+				funcName = "home_page"
+				params = map[string]string{"id": second}
+			} else {
+				clean := strings.ReplaceAll(strings.ReplaceAll(trimmed, "-", "_"), "/", "_")
+				funcName = clean + "_page"
+			}
+		} else {
+			// try dynamic: /<name> -> <name>_page (multi-segment joins with _)
+			clean := strings.Trim(path, "/")
+			clean = strings.ReplaceAll(clean, "-", "_")
+			clean = strings.ReplaceAll(clean, "/", "_")
+			funcName = clean + "_page"
+		}
 	}
-	// call page func with props {}
-	prog, err := frontend.ParseSource(fmt.Sprintf("let __vm = %s({})\n", funcName), "<web>")
-	if err != nil {
-		return "", err
-	}
-	_ = prog
+	propsVal := buildPropsValue(path, queryMap, params)
 	// Use eval via backend: call func value from globals
 	fnVal, ok := in.Lookup(funcName)
 	if !ok {
-		return "", fmt.Errorf("unknown route %q (no %s)", route, funcName)
+		// 404: unknown route tries <name>_page; if missing, try 404_page.
+		if fn404, ok404 := lookup404Func(in); ok404 {
+			vm404, err := in.Call(fn404, []backend.Value{propsVal})
+			if err != nil {
+				return "", http.StatusInternalServerError, err
+			}
+			vm404 = applyLayouts(in, vm404)
+			j, err := backend.ValueToJSONable(vm404)
+			if err != nil {
+				return "", http.StatusInternalServerError, err
+			}
+			data, err := json.Marshal(j)
+			if err != nil {
+				return "", http.StatusInternalServerError, err
+			}
+			return string(data), http.StatusNotFound, nil
+		}
+		return "", http.StatusNotFound, &routeNotFoundError{
+			route: path,
+			msg:   fmt.Sprintf("404 page not found: %q (no %s nor 404_page)", path, funcName),
+		}
 	}
-	vm, err := in.Call(fnVal, []backend.Value{backend.MapV(map[string]backend.Value{})})
+	vm, err := in.Call(fnVal, []backend.Value{propsVal})
 	if err != nil {
-		return "", err
+		return "", http.StatusInternalServerError, err
 	}
 	// Nested layouts (v2.4, Next.js analogue): wrap page with layout funcs.
 	// Convention: page vm may carry `layout: "admin"` -> call admin_layout(page);
@@ -251,13 +563,13 @@ func renderRoute(cfg *config.Config, route string) (string, error) {
 	vm = applyLayouts(in, vm)
 	j, err := backend.ValueToJSONable(vm)
 	if err != nil {
-		return "", err
+		return "", http.StatusInternalServerError, err
 	}
 	data, err := json.Marshal(j)
 	if err != nil {
-		return "", err
+		return "", http.StatusInternalServerError, err
 	}
-	return string(data), nil
+	return string(data), http.StatusOK, nil
 }
 
 func applyLayouts(in *backend.Interpreter, vm backend.Value) backend.Value {
@@ -266,6 +578,8 @@ func applyLayouts(in *backend.Interpreter, vm backend.Value) backend.Value {
 		if fn, ok := in.Lookup(name + "_layout"); ok {
 			if out, err := in.Call(fn, []backend.Value{vm}); err == nil {
 				return out
+			} else {
+				fmt.Printf("layout %s_layout failed: %v\n", name, err)
 			}
 		}
 	}
@@ -277,6 +591,8 @@ func applyLayouts(in *backend.Interpreter, vm backend.Value) backend.Value {
 				if isViewModel(out) {
 					vm = out
 				}
+			} else {
+				fmt.Printf("layout %s failed: %v\n", lname, err)
 			}
 		}
 	}
@@ -363,10 +679,207 @@ func runAPIRouteWithQuery(cfg *config.Config, name string, query map[string]stri
 
 func vmToHTML(vmJSON, route string) string { return vmToHTMLWithWatch(vmJSON, route, false) }
 
+// --- P2 hydrate-full SSR helpers (additive, routing table untouched) ---
+
+// tagForVMType maps a view-model type to an HTML tag. Known HTML tags pass
+// through; component/page/layout types fall back to div (data-type preserved).
+// Client JS mirrors this map exactly so SSR + hydrate agree on tags.
+func tagForVMType(t string) string {
+	switch t {
+	case "a", "button", "img", "input", "span", "p", "h1", "h2", "h3", "h4",
+		"ul", "li", "header", "footer", "section", "article", "nav", "main",
+		"form", "label", "textarea", "select", "option", "table", "tr", "td", "div":
+		return t
+	case "text":
+		return "span"
+	default:
+		return "div"
+	}
+}
+
+func isVoidTag(tag string) bool {
+	switch tag {
+	case "img", "input", "br", "hr":
+		return true
+	default:
+		return false
+	}
+}
+
+// propAttrString stringifies a VM prop for a data-prop-* attribute.
+// Scalars use JS-String-compatible forms; objects use canonical JSON
+// (mirrors client JSON.stringify for objects).
+func propAttrString(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return x
+	case bool:
+		if x {
+			return "true"
+		}
+		return "false"
+	case float64, float32, int, int64, int32:
+		b, err := json.Marshal(v)
+		if err == nil {
+			return string(b)
+		}
+		return fmt.Sprintf("%v", v)
+	default:
+		b, err := json.Marshal(v)
+		if err == nil {
+			return string(b)
+		}
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// renderVMNodeToHTML renders one VM node (and children) to SSR HTML.
+// Escapes all text/attrs via html.EscapeString (never raw except the
+// allowlisted props.html slot, which only literal strings reach because
+// `fusion vet` frontend-set-html rejects non-literals).
+func renderVMNodeToHTML(v any) string {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return ""
+	}
+	key, _ := m["key"].(string)
+	typ, _ := m["type"].(string)
+	if typ == "" {
+		typ = "div"
+	}
+	tag := tagForVMType(typ)
+	props, _ := m["props"].(map[string]any)
+	if props == nil {
+		props = map[string]any{}
+	}
+	children, _ := m["children"].([]any)
+
+	var b strings.Builder
+	b.WriteString("<" + tag)
+	if key != "" {
+		b.WriteString(` data-key="` + html.EscapeString(key) + `"`)
+	}
+	b.WriteString(` data-type="` + html.EscapeString(typ) + `"`)
+	if c, ok := props["class"].(string); ok && c != "" {
+		b.WriteString(` class="` + html.EscapeString(c) + `"`)
+	}
+	if id, ok := props["id"].(string); ok && id != "" {
+		b.WriteString(` id="` + html.EscapeString(id) + `"`)
+	}
+	if href, ok := props["href"].(string); ok && href != "" {
+		b.WriteString(` href="` + html.EscapeString(href) + `"`)
+	}
+	if src, ok := props["src"].(string); ok && src != "" {
+		b.WriteString(` src="` + html.EscapeString(src) + `"`)
+	}
+	if val, ok := props["value"]; ok && val != nil {
+		if s, ok := val.(string); ok {
+			b.WriteString(` value="` + html.EscapeString(s) + `"`)
+		} else {
+			b.WriteString(` value="` + html.EscapeString(propAttrString(val)) + `"`)
+		}
+	}
+	if ph, ok := props["placeholder"].(string); ok && ph != "" {
+		b.WriteString(` placeholder="` + html.EscapeString(ph) + `"`)
+	}
+	if alt, ok := props["alt"].(string); ok && alt != "" {
+		b.WriteString(` alt="` + html.EscapeString(alt) + `"`)
+	}
+	action := ""
+	if a, ok := props["on_click"].(string); ok && a != "" {
+		action = a
+	}
+	if a, ok := props["onClick"].(string); ok && a != "" {
+		action = a
+	}
+	if action != "" {
+		b.WriteString(` data-action="` + html.EscapeString(action) + `"`)
+	}
+	// data-prop-* fallback for the rest (sorted for determinism).
+	skip := map[string]bool{
+		"title": true, "text": true, "html": true,
+		"class": true, "id": true, "href": true, "src": true,
+		"value": true, "placeholder": true, "alt": true,
+		"on_click": true, "onClick": true,
+	}
+	var keys []string
+	for k := range props {
+		if !skip[k] {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		sv := propAttrString(props[k])
+		b.WriteString(` data-prop-` + html.EscapeString(k) + `="` + html.EscapeString(sv) + `"`)
+	}
+	if isVoidTag(tag) {
+		b.WriteString(">")
+		return b.String()
+	}
+	b.WriteString(">")
+	if t, ok := props["title"].(string); ok && t != "" {
+		b.WriteString("<h1>" + html.EscapeString(t) + "</h1>")
+	}
+	if tx, ok := props["text"].(string); ok && tx != "" {
+		b.WriteString(`<span class="txt">` + html.EscapeString(tx) + `</span>`)
+	}
+	if h, ok := props["html"].(string); ok && h != "" {
+		// Allowlisted raw HTML slot only: non-literal values are rejected by
+		// `fusion vet` (frontend-set-html), so reaching here means a literal.
+		b.WriteString(h)
+	}
+	b.WriteString(`<div class="kids">`)
+	if len(children) > 100 {
+		for i := 0; i < 100; i++ {
+			b.WriteString(renderVMNodeToHTML(children[i]))
+		}
+		moreKey := key + ":more"
+		b.WriteString(`<button data-key="` + html.EscapeString(moreKey) + `" data-action="show_more">Show more (100/` + fmt.Sprintf("%d", len(children)) + `)</button>`)
+	} else {
+		for _, c := range children {
+			b.WriteString(renderVMNodeToHTML(c))
+		}
+	}
+	b.WriteString(`</div>`)
+	b.WriteString("</" + tag + ">")
+	return b.String()
+}
+
+// vmToSSRHTML renders a VM JSON doc to SSR inner HTML for #app.
+func vmToSSRHTML(vmJSON string) string {
+	var v any
+	if err := json.Unmarshal([]byte(vmJSON), &v); err != nil {
+		return ""
+	}
+	return renderVMNodeToHTML(v)
+}
+
+// initialStateJSON embeds the backend use_state snapshot for hydration.
+// Divergence (documented): backend globalState is a process-global Go map
+// populated during SSR renders; client __state is a per-browser copy
+// snapshotted at SSR time. Client set_state updates only the browser copy
+// and schedules a CSR re-fetch (?format=json + patch); it never writes back
+// to the backend map. This avoids cross-client leakage and keeps CSR snappy.
+func initialStateJSON() string {
+	snap := backend.SnapshotGlobalState()
+	if len(snap) == 0 {
+		return "{}"
+	}
+	b, err := json.Marshal(snap)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
 func vmToHTMLWithWatch(vmJSON, route string, watch bool) string {
 	var v any
 	_ = json.Unmarshal([]byte(vmJSON), &v)
 	pretty, _ := json.MarshalIndent(v, "", "  ")
+	prettyStr := strings.ReplaceAll(string(pretty), "</", "<\\/")
 	title := "ks-fusion"
 	if m, ok := v.(map[string]any); ok {
 		if props, ok := m["props"].(map[string]any); ok {
@@ -375,6 +888,10 @@ func vmToHTMLWithWatch(vmJSON, route string, watch bool) string {
 			}
 		}
 	}
+	titleEsc := html.EscapeString(title)
+	routeEsc := html.EscapeString(route)
+	ssrHTML := vmToSSRHTML(vmJSON)
+	stateJSON := initialStateJSON()
 	watchScript := ""
 	if watch {
 		watchScript = `<script>
@@ -393,62 +910,171 @@ es.onmessage = function(e){
 	return fmt.Sprintf(`<!doctype html>
 <html><head><meta charset="utf-8"><title>%s</title></head>
 <body>
-<div id="app" data-route="%s"></div>
+<div id="app" data-route="%s">%s</div>
 <script id="vm" type="application/json">%s</script>
 <script>
-// v2.5 hydrate: keyed 1:1 DOM (data-key) + patch applier (no reload path).
+// P2 hydrate-full + CSR (STRICT): SSR keeps data-key; hydrate walks existing DOM.
+// Safety: escape all text by default via textContent and createTextNode semantics,
+// never innerHTML except the allowlisted props.html slot (js_call("set_html", literal)
+// only: only literal strings reach it because fusion vet frontend-set-html rejects
+// non-literals; server already vets).
 (function(){
   var vm = JSON.parse(document.getElementById('vm').textContent);
   var app = document.getElementById('app');
-  var __state = {};
+  // Divergence from backend global map (stdlib_ext2.go): backend use_state is a
+  // process-global Go map populated during SSR; client __state is a per-browser
+  // snapshot embedded at SSR time. Client set_state updates only the browser copy
+  // and schedules a CSR re-fetch plus patch; it never writes back to backend.
+  var __state = %s;
   var __byKey = {};
+  var __mounts = [];
+  var __csrScheduled = false;
+  window.__currentVM = vm;
   window.use_state = function(k, init){ if(!(k in __state)) __state[k]=init; return __state[k]; };
-  window.set_state = function(k, v){ __state[k]=v; return v; };
+  window.set_state = function(k, v){ __state[k]=v; if(!__csrScheduled){ __csrScheduled=true; setTimeout(function(){ __csrScheduled=false; if(window.__csrRefresh) window.__csrRefresh(); },0); } return v; };
+  window.on_mount = function(fn){ __mounts.push(fn); };
+  window.fetch_json = function(path){
+    // fetch_json GET-only (server: json_parse(http_get(url))): validates JSON shape.
+    return fetch(path).then(function(r){ if(!r.ok) throw new Error('fetch_json failed status '+r.status); return r.json(); }).then(function(data){
+      if(data!==null && typeof data==='object') return data;
+      window.__banner('fetch_json shape invalid for '+path+': want object or array');
+      throw new Error('fetch_json shape invalid');
+    });
+  };
   window.__banner = function(msg){
     var b = document.getElementById('fusion-banner');
     if(!b){ b = document.createElement('div'); b.id = 'fusion-banner'; b.setAttribute('role','alert'); document.body.insertBefore(b, document.body.firstChild); }
     b.textContent = msg;
   };
+  function csrUrl(){
+    var path = window.location.pathname || '/';
+    var q = window.location.search || '';
+    if(q.indexOf('format=json')>=0) return path+q;
+    if(q) return path+q+'&format=json';
+    return path+'?format=json';
+  }
+  window.__csrRefresh = function(){
+    fetch(csrUrl()).then(function(r){ if(!r.ok) throw new Error('csr refresh status '+r.status); return r.json(); }).then(function(newVM){
+      window.__hydrate(newVM);
+    }).catch(function(e){ window.__banner('csr failed: '+e.message); });
+  };
+  window.__action = function(action, key){
+    if(action==='show_more'){ return window.__expandMore(key); }
+    var url = csrUrl();
+    var opts = {};
+    try{ opts = {headers:{'X-Fusion-Action': String(action), 'X-Fusion-Key': String(key||'')}}; }catch(e){}
+    fetch(url, opts).then(function(r){ if(!r.ok) throw new Error('action failed status '+r.status); return r.json(); }).then(function(newVM){
+      window.__hydrate(newVM);
+    }).catch(function(e){ window.__banner('action failed: '+e.message); });
+  };
+  function findChildByKey(box, key){
+    var list = box.children;
+    for(var i=0;i<list.length;i++){ if(list[i].getAttribute && list[i].getAttribute('data-key')===key) return list[i]; }
+    return null;
+  }
+  function tagForType(t){
+    var known = {a:1,button:1,img:1,input:1,span:1,p:1,h1:1,h2:1,h3:1,h4:1,ul:1,li:1,header:1,footer:1,section:1,article:1,nav:1,main:1,form:1,label:1,textarea:1,select:1,option:1,table:1,tr:1,td:1,div:1};
+    if(t && known[t]) return t;
+    if(t==='text') return 'span';
+    return 'div';
+  }
+  function isVoidTag(tag){ return tag==='img'||tag==='input'||tag==='br'||tag==='hr'; }
+  function strVal(v){ if(v===null||v===undefined) return ''; if(typeof v==='object') return JSON.stringify(v); return String(v); }
+  function firstChildByTag(el, tag, cls){
+    var list = el.children;
+    for(var i=0;i<list.length;i++){
+      if(list[i].tagName===tag && (!cls || list[i].className===cls)) return list[i];
+    }
+    return null;
+  }
   function kidsBox(el){
-    var k = el.querySelector(':scope > .kids');
+    var k = firstChildByTag(el, 'DIV', 'kids');
     if(!k){ k = document.createElement('div'); k.className = 'kids'; el.appendChild(k); }
     return k;
   }
+  function applySingleProp(el, prop, value){
+    if(prop==='title'){
+      var h = firstChildByTag(el, 'H1', '');
+      if(value==null){ if(h) h.parentNode.removeChild(h); }
+      else { if(!h){ h = document.createElement('h1'); el.insertBefore(h, el.firstChild); } h.textContent = String(value); }
+    } else if(prop==='text'){
+      var t = null;
+      var list = el.children;
+      for(var i=0;i<list.length;i++){ if(list[i].tagName==='SPAN' && list[i].className==='txt'){ t=list[i]; break; } }
+      if(value==null){ if(t) t.parentNode.removeChild(t); }
+      else { if(!t){ t = document.createElement('span'); t.className = 'txt'; var kb = kidsBox(el); el.insertBefore(t, kb); } t.textContent = String(value); }
+    } else if(prop==='html'){
+      // allowlisted js_call("set_html", literal) only: server vets via frontend-set-html.
+      // All other text uses textContent (escaped by browser), never innerHTML.
+      var hb = firstChildByTag(el, 'DIV', 'html');
+      if(value==null){ if(hb) hb.parentNode.removeChild(hb); }
+      else { if(!hb){ hb = document.createElement('div'); hb.className = 'html'; var kb2 = kidsBox(el); el.insertBefore(hb, kb2); } hb.innerHTML = String(value); }
+    } else if(prop==='class'){ if(value==null) el.removeAttribute('class'); else el.setAttribute('class', String(value)); }
+    else if(prop==='id'){ if(value==null) el.removeAttribute('id'); else el.setAttribute('id', String(value)); }
+    else if(prop==='href'){ if(value==null) el.removeAttribute('href'); else el.setAttribute('href', String(value)); }
+    else if(prop==='src'){ if(value==null) el.removeAttribute('src'); else el.setAttribute('src', String(value)); }
+    else if(prop==='value'){ if(value==null){ el.removeAttribute('value'); if('value' in el) el.value=''; } else { el.setAttribute('value', String(value)); if('value' in el) el.value=String(value); } }
+    else if(prop==='placeholder'){ if(value==null) el.removeAttribute('placeholder'); else el.setAttribute('placeholder', String(value)); }
+    else if(prop==='alt'){ if(value==null) el.removeAttribute('alt'); else el.setAttribute('alt', String(value)); }
+    else if(prop==='on_click'||prop==='onClick'){
+      if(value==null){ el.removeAttribute('data-action'); el.onclick=null; }
+      else { el.setAttribute('data-action', String(value)); (function(a,k){ el.onclick=function(ev){ if(ev&&ev.preventDefault) ev.preventDefault(); window.__action(a,k); }; })(String(value), el.getAttribute('data-key')); }
+    } else {
+      if(value==null) el.removeAttribute('data-prop-'+prop);
+      else el.setAttribute('data-prop-'+prop, strVal(value));
+    }
+  }
   function paintProps(el, node){
     var props = node.props || {};
-    var h = el.querySelector(':scope > h1');
-    if(props.title){ if(!h){ h = document.createElement('h1'); el.insertBefore(h, el.firstChild); } h.textContent = props.title; }
-    else if(h){ h.parentNode.removeChild(h); }
-    var s = el.querySelector(':scope > .txt');
-    if(props.text){ if(!s){ s = document.createElement('span'); s.className = 'txt'; el.appendChild(s); } s.textContent = props.text; }
-    else if(s){ s.parentNode.removeChild(s); }
-    for(var pk in props){ if(pk !== 'title' && pk !== 'text'){ el.setAttribute('data-prop-' + pk, String(props[pk])); } }
+    applySingleProp(el, 'title', props.title!=null?props.title:null);
+    applySingleProp(el, 'text', props.text!=null?props.text:null);
+    if(props.html!=null) applySingleProp(el, 'html', props.html);
+    else applySingleProp(el, 'html', null);
+    var realKeys = ['class','id','href','src','value','placeholder','alt','on_click','onClick'];
+    for(var i=0;i<realKeys.length;i++){ var rk=realKeys[i]; if(rk in props) applySingleProp(el, rk, props[rk]); else applySingleProp(el, rk, null); }
+    for(var pk in props){
+      if(!props.hasOwnProperty(pk)) continue;
+      if(pk==='title'||pk==='text'||pk==='html'||pk==='class'||pk==='id'||pk==='href'||pk==='src'||pk==='value'||pk==='placeholder'||pk==='alt'||pk==='on_click'||pk==='onClick') continue;
+      applySingleProp(el, pk, props[pk]);
+    }
+    var attrs = el.attributes;
+    var toRemove = [];
+    for(var a=0;a<attrs.length;a++){
+      var an = attrs[a].name;
+      if(an.indexOf('data-prop-')===0){
+        var pn = an.slice(10);
+        if(!(pn in props)) toRemove.push(an);
+      }
+    }
+    for(var r=0;r<toRemove.length;r++) el.removeAttribute(toRemove[r]);
+    if(el.hasAttribute('data-action') && !('on_click' in props) && !('onClick' in props)){
+      if(el.getAttribute('data-action')!=='show_more'){ el.removeAttribute('data-action'); el.onclick=null; }
+    }
   }
   function build(node){
-    var el = document.createElement('div');
+    var tag = tagForType(node.type||'div');
+    var el = document.createElement(tag);
     el.setAttribute('data-key', node.key);
     el.setAttribute('data-type', node.type || 'div');
+    try{ __byKey[node.key] = el; }catch(e){}
     paintProps(el, node);
+    if(el.getAttribute('data-action')==='show_more' && !el.onclick){
+      (function(k){ el.onclick=function(ev){ if(ev&&ev.preventDefault) ev.preventDefault(); window.__action('show_more', k); }; })(node.key);
+    }
+    if(isVoidTag(tag)) return el;
     var box = kidsBox(el);
-    (__byKey[node.key] = el);
     var kids = node.children || [];
     if(kids.length > 100){
-      // virtualize lists >100 rows: first 100 + expander (keyed children preserved)
-      var shown = 0;
+      for(var i=0;i<100;i++){ box.appendChild(build(kids[i])); }
       var moreBtn = document.createElement('button');
       moreBtn.setAttribute('data-key', node.key + ':more');
-      (function renderMore(){
-        var frag = document.createDocumentFragment();
-        for(var i=shown; i<Math.min(shown+100, kids.length); i++){ frag.appendChild(build(kids[i])); }
-        shown += 100;
-        box.insertBefore(frag, moreBtn);
-        if(shown >= kids.length && moreBtn.parentNode) moreBtn.parentNode.removeChild(moreBtn);
-        else moreBtn.textContent = 'Show more (' + shown + '/' + kids.length + ')';
-      })();
-      moreBtn.onclick = function(){ var f = box.querySelectorAll(':scope > div[data-key]').length; for(var i=f; i<Math.min(f+100, kids.length); i++){ box.appendChild(build(kids[i])); } if(box.querySelectorAll(':scope > div[data-key]').length >= kids.length && moreBtn.parentNode) moreBtn.parentNode.removeChild(moreBtn); };
+      moreBtn.setAttribute('data-action', 'show_more');
+      moreBtn.textContent = 'Show more (100/' + kids.length + ')';
+      (function(pk){ moreBtn.onclick=function(ev){ if(ev&&ev.preventDefault) ev.preventDefault(); window.__action('show_more', pk); }; })(node.key);
+      try{ __byKey[node.key+':more'] = moreBtn; }catch(e2){}
       box.appendChild(moreBtn);
     } else {
-      kids.forEach(function(c){ box.appendChild(build(c)); });
+      for(var j=0;j<kids.length;j++){ box.appendChild(build(kids[j])); }
     }
     return el;
   }
@@ -458,35 +1084,36 @@ es.onmessage = function(e){
     var kids = el.children;
     for(var i=0; i<kids.length; i++) dropKeys(kids[i]);
   }
+  function keyedChildren(box){
+    var out = [];
+    for(var i=0;i<box.children.length;i++){
+      var c = box.children[i];
+      if(c.getAttribute && c.getAttribute('data-key')) out.push(c);
+    }
+    return out;
+  }
   function applyPatch(ops){
     ops.forEach(function(op){
       var el = __byKey[op.key];
       if(op.op === 'setText' && el){
-        var s = el.querySelector(':scope > .txt');
-        if(!s){ s = document.createElement('span'); s.className = 'txt'; el.appendChild(s); }
-        s.textContent = op.value == null ? '' : String(op.value);
+        applySingleProp(el, 'text', op.value);
       } else if(op.op === 'setProp' && el){
-        if(op.prop === 'title'){
-          var h = el.querySelector(':scope > h1');
-          if(op.value == null){ if(h) h.parentNode.removeChild(h); }
-          else { if(!h){ h = document.createElement('h1'); el.insertBefore(h, el.firstChild); } h.textContent = String(op.value); }
-        } else if(op.prop === 'text'){
-          var t = el.querySelector(':scope > .txt');
-          if(op.value == null){ if(t) t.parentNode.removeChild(t); }
-          else { if(!t){ t = document.createElement('span'); t.className = 'txt'; el.appendChild(t); } t.textContent = String(op.value); }
-        } else if(op.value == null){ el.removeAttribute('data-prop-' + op.prop); }
-        else { el.setAttribute('data-prop-' + op.prop, String(op.value)); }
+        applySingleProp(el, op.prop, op.value);
       } else if(op.op === 'replace' && el){
         var fresh = build(op.value);
         dropKeys(el);
-        el.parentNode.replaceChild(fresh, el);
+        if(el.parentNode) el.parentNode.replaceChild(fresh, el);
       } else if(op.op === 'insert'){
         var parent = __byKey[op.parent];
         if(!parent) return;
         var box = kidsBox(parent);
         var node = build(op.value);
-        var ref = box.querySelectorAll(':scope > div[data-key]')[op.index];
-        if(ref) box.insertBefore(node, ref); else box.appendChild(node);
+        var kids = keyedChildren(box);
+        var ref = kids[op.index];
+        if(ref) box.insertBefore(node, ref); else {
+          var more = findChildByKey(box, op.parent+':more');
+          if(more) box.insertBefore(node, more); else box.appendChild(node);
+        }
       } else if(op.op === 'remove' && el){
         dropKeys(el);
         if(el.parentNode) el.parentNode.removeChild(el);
@@ -494,29 +1121,149 @@ es.onmessage = function(e){
         var p = __byKey[op.parent];
         if(!p) return;
         var bx = kidsBox(p);
-        var kids = bx.querySelectorAll(':scope > div[data-key]');
-        var ref = kids[op.index];
-        if(ref === el) return;
+        var ks = keyedChildren(bx);
+        var rf = ks[op.index];
+        if(rf === el) return;
         bx.removeChild(el);
-        kids = bx.querySelectorAll(':scope > div[data-key]');
-        ref = kids[op.index];
-        if(ref) bx.insertBefore(el, ref); else bx.appendChild(el);
+        ks = keyedChildren(bx);
+        rf = ks[op.index];
+        if(rf) bx.insertBefore(el, rf); else bx.appendChild(el);
       }
     });
   }
   window.__applyPatch = applyPatch;
+  function hydrateEl(el, node){
+    if(!el || !node) return;
+    try{ __byKey[node.key] = el; }catch(e){}
+    paintProps(el, node);
+    if(el.getAttribute('data-action')==='show_more' && !el.onclick){
+      (function(k){ el.onclick=function(ev){ if(ev&&ev.preventDefault) ev.preventDefault(); window.__action('show_more', k); }; })(node.key);
+    }
+    var tag = tagForType(node.type||'div');
+    if(isVoidTag(tag)) return;
+    var box = kidsBox(el);
+    var kids = node.children || [];
+    var visible = kids.length>100 ? kids.slice(0,100) : kids;
+    var want = {};
+    for(var vi=0;vi<visible.length;vi++) want[visible[vi].key]=true;
+    var existing = keyedChildren(box);
+    for(var ei=0;ei<existing.length;ei++){
+      var ek = existing[ei].getAttribute('data-key');
+      if(ek===node.key+':more') continue;
+      if(!want[ek]){ dropKeys(existing[ei]); if(existing[ei].parentNode) existing[ei].parentNode.removeChild(existing[ei]); }
+    }
+    for(var idx=0;idx<visible.length;idx++){
+      var cn = visible[idx];
+      var ce = findChildByKey(box, cn.key);
+      if(ce){
+        var ordered = keyedChildren(box);
+        var curPos = -1;
+        for(var op=0;op<ordered.length;op++){ if(ordered[op]===ce){ curPos=op; break; } }
+        if(curPos!==idx){
+          var ref = keyedChildren(box)[idx];
+          if(ref && ref!==ce) box.insertBefore(ce, ref);
+          else if(!ref){
+            var m = findChildByKey(box, node.key+':more');
+            if(m) box.insertBefore(ce, m); else box.appendChild(ce);
+          }
+        }
+        hydrateEl(ce, cn);
+      } else {
+        var fresh = build(cn);
+        var ref2 = keyedChildren(box)[idx];
+        if(ref2) box.insertBefore(fresh, ref2);
+        else { var m2 = findChildByKey(box, node.key+':more'); if(m2) box.insertBefore(fresh, m2); else box.appendChild(fresh); }
+      }
+    }
+    var moreKey = node.key+':more';
+    var moreEl = findChildByKey(box, moreKey);
+    if(kids.length>100){
+      if(!moreEl){
+        var nb = document.createElement('button');
+        nb.setAttribute('data-key', moreKey);
+        nb.setAttribute('data-action', 'show_more');
+        nb.textContent = 'Show more ('+Math.min(100,kids.length)+'/'+kids.length+')';
+        (function(pk){ nb.onclick=function(ev){ if(ev&&ev.preventDefault) ev.preventDefault(); window.__action('show_more', pk); }; })(node.key);
+        try{ __byKey[moreKey]=nb; }catch(e){}
+        box.appendChild(nb);
+      } else {
+        var shownCount = 0;
+        for(var sc=0;sc<box.children.length;sc++){ var cc=box.children[sc]; if(cc.getAttribute&&cc.getAttribute('data-key')&&cc.getAttribute('data-key')!==moreKey) shownCount++; }
+        if(shownCount>=kids.length){ if(moreEl.parentNode) moreEl.parentNode.removeChild(moreEl); delete __byKey[moreKey]; }
+        else moreEl.textContent = 'Show more ('+shownCount+'/'+kids.length+')';
+      }
+    } else if(moreEl){ if(moreEl.parentNode) moreEl.parentNode.removeChild(moreEl); delete __byKey[moreKey]; }
+  }
+  window.__expandMore = function(parentKey){
+    var cur = window.__currentVM;
+    if(!cur) return;
+    function find(n,k){
+      if(!n) return null;
+      if(n.key===k) return n;
+      var ch=n.children||[];
+      for(var i=0;i<ch.length;i++){ var r=find(ch[i],k); if(r) return r; }
+      return null;
+    }
+    var node = find(cur, parentKey);
+    if(!node) return;
+    var parentEl = __byKey[parentKey];
+    if(!parentEl) return;
+    var box = kidsBox(parentEl);
+    var moreEl = findChildByKey(box, parentKey+':more');
+    var count=0;
+    for(var i=0;i<box.children.length;i++){ var c=box.children[i]; if(c.getAttribute&&c.getAttribute('data-key')&&c.getAttribute('data-key')!==parentKey+':more') count++; }
+    var kids=node.children||[];
+    var next=count+100;
+    if(next>kids.length) next=kids.length;
+    var frag=document.createDocumentFragment();
+    for(var j=count;j<next;j++) frag.appendChild(build(kids[j]));
+    if(moreEl) box.insertBefore(frag, moreEl);
+    else box.appendChild(frag);
+    if(next>=kids.length){ if(moreEl&&moreEl.parentNode) moreEl.parentNode.removeChild(moreEl); }
+    else if(moreEl) moreEl.textContent='Show more ('+next+'/'+kids.length+')';
+  };
+  window.__hydrate = function(newVM){
+    var rootKey = newVM.key;
+    var indexed = app.querySelectorAll('[data-key]');
+    __byKey = {};
+    for(var i=0;i<indexed.length;i++) __byKey[indexed[i].getAttribute('data-key')]=indexed[i];
+    var rootEl = __byKey[rootKey];
+    if(!rootEl){
+      while(app.firstChild) app.removeChild(app.firstChild);
+      var fresh = build(newVM);
+      app.appendChild(fresh);
+      rootEl = fresh;
+    } else {
+      hydrateEl(rootEl, newVM);
+      var tops=[];
+      for(var t=0;t<app.children.length;t++) tops.push(app.children[t]);
+      for(var ti=0;ti<tops.length;ti++){ if(tops[ti]!==rootEl) app.removeChild(tops[ti]); }
+    }
+    window.__currentVM = newVM;
+    try{ document.getElementById('vm').textContent = JSON.stringify(newVM); }catch(e){}
+    return rootEl;
+  };
   window.__renderVM = function(v, root){
-    root.innerHTML=''; __byKey = {};
+    while(root.firstChild) root.removeChild(root.firstChild);
+    __byKey = {};
     root.appendChild(build(v));
     window.__currentVM = v;
-    document.getElementById('vm').textContent = JSON.stringify(v);
+    try{ document.getElementById('vm').textContent = JSON.stringify(v); }catch(e){}
   };
-  try{ window.__renderVM(vm, app); }catch(e){ window.__banner('render failed: ' + e.message); }
+  function runMounts(){
+    for(var i=0;i<__mounts.length;i++){ try{ __mounts[i](); }catch(e){ window.__banner('mount failed: '+e.message); } }
+    __mounts=[];
+  }
+  function boot(){
+    try{ window.__hydrate(vm); }catch(e){ window.__banner('hydrate failed: '+e.message); try{ window.__renderVM(vm, app); }catch(e2){ window.__banner('render failed: '+e2.message); } }
+    runMounts();
+  }
+  if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', boot); } else { boot(); }
 })();
 </script>
 %s
 <!-- SSR in %s -->
-</body></html>`, title, route, string(pretty), watchScript, time.Now().Format(time.RFC3339))
+</body></html>`, titleEsc, routeEsc, ssrHTML, prettyStr, stateJSON, watchScript, time.Now().Format(time.RFC3339))
 }
 
 type webWatcher struct {
@@ -549,7 +1296,8 @@ func (w *webWatcher) snapshot() map[string]time.Time {
 func (w *webWatcher) loop() {
 	w.lastMod = w.snapshot()
 	for {
-		time.Sleep(400 * time.Millisecond)
+		// P4: poll interval kept at 400ms (TODO WS/fsnotify push).
+		time.Sleep(webWatchPollInterval)
 		cur := w.snapshot()
 		changed := len(cur) != len(w.lastMod)
 		if !changed {
@@ -757,13 +1505,22 @@ func BuildSSG(appDir, out string) error {
 		return err
 	}
 	routes := []string{"/", "/hi"}
-	// add each page file as route
+	// add each static page file as route (P1: skip dynamic foo_[bar].ks)
 	if ents, err := os.ReadDir(filepath.Join(cfg.Dir, "frontend", "pages")); err == nil {
 		for _, e := range ents {
 			if e.IsDir() || !strings.HasSuffix(e.Name(), ".ks") || strings.HasSuffix(e.Name(), "_test.ks") {
 				continue
 			}
 			base := strings.TrimSuffix(e.Name(), ".ks")
+			// P1 SSG parity: dynamic routes need a param value; skip, not fatal.
+			if _, _, _, isDyn := parseDynamicFile(base); isDyn {
+				fmt.Printf("ssg skip dynamic %s: dynamic route excluded from SSG\n", e.Name())
+				continue
+			}
+			if strings.Contains(base, "[") || strings.Contains(base, "]") {
+				fmt.Printf("ssg skip dynamic %s: dynamic route excluded from SSG\n", e.Name())
+				continue
+			}
 			var r string
 			if base == "home" {
 				r = "/"
@@ -806,8 +1563,8 @@ func BuildSSG(appDir, out string) error {
 	return nil
 }
 
-// BuildJS transpiles safe .ks subset (pages/components) to JS per-route.
-func BuildJS(appDir, out string) error {
+// oldBuildJS is the v2.2 prototype (kept for reference; P3 BuildJS lives in buildjs_p3.go).
+func oldBuildJS(appDir, out string) error {
 	cfg, err := config.Load(appDir)
 	if err != nil {
 		return err

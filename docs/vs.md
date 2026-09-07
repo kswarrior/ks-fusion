@@ -49,7 +49,7 @@
 |---|---|---|
 | Single static binary, max RPS, strict types | Go / Rust | `.ks` has a real `--bin` embed + `--target` passthrough + `--strip` (`-ldflags "-s -w"`, ~31% smaller measured) + vendor-aware hash-skip cache + `-trimpath` repro, but it shells out to `go build` (Go toolchain required, binary size = Go runtime), the full language is still tree-walk (VM v0.3 covers no concurrency), and `--cpuprofile` profiles the Go host, not `.ks` lines (use `fusion profile` for exact per-line statement counts). No LLVM/JIT — nothing here is Rust/C++-fast on compute. |
 | Kernel, drivers, games, hard realtime | C / C++ / Rust | No manual memory, no pointers, no SIMD. Non-goal, stays that way. |
-| Browser UI / React / SSR | Next.js (TS) | `frontend/` has view-model maps + `run-web` SSR (HTML+JSON, `/api/*` funcs, SSE **keyed patches, no reload path** — banner on render error, never `location.reload`) + background ISR (`revalidate` + stale-while-revalidate) + nested layouts + `build-js` subset transpiler (emits `// unsupported` / `// for-c` for what it skips) + `build-ssg` + `use_state` shim + virtualized lists. No hydrate-full (`on_mount` immediate), no CSS-in-`.ks`. Prototype only. |
+| Browser UI / React / SSR | Next.js (TS) | `frontend/` has view-model maps + `run-web` SSR (HTML+JSON, `/api/*` funcs, SSE **keyed patches, no reload path** — banner on render error, never `location.reload`) + background ISR (`revalidate` + stale-while-revalidate) + nested layouts + `build-js` subset transpiler (emits `// unsupported` / `// for-c` for what it skips) + `build-ssg` + hydrate-full (`__hydrate` walks SSR `data-key` DOM, `__action` CSR via `?format=json` + patch, `__mounts` deferred `on_mount`, `fetch_json` shim with shape check) + virtualized lists. No CSS-in-`.ks`, `js_call` sync-only. Prototype only. |
 | CRUD + auth + admin panel tomorrow | PHP Laravel / Python Django | No ORM/migrations/templates. Has `http_*`, JSON-file KV `db_*` + JSON-file sqlite *extended dialect* (UPDATE/JOIN/ORDER BY/LIMIT/OFFSET/GROUP BY+COUNT, WHERE with AND/OR + LIKE/NOT LIKE (`%`/`_`), no parens/transactions/indexes) + `postgres_*` compat names on the same engine + `exec_pipes`/`spawn` split pipes/signals, `tcp_shutdown`, `ws_connect` + RFC 6455 **text-frame** encode/decode (no server, binary rejected), `run-web` `/api/*` funcs. Full framework still ahead. |
 | Numerical / scientific / matrices | Julia | No vectorized ops/DataFrames/plots. Scalar loops only. Folding + `range(n)` fast path help constants/iteration overhead, not loop speed; VM loop is currently *slower* than the interpreter (`docs/bench.md`). |
 | Quick scripts, rules, gluing, learning | ks-fusion | — this is the sweet spot (plus small `--bin` services where a Go toolchain is acceptable). |
@@ -71,7 +71,7 @@ See `docs/futures.md` for the roadmap (v2.6 header; §3 still lists P1/P2 boxes 
 `http/net-ws/fs/process/time/crypto/db/log` are implemented to the depth in §4,
 `publish/pull/yank` + `vendor/` + namespaces done file-local, `repl/bench/debug/`
 done with `debug` non-interactive, `run-web`/`build-js` done prototype-grade;
-unchecked: git deps, central registry, variadics, hydrate-full, FFI).
+unchecked: git deps, central registry, variadics, CSS handling, FFI).
 
 `fusion compile` (`internal/compiler`, `.ksb-1` + `fusion prog.ksb` + `--dis`/`--run`) is step one
 of the P1 runtime plan; v2.2 added `--bin`/`--target`, v2.3 added cache/host-profile/file-registry/watch/SSG/TCP-minimal,
@@ -166,8 +166,11 @@ What the `.ks` 84 does and does not mean (read before citing 84; evidence for ev
   Requires Go toolchain; cache is whole-app hash-skip (no TTL/size/remote),
   no incremental per-file rebuild. 8 holds.
 - Frontend 8 = “SSR + DOM-diff without reload + background ISR + nested layouts
-  + subset-JS (hashes/manifest/budgets) + SSG + virtualized lists + `use_state`
-  shim” (evidence §E6). No hydrate-full (`on_mount` immediate), no CSS handling,
+  + subset-JS (hashes/manifest/budgets) + SSG + virtualized lists + hydrate-full
+  (`__hydrate` + `__action` CSR + `__mounts` + `fetch_json` shim) + `use_state`
+  shim + strict frontend vet (`frontend-env`/`frontend-set-html`/`frontend-key`
+  as `check` errors, app-aware save diagnostics with whole-line ranges)”
+  (evidence §E6). No CSS handling, `js_call` sync-only,
   `fetch_json` GET-only. 8 ties Node SSR-prototype depth; React/Vite/Next UI
   depth still ahead.
 - Maturity 9 = “`docs/stability.md` semver/LTS + `docs/rfcs/` (2 RFCs) +
@@ -383,8 +386,21 @@ ks-fusion app = `backend/main.ks` + `frontend/` (`main.ks` route table +
 `store/app.ks`) run concurrently in console via `render_console`, plus `run-web` SSR (HTML+JSON, `/api/*`) and `build-js` per-route JS.
 
 Honest `run-web` scope (`internal/tools/webjs.go`): loads `frontend/**/*.ks` except `main.ks` into one
-interpreter, calls `<route>_page({})` (`/`→`home_page`, `/hi`→`hi_page`, `/user/*`→`home_page`),
-embeds pretty JSON + a small JS shim (`window.use_state/set_state` over `__state`) + `?format=json` +
+interpreter, calls `<route>_page(props)` with `props={path, query, params}` + flattened params
+(`/`→`home_page`, `/hi`→`hi_page`, `/user/7`→`user_page` with `props.id="7"` when
+`frontend/pages/user_[id].ks` exists else `/user/*`→`home_page` fallback, `/<name>`→`<name>_page`;
+generalized `foo_[bar].ks`→`foo_page` with `props.bar`; unknown→`404_page`/`notfound_page` with HTTP 404
+else JSON `{"error":...}` 404, `X-Render-Time` preserved),
+embeds pretty JSON + hydrate-full client shim (`window.use_state/set_state` over `__state`
+  snapshotted from the backend `use_state` map at SSR time — client-only divergence documented
+  in code: `set_state` schedules a debounced CSR re-render, never writes back;
+  `window.on_mount` defers to `__mounts` run once on `DOMContentLoaded` after `__hydrate`;
+  `window.fetch_json(path)` is GET-only `fetch(path).then(r=>r.json())` with object/array
+  shape check + banner; `props.on_click`/`onClick` → `data-action` + `window.__action`
+  which re-fetches `?format=json` for the current route and hydrates/patches;
+  `__renderVM` supports `class/id/href/src/value/placeholder` + `data-prop-*` fallback;
+  all text escaped via `textContent`/`createTextNode`, never `innerHTML` except the
+  allowlisted `js_call("set_html", literal)` `props.html` slot which server vets) + `?format=json` +
 `X-Render-Time` (+ `X-Cache: HIT` on ISR hits). `/api/<name>` requires `backend/api/<name>.ks` with
 `api_<name>({query,path})` else returns `{"ok":true}`. `--watch` polls `.ks` mtimes every 400ms and pushes over
 SSE (300ms ticker): on change it re-renders and sends keyed `{ops, vm}` patches applied via
@@ -397,19 +413,33 @@ serve-stale-while-revalidate (`webjs.go:592` `startBackground`, `webjs.go:704` `
 Nested layouts are conventional: a page VM with `layout: "admin"` wraps via
 `admin_layout(page)`, then `_app_layout`, then `app_layout` when those funcs exist;
 a value counts as a view-model when it has `type`/`children`/`key`.
-`build-js` transpiles a subset per route (handles `let/assign/func/block/if/while/for-in/print/expr/call/index/array/map`;
-`for-c` → `// for-c (see .ks source)`, anything else → `// unsupported`), strips blanks/`//` as “minify”,
-writes `<route>.js` (`home`→`index`) with per-route sha256 (skip-write when unchanged) + `manifest.json {route:{size,sha256}}`,
-warns >100KB / fails >250KB per route.
-`build-ssg` pre-renders `[/, /hi + pages/*.ks]` to `<name>.html+.json` (`/`→`index`); per-route failures only
-`ssg skip`, not fatal. `use_state/set_state` in `.ks` is a process-global map
-(`internal/backend/stdlib_ext2.go`); `on_mount(f)` calls `f` immediately (no lifecycle — no hydrate-full);
-`fetch_json(url)` is `json_parse(http_get(url))`, GET-only. Lists over 100 children render the first 100
-plus a `Show more (shown/total)` expander.
+`build-js` (P3 STRICT, default) transpiles a safe subset per route: `let/assign(+indexed)/func/block/if/while/for-in/break/continue/return/print/expr/call/index(+?.-safe)/slice/array/map/func-lit`
+plus builtin maps (`str/int/float/bool/type/json_stringify/json_parse/keys/values/upper/lower/trim/split/join/push/pop/ok/err/is_ok/is_err/len/range`,
+`in` via `__ks_in`, `is <base-type>` inline, `for-in range(n)` via emitted `range()` helper);
+loads all `frontend/**/*.ks` except `main.ks`, BFSes per-route used-func closure from `<route>_page` + `app_layout`/`_app_layout`
+(+ string-referenced `*_layout`) and emits only used funcs/globals (tree-shake analogue: `app_fetch_user`/`app_state` excluded from `/`
+when unused); STRICT fails on unsupported with `file:line` (`for-c`, `go/sleep/try/switch/select/defer/struct/enum`, unknown `is`, bad assign —
+e.g. `build-js frontend/pages/bad.ks:2: for-c not in JS subset, see .ks source`), `--strict=false` keeps v2.2 lenient
+`// unsupported ...` / `// for-c` output for migration; trims blanks as “minify” (keeps `//`),
+writes `<route>.js` (`home`→`index`, dynamic `user_[id].ks`→`user_[id].js` with `// route: /user/:id` comment) with per-route sha256
+(skip-write when unchanged) + `manifest.json {route:{size,sha256}}` (+ `styles: [...]` hint), warns >100KB / fails >250KB per route.
+CSS passthrough (no CSS-in-`.ks`): `props.class`/`className` strings emit verbatim; `frontend/styles/*.css` copies to `<out>/styles/`
++ manifest `styles` `<link>` hint (never bundled).
+`build-ssg` pre-renders `[/, /hi + pages/*.ks]` (skips dynamic `foo_[bar].ks` with
+`ssg skip dynamic`, not fatal) to `<name>.html+.json` (`/`→`index`); per-route failures only
+`ssg skip`, not fatal. SSR keeps `data-key` attributes in `#app` so `window.__hydrate(vm)`
+walks the existing DOM, attaches `data-action` listeners, and only creates missing nodes.
+`use_state/set_state` in `.ks` is a process-global map (`internal/backend/stdlib_ext2.go`,
+`SnapshotGlobalState` for the SSR snapshot); interpreter `on_mount(f)` still calls `f`
+immediately for console/run — only the web shim defers to `__mounts`.
+`fetch_json(url)` is `json_parse(http_get(url))`, GET-only (client shim validates shape).
+Lists over 100 children SSR the first 100 plus a `Show more (shown/total)` expander wired
+via the same `data-action="show_more"` + `__action` path (no reload, never `location.reload`).
+Remaining limits: no CSS handling, `js_call` sync-only.
 
 * Today: use Next.js for real browser UI. Use `.ks` backend as JSON worker
   (`read_file` → `json_stringify` → stdout, or `http_get` → `fetch_json`) called from an API route, or `run-web` for SSR prototype.
-* Future (`docs/futures.md`, `plan/frontend.md`): hydrate-full, CSS handling. Do not reimplement React in `.ks` — explicit non-goal.
+* Future (`docs/futures.md`, `plan/frontend.md`): CSS handling, `js_call` promises. Do not reimplement React in `.ks` — explicit non-goal.
 
 Pick Next.js for SEO sites, dashboards, SaaS UI.
 Pick `.ks` for the logic worker behind it.
@@ -708,15 +738,17 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
 
 - Diff: `diff.go:76` `DiffViewModels` (keyed setText/setProp/replace/insert/
   remove/move) + `diff_test.go`.
-- SSE: keyed `{"ops":..,"vm":..}` patches; client `__applyPatch`/`__renderVM`/
-  `data-key`; render-error → `{"reload":true}` banner only (never
+- SSE: keyed `{"ops":..,"vm":..}` patches; client `__applyPatch`/`__hydrate`/`__renderVM`/
+  `data-key` + `__action` CSR (`?format=json` + patch) + `__mounts` + `fetch_json` shim;
+  render-error → `{"reload":true}` banner only (never
   `location.reload()`).
 - ISR: background regen (`webjs.go:592` `startBackground`, `webjs.go:704`
   `kickRefresh`, serve-stale-while-revalidate).
 - Tests: `isr_test.go:42` (background refreshes), `isr_test.go:67` (stale-while),
   `isr_test.go:114` (no `location.reload` in HTML), `isr_test.go:137` (SSE ops,
-  no reload payload).
-- Limits: no hydrate-full (`on_mount` immediate), no CSS handling,
+  no reload payload), `hydrate_test.go` (SSR `data-key` + escape, hydrate/action/mount,
+  `/api/user` echo, `fetch_json` GET-only).
+- Limits: no CSS handling, `js_call` sync-only,
   `fetch_json` GET-only. 8 ties Node SSR-prototype depth.
 
 ### E7. Maturity 8→9 (v2.6): release + E2E + in-repo CI + hygiene (+1, meets the bar)
@@ -924,11 +956,11 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
 | 10 | Packages | proxy + `go.sum` | crates.io + lock | `fusion.lock`+semver + file-local registry (`publish/pull/yank`, sha256, namespaces) + real `audit` + `vendor/`; `.ksb` per-file | central server, git deps, token auth | `futures.md` P0+P2 |
 | 11 | Tooling | `fmt/vet/test/bench/pprof` | `clippy/fmt/bench` | `new/run/build/launch` + `compile` + `test --timeout` + `fmt/vet/doc/check/repl/bench/debug/profile` + `audit` + full LSP (incl. completion) + vendor-aware hash-skip cache + VS Code ext v0.3.0 | DAP, sampling time-profiler | `futures.md` P0+P2 DX |
 | 12 | IDE | `gopls` | `rust-analyzer` | LSP (hover/goto/completion/rename/diagnostics/format), ext v0.3.0, non-interactive debugger + exact-count profiler | DAP/step-REPL, ext test harness | `futures.md` P2 DX |
-| 13 | Frontend | `html/template`/WASM | WASM pkgs | console + `run-web` SSR (keyed diff, no reload; background ISR; nested layouts) + subset `build-js` (hashes/budgets/manifest) + `build-ssg` + `use_state` shim + API funcs + virtualize>100 | hydrate-full, CSS handling | `futures.md` P2 frontend |
+| 13 | Frontend | `html/template`/WASM | WASM pkgs | console + `run-web` SSR (hydrate-full `__hydrate`/`__action`/`__mounts`/`fetch_json` shim, keyed diff, no reload; background ISR; nested layouts) + subset `build-js` (hashes/budgets/manifest) + `build-ssg` + `use_state` shim + API funcs + virtualize>100 | CSS handling, `js_call` promises | `futures.md` P2 frontend |
 | 14 | FFI | `cgo` | `unsafe`/FFI | none | opt-in `ffi_*` + Go plugin API | `futures.md` P2 interop |
 | 15 | Stability | compat promise | editions | v2.7 source + `stability.md`/RFCs/LTS docs + `release/fusion` v2.7 + `ci.sh` + 136 tests + timeout + repeat-safe + `--bin`/`--strip` E2E + hygiene | TLS-server E2E (needs `tls_serve`) | `futures.md` §5 |
 
-Close full VM + DAP/time-profiler + native-DB + methods/variadics + hydrate-full + central
+Close full VM + DAP/time-profiler + native-DB + methods/variadics + CSS handling + central
 registry with depth and `.ks` moves `84 → ~87–89/100`.
 Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
 
@@ -981,10 +1013,12 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
   client, no vscode-test harness). No `go/chan/select` in compiled output yet
   (`sleep` + `try/catch`-without-`finally` compile since v0.3);
   `go defer` rejected.
-* `frontend/` is SSR + keyed DOM-diff without reload + background ISR + nested layouts
-  + subset-JS (hashes/manifest/budgets) + SSG + `use_state` shim (`on_mount`
-  immediate — no hydrate-full, `fetch_json` GET-only, virtualize>100) — still no CSS
-  handling. See `plan/frontend.md`.
+* `frontend/` is SSR + hydrate-full (`__hydrate` walks SSR `data-key` DOM, `__action` CSR,
+  `__mounts` deferred `on_mount`, `fetch_json` shim with shape check) + keyed DOM-diff
+  without reload + background ISR + nested layouts + subset-JS (hashes/manifest/budgets)
+  + SSG + `use_state` shim (snapshot + debounced CSR; backend map divergence documented,
+  `fetch_json` GET-only, virtualize>100 via `show_more` action) — still no CSS
+  handling, `js_call` sync-only. See `plan/frontend.md`.
 * Net/data depth: `http_serve` always `application/json`, no method/status/headers/
   shutdown; `tcp_serve` has `tcp_shutdown`; `tls_connect` client-only;
   `ws_connect` + text frames only (binary rejected, no server); `db_*` KV-file;

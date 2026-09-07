@@ -313,6 +313,10 @@ type vetter struct {
 	// var name -> declared type annotation (from `let x: T`).
 	enums    map[string][]string
 	varTypes map[string]string
+	// P0 frontend rules: for-in loop vars (stack) to detect index keys,
+	// curLine tracks the nearest enclosing Stmt line (Expr has no Line).
+	loopVars []map[string]bool
+	curLine  int
 }
 
 func newVetter(file string) *vetter {
@@ -324,11 +328,23 @@ func newVetter(file string) *vetter {
 	for _, k := range []string{"true", "false", "nil"} {
 		bm[k] = true
 	}
+	// NOTE: isFrontend is a minimal strings.Contains(path,"frontend/") check.
+	// Temp-path bypass (documented): t.TempDir() paths lack "frontend/", so
+	// unit tests must create a frontend/ subdir (or vet via VetTarget on such
+	// a layout); otherwise frontend rules silently skip. Kept minimal for P0
+	// (no abs-path / alias / case handling). Do not touch webjs.go routing.
+	isFE := strings.Contains(filepath.ToSlash(file), "frontend/")
+	if isFE {
+		// Frontend JS-bridge names (no backend builtin yet): whitelist so the
+		// frontend-set-html rule — not unknown-var — owns these calls.
+		bm["set_html"] = true
+		bm["js_call"] = true
+	}
 	return &vetter{
 		file: file,
 		funcArity: map[string]int{},
 		builtins: bm,
-		isFrontend: strings.Contains(filepath.ToSlash(file), "frontend/"),
+		isFrontend: isFE,
 		enums: map[string][]string{},
 		varTypes: map[string]string{},
 	}
@@ -464,6 +480,7 @@ func vetFileWithGlobalsEnums(path string, globalFuncs map[string]int, globalLets
 }
 
 func (v *vetter) frontendTextRules(path string) {
+	// See newVetter NOTE: temp paths without "frontend/" skip these rules.
 	if !v.isFrontend {
 		return
 	}
@@ -472,22 +489,123 @@ func (v *vetter) frontendTextRules(path string) {
 		return
 	}
 	lines := strings.Split(string(data), "\n")
-	for i, l := range lines {
-		// env( in frontend is server-only violation (ROUTE is the allowed routing exception)
-		trim := strings.TrimSpace(l)
-		if strings.HasPrefix(trim, "#") || strings.HasPrefix(trim, "//") {
+	inBlock := false
+	for i, raw := range lines {
+		code := stripFrontendCode(raw, &inBlock)
+		if !hasEnvCall(code) {
 			continue
 		}
-		if strings.Contains(l, "env(") && !strings.Contains(l, `"ROUTE"`) && !strings.Contains(l, `'ROUTE'`) {
-			v.issues = append(v.issues, VetIssue{File: path, Line: i + 1, Rule: "frontend-env", Msg: "env() in frontend/ is server-only; keep secrets in backend/"})
+		// ROUTE is the allowed routing exception: env("ROUTE", ...) in
+		// frontend/main.ks only. Check raw line for quoted ROUTE.
+		if strings.Contains(raw, `"ROUTE"`) || strings.Contains(raw, `'ROUTE'`) {
+			continue
+		}
+		v.issues = append(v.issues, VetIssue{File: path, Line: i + 1, Rule: "frontend-env", Msg: "env() in frontend/ is server-only; keep secrets in backend/", IsError: true})
+	}
+}
+
+// stripFrontendCode removes /* */ block comments (via inBlock across lines),
+// string contents ("..." and '...', with escapes), and # / // line comments.
+// Returns code-only text for env( detection, so "env(" inside strings or
+// comments never flags.
+func stripFrontendCode(line string, inBlock *bool) string {
+	var b strings.Builder
+	b.Grow(len(line))
+	inD, inS := false, false
+	for j := 0; j < len(line); {
+		c := line[j]
+		if *inBlock {
+			if c == '*' && j+1 < len(line) && line[j+1] == '/' {
+				*inBlock = false
+				j += 2
+				continue
+			}
+			j++
+			continue
+		}
+		if inD {
+			if c == '\\' {
+				j += 2
+				continue
+			}
+			if c == '"' {
+				inD = false
+			}
+			j++
+			continue
+		}
+		if inS {
+			if c == '\\' {
+				j += 2
+				continue
+			}
+			if c == '\'' {
+				inS = false
+			}
+			j++
+			continue
+		}
+		if c == '"' {
+			inD = true
+			j++
+			continue
+		}
+		if c == '\'' {
+			inS = true
+			j++
+			continue
+		}
+		if c == '/' && j+1 < len(line) && line[j+1] == '*' {
+			*inBlock = true
+			j += 2
+			continue
+		}
+		if c == '/' && j+1 < len(line) && line[j+1] == '/' {
+			break // // comment
+		}
+		if c == '#' {
+			break // # comment
+		}
+		b.WriteByte(c)
+		j++
+	}
+	return b.String()
+}
+
+// hasEnvCall reports `env (` (allow space) with word boundaries.
+func hasEnvCall(code string) bool {
+	for i := 0; i+3 <= len(code); i++ {
+		if code[i] != 'e' || i+3 > len(code) || code[i:i+3] != "env" {
+			continue
+		}
+		if i > 0 && isEnvIdentChar(code[i-1]) {
+			continue
+		}
+		if i+3 < len(code) && isEnvIdentChar(code[i+3]) {
+			continue
+		}
+		j := i + 3
+		for j < len(code) && (code[j] == ' ' || code[j] == '\t') {
+			j++
+		}
+		if j < len(code) && code[j] == '(' {
+			return true
 		}
 	}
+	return false
+}
+
+func isEnvIdentChar(c byte) bool {
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }
 
 func (v *vetter) walkStmt(st *frontend.Stmt) {
 	if st == nil {
 		return
 	}
+	prevLine := v.curLine
+	v.curLine = st.Line
+	defer func() { v.curLine = prevLine }()
 	switch st.Kind {
 	case frontend.StmtLet:
 		if st.Expr != nil {
@@ -546,7 +664,9 @@ func (v *vetter) walkStmt(st *frontend.Stmt) {
 		for _, n := range st.Names {
 			v.define(n, st.Line, true)
 		}
+		v.pushLoopVars(st.Names)
 		v.walkStmt(st.Body)
+		v.popLoopVars()
 		v.popScope()
 	case frontend.StmtForC:
 		v.pushScope()
@@ -747,6 +867,105 @@ func (v *vetter) switchIsBool(e *frontend.Expr) bool {
 	return ok && t == "bool"
 }
 
+func (v *vetter) pushLoopVars(names []string) {
+	m := map[string]bool{}
+	for _, n := range names {
+		m[n] = true
+	}
+	v.loopVars = append(v.loopVars, m)
+}
+
+func (v *vetter) popLoopVars() {
+	if len(v.loopVars) == 0 {
+		return
+	}
+	v.loopVars = v.loopVars[:len(v.loopVars)-1]
+}
+
+func (v *vetter) isLoopVar(name string) bool {
+	for i := len(v.loopVars) - 1; i >= 0; i-- {
+		if v.loopVars[i][name] {
+			return true
+		}
+	}
+	return false
+}
+
+func isExprLiteral(e *frontend.Expr) bool {
+	if e == nil {
+		return false
+	}
+	switch e.Kind {
+	case frontend.ExprString, frontend.ExprInt, frontend.ExprFloat, frontend.ExprBool, frontend.ExprNil:
+		return true
+	default:
+		return false
+	}
+}
+
+func (v *vetter) frontendLine() int {
+	if v.curLine > 0 {
+		return v.curLine
+	}
+	return 1
+}
+
+// checkFrontendSetHTML flags non-literal HTML: set_html(non-literal) and
+// js_call("set_html", non-literal). Literal strings are allowed (allowlisted
+// raw-HTML path per plan/frontend.md safety rule).
+func (v *vetter) checkFrontendSetHTML(e *frontend.Expr) {
+	if e.Callee == nil || e.Callee.Kind != frontend.ExprVar {
+		return
+	}
+	line := v.frontendLine()
+	switch e.Callee.Name {
+	case "set_html":
+		if len(e.Args) >= 1 && !isExprLiteral(e.Args[0]) {
+			v.issues = append(v.issues, VetIssue{File: v.file, Line: line, Rule: "frontend-set-html", Msg: "set_html first arg must be a string literal (non-literal HTML needs sanitizer + allowlist)", IsError: true})
+		}
+	case "js_call":
+		if len(e.Args) >= 2 {
+			if s, ok := stringLiteral(e.Args[0]); ok && s == "set_html" {
+				if !isExprLiteral(e.Args[1]) {
+					v.issues = append(v.issues, VetIssue{File: v.file, Line: line, Rule: "frontend-set-html", Msg: `js_call("set_html", ...) second arg must be a string literal`, IsError: true})
+				}
+			}
+		}
+	}
+}
+
+// checkFrontendKey flags view-model maps ({type + props/children}) missing
+// "key", and key: <for-in loop var> (index keys must be stable, not indices).
+func (v *vetter) checkFrontendKey(e *frontend.Expr) {
+	hasType, hasPropsOrChildren, hasKey := false, false, false
+	keyIdx := -1
+	for i, k := range e.MapKeys {
+		switch k {
+		case "type":
+			hasType = true
+		case "props", "children":
+			hasPropsOrChildren = true
+		case "key":
+			hasKey = true
+			keyIdx = i
+		}
+	}
+	if !(hasType && hasPropsOrChildren) {
+		return
+	}
+	line := v.frontendLine()
+	if !hasKey {
+		v.issues = append(v.issues, VetIssue{File: v.file, Line: line, Rule: "frontend-key", Msg: `view-model map {type, props, children} missing required "key" (stable key, not index)`, IsError: true})
+		return
+	}
+	if keyIdx >= 0 && keyIdx < len(e.MapVals) {
+		kv := e.MapVals[keyIdx]
+		if kv != nil && kv.Kind == frontend.ExprVar && v.isLoopVar(kv.Name) {
+			v.issues = append(v.issues, VetIssue{File: v.file, Line: line, Rule: "frontend-key", Msg: fmt.Sprintf("index key %q: use stable id, not for-in loop var", kv.Name), IsError: true})
+		}
+	}
+}
+
 func (v *vetter) walkExpr(e *frontend.Expr) {
 	if e == nil {
 		return
@@ -774,8 +993,14 @@ func (v *vetter) walkExpr(e *frontend.Expr) {
 				} else {
 					v.use(e.Callee.Name)
 				}
+				if v.isFrontend {
+					v.checkFrontendSetHTML(e)
+				}
 			} else {
 				v.walkExpr(e.Callee)
+				if v.isFrontend {
+					v.checkFrontendSetHTML(e)
+				}
 			}
 		}
 		for _, a := range e.Args {
@@ -799,6 +1024,9 @@ func (v *vetter) walkExpr(e *frontend.Expr) {
 			v.walkExpr(el)
 		}
 	case frontend.ExprMap:
+		if v.isFrontend {
+			v.checkFrontendKey(e)
+		}
 		for _, mv := range e.MapVals {
 			v.walkExpr(mv)
 		}
