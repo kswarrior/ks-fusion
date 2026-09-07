@@ -1,4 +1,4 @@
-# Missing List — v2.6 done (score 84/100 honest, see docs/vs.md v2.5 + v2.6 evidence + Corrections)
+# Missing List — v2.7 done (score 84/100 honest, see docs/vs.md v2.5 + v2.6 evidence + v2.7 Corrections)
 
 > Source: `docs/vs.md` gaps + `docs/futures.md` roadmap + `plan/frontend.md` + `plan/tooling.md`.
 > Checked = exists today. Unchecked = missing. Score impact in brackets.
@@ -20,7 +20,7 @@
 
 - [x] Tree-walk opts (lock-free scopes, O(n log n) sort, O(log n) pow)
 - [x] Compiler v0.1 subset (`.ksb-1`, 7 builtins, no go/chan/try/switch/slices/is/?./??)
-- [x] VM v0.2 (slices, is/?./??, typed params, switch + O(log n) ** + bench docs/bench.md) done v2.5 [holds Perf 7; +1 needs full VM + consistent wins]; left: go/chan/select, import/try/defer
+- [x] VM v0.2 (slices, is/?./??, typed params, switch + O(log n) ** + bench docs/bench.md) done v2.5 [held Perf 7]; v0.3 done v2.7 (range-int for-in, sleep, try/catch-no-finally, assert parity, 8 builtins; loop regression fixed, both benches green) [holds Perf 7; 8 needs full VM (concurrency/import/defer/nominals); 10 needs native backend]; left: go/chan/select, import/defer/finally
 - [x] `fusion build --bin` single static executable [+3 Build done]
 - [x] `--target` matrix (linux/amd64,arm64,darwin,windows,wasm via GOOS/GOARCH) (done v2.4)
 - [ ] `--cpuprofile`, opcode counts

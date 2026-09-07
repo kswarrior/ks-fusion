@@ -532,7 +532,7 @@ Pick `.ks` for sidecar scripts/services (data munging, checks, bots, `--bin` wor
 
 | Rank | Stack | Total /100 | Verdict vs .ks (84) |
 |---:|---|---:|---|
-| 1 | **ks-fusion v2.6 source (177 builtins = 96+52+11+12+6; struct/enum + exhaustive vet; VM v0.2 + bench; WS-text + extended SQL (OR/LIKE)/postgres-compat + pipes; real audit; LSP + completion + debug + profile + VS Code ext v0.3.0; diff + bg-ISR; vendor-aware cache + --strip; release v2.6 + ci.sh + --bin/--strip E2E + hygiene)** | **84** | **baseline — leads on simplicity (9/10) + script breadth; behind on native depth (see “What 84 means” + “Honest limits”).** |
+| 1 | **ks-fusion v2.7 source (177 builtins = 96+52+11+12+6; struct/enum + exhaustive vet; VM v0.3 + bench; WS-text + extended SQL (OR/LIKE)/postgres-compat + pipes; real audit; LSP + completion + debug + profile + VS Code ext v0.3.0; diff + bg-ISR; vendor-aware cache + --strip; release v2.7 + ci.sh + --bin/--strip E2E + hygiene)** | **84** | **baseline — leads on simplicity (9/10) + script breadth; behind on native depth (see “What 84 means” + “Honest limits”).** |
 | 2 | Go | 82 | -2, prod servers / single binary depth |
 | 3 | Rust | 81 | -3, systems / safety depth |
 | 4 | Next.js | 79 | -5, browser UI depth (different category) |
@@ -1072,6 +1072,32 @@ Everything else is documented progress *inside* its current score:
   scripts; behind on native depth). Grand total `1315/1800`, avg `73.1`.
   Extra-stack margins recomputed from 84.
 
+## Corrections in this rewrite (v2.6 honest 84 → v2.7 honest 84, Perf holds 7)
+
+No dimension moves. The Perf work is real and measured, and it deliberately
+stops short of both bars — this section exists to say exactly why:
+
+* VM v0.2 → **v0.3** (same `.ksb-1` format, no bundle break): range-int
+  `for-in` fast path (`compiler.go:988/1005`, existing opcodes only),
+  `sleep` compiles (`vm.go:1372`, error-parity with the interpreter),
+  `try/catch` without `finally` compiles (`compiler.go:518` +
+  `vm.go:814/816/323`, unwind + raw-message bind + control-flow bypass),
+  VM `assert(x, msg)` message parity, builtins 7 → 8, rejects 7 → 6.
+  Tests +3 (`TestCompileRangeFastPath`, `TestCompileSleep`,
+  `TestCompileTryCatch`; 133 → 136 funcs).
+* Both VM benches now beat the interpreter on every run (fib ≈1.7–3.4x,
+  loop ≈1.3–1.4x — the v0.2 loop regression is fixed; `docs/bench.md`
+  keeps the old Xeon table labeled and adds the new table).
+* Perf **holds 7** because the documented 8-bar is unmet: no concurrency,
+  no `import`/`defer`, nominal checks skipped in the VM. And 10
+  (Rust/C/C++) is not a matter of more tuning: a Go-hosted stack VM does
+  per-opcode dispatch under a step budget — it can only ever win
+  small-integer multiples over the tree-walk interpreter, never approach
+  LLVM machine code (typically 50–100x on compute-heavy loops). Reaching 10
+  needs a native backend (LLVM/Cranelift/full AOT), which is months of work
+  and explicitly not started. Claiming 8, let alone 10, on today's VM
+  would repeat the interim-87 overshoot this doc was written to correct.
+
 Factual fixes in this rewrite (stale v2.4-era claims corrected):
 
 * Counts: **177 distinct** (`96` base + `52` ext + `11` ext2 + `12` ext3 + `6` ext4;
@@ -1100,28 +1126,30 @@ Factual fixes in this rewrite (stale v2.4-era claims corrected):
 ## How to verify (run these)
 
 ```bash
-go build -o /tmp/fusion ./cmd/fusion && /tmp/fusion version   # want: ks-fusion v2.6 (release/fusion also v2.6)
+go build -o /tmp/fusion ./cmd/fusion && /tmp/fusion version   # want: ks-fusion v2.7 (release/fusion also v2.7)
 grep -ohP '\{Name: "\K[^"]+' internal/backend/*.go | sort -u | wc -l        # want: 177 (96+52+11+12+6)
 grep -ohP '\{Name: "\K[^"]+' internal/backend/*.go | sort | uniq -d | head  # want: no dups (empty)
-grep -rh "^func Test" internal/ --include="*_test.go" | wc -l             # want: 133
+grep -rh "^func Test" internal/ --include="*_test.go" | wc -l             # want: 136
 grep -rh "^func Benchmark" internal/ --include="*_test.go" | wc -l        # want: 5
 go test ./... -count=1                                     # all green
 go test ./internal/backend/ -run TestV23TCP -count=3       # repeat-safe (port 0 + tcp_shutdown)
 go test ./internal/compiler/ -run TestCompileV02 -count=1 -v  # VM v0.2 slices/is/typed/switch (+nominal-skip)
+go test ./internal/compiler/ -run 'TestCompileRangeFastPath|TestCompileSleep|TestCompileTryCatch' -count=1 -v  # v0.3: range/sleep/try-catch
 go test ./internal/tools/ -run 'TestVetExhaustive|TestAudit|TestLSP|TestDebug|TestISR|TestWeb|TestSSE' -count=1 -v
 go test ./internal/tools/ -run 'TestLSPCompletion|TestProfile|TestCacheVendorBusts|TestBuildBinE2E' -count=1 -v  # v2.6: completion/profile/vendor-cache/--bin E2E
 go test ./internal/backend/ -run 'TestRunStructEnum|TestRunSqlite|TestRunPostgres' -count=1 -v  # incl. TestRunSqliteOrLike
-go test ./internal/backend/ -bench BenchmarkInterp -benchtime 1x -run XXX  # interp fib/loop/map
-go test ./internal/compiler/ -bench BenchmarkVM -benchtime 1x -run XXX    # VM fib (~2x) / loop (~0.7x)
+go test ./internal/backend/ -bench BenchmarkInterp -benchtime 10x -run XXX  # interp fib/loop/map
+go test ./internal/compiler/ -bench BenchmarkVM -benchtime 10x -run XXX    # VM v0.3: fib (~1.7-3.4x) + loop (~1.3-1.4x) wins
 node --check editors/vscode/extension.js && echo "VS Code ext JS OK"
 printf 'let s = 0\nfor i in range(3) {\n s = s + 1\n}\nprint s\n' > /tmp/p.ks && /tmp/fusion profile /tmp/p.ks --top 3  # .ks-line profiler
+printf 'sleep 1\nprint "sleep-ok"\n' > /tmp/slp.ks && /tmp/fusion compile /tmp/slp.ks --run  # v0.3 sleep in VM
 /tmp/fusion debug /tmp/dbg.ks --break 2 --trace | head                    # breakpoints + trace + globals
 /tmp/fusion vet ./tests/hello-app && /tmp/fusion check ./tests/hello-app  # vet warns-only + check ok
 /tmp/fusion fmt . --check                                  # clean
 go vet ./...                                               # clean
 bash ci.sh 2>&1 | tail -n 2                                # CI OK
-grep -n "runs in interpreter" internal/compiler/compiler.go | head  # 7 remaining rejects
+grep -n "runs in interpreter" internal/compiler/compiler.go | head  # 6 remaining rejects
 grep -n "func evalWhere" internal/backend/stdlib_ext3.go   # OR-split + AND-chain + LIKE conds
-ls ci.sh docs/bench.md release/fusion && ./release/fusion version  # release v2.6
+ls ci.sh docs/bench.md release/fusion && ./release/fusion version  # release v2.7
 test ! -e retest.log && echo "retest.log leftover gone" && test -e .gitignore && echo ".gitignore present"
 ```
