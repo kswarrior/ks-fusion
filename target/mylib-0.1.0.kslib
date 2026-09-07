@@ -1,0 +1,12 @@
+#!/usr/bin/env fusion
+{
+  "format": "kslib-1",
+  "name": "mylib",
+  "version": "0.1.0",
+  "files": [
+    {
+      "path": "src/lib.ks",
+      "source": "# src/lib.ks - mylib library entry\n# Import me with: import \"mylib\" (after `fusion build --release`)\n\nfunc greet(name) {\n  return \"hello \" + name + \" from mylib\"\n}\n\nfunc add(a, b) {\n  return a + b\n}\n"
+    }
+  ]
+}
