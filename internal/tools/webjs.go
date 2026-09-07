@@ -831,6 +831,7 @@ func renderVMNodeToHTML(v any) string {
 		// `fusion vet` (frontend-set-html), so reaching here means a literal.
 		b.WriteString(h)
 	}
+	renderChromeBlocks(&b, typ, key, props)
 	b.WriteString(`<div class="kids">`)
 	if len(children) > 100 {
 		for i := 0; i < 100; i++ {
