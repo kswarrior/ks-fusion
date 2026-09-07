@@ -168,7 +168,35 @@ func TestCompileV02Typed(t *testing.T) {
 }
 
 func TestCompileV02Switch(t *testing.T) {
-	mustRun(t, "let r = \"\"\nswitch 2 {\n case 1 { r = \"one\" }\n case 2, 3 { r = \"few\" }\n default { r = \"many\" }\n}\nassert(r == \"few\")\n")
+	mustRun(t, "let r = \"\"\nswitch 2 {\n case 1 { r = \"one\" }\n case 2, 3 { r = \"few\" }\n default { r = \"dflt\" }\n}\nassert(r == \"few\")\n")
 	mustRun(t, "let r = \"\"\nswitch 99 {\n case 1 { r = \"one\" }\n default { r = \"dflt\" }\n}\nassert(r == \"dflt\")\n")
 	mustRun(t, "for i in range(3) {\n switch i {\n case 1 { break }\n default { continue }\n }\n assert(i == 1)\n}\n")
+}
+
+func TestCompileRangeFastPath(t *testing.T) {
+	// 1-arg and 2-arg forms, incl. variable bounds (evaluated once).
+	mustRun(t, "let s = 0\nfor i in range(10000) { s = s + i }\nassert(s == 49995000)\n")
+	mustRun(t, "let s = 0\nfor i in range(3, 7) { s = s + i }\nassert(s == 18)\n")
+	mustRun(t, "let n = 5\nlet s = 0\nfor i in range(n) { s = s + 1 }\nassert(s == 5)\n")
+	mustRun(t, "let a = 2\nlet b = 5\nlet s = 0\nfor i in range(a, b) { s = s + i }\nassert(s == 9)\n")
+	// two-var form: k = 0-based index, v = value (mirrors interpreter).
+	mustRun(t, "let sk = 0\nlet sv = 0\nfor k, v in range(4) { sk = sk + k\n sv = sv + v }\nassert(sk == 6)\nassert(sv == 6)\n")
+	mustRun(t, "let sk = 0\nlet sv = 0\nfor k, v in range(2, 5) { sk = sk + k\n sv = sv + v }\nassert(sk == 3)\nassert(sv == 9)\n")
+	// empty ranges run zero times.
+	mustRun(t, "let s = 0\nfor i in range(0) { s = 99 }\nassert(s == 0)\n")
+	mustRun(t, "let s = 0\nfor i in range(5, 2) { s = 99 }\nassert(s == 0)\n")
+	mustRun(t, "let s = 0\nfor i in range(-3) { s = 99 }\nassert(s == 0)\n")
+	// break/continue/nesting/shadowing match the generic path.
+	mustRun(t, "let s = 0\nfor i in range(10) {\n if i == 2 { continue }\n if i == 4 { break }\n s = s + 1\n}\nassert(s == 3)\n")
+	mustRun(t, "let s = 0\nfor i in range(3) {\n for j in range(3) { s = s + 1 }\n}\nassert(s == 9)\n")
+	mustRun(t, "let i = 99\nfor i in range(3) { }\nassert(i == 2)\n")
+	// assigning the loop var inside the body does not corrupt iteration
+	// (counter lives in a hidden slot, as in the generic path).
+	mustRun(t, "let n = 0\nfor i in range(5) {\n i = 100\n n = n + 1\n}\nassert(n == 5)\nassert(i == 100)\n")
+	// 3-arg range keeps the generic path (same values, incl. step).
+	mustRun(t, "let s = 0\nfor i in range(0, 10, 3) { s = s + i }\nassert(s == 18)\n")
+	// non-int bounds are runtime errors in both engines.
+	mustFailRun(t, "for i in range(\"x\") { print i }\n")
+	mustFailRun(t, "for i in range(2.5) { print i }\n")
+	mustFailRun(t, "for i in range(nil) { print i }\n")
 }
