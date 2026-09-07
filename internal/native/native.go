@@ -848,17 +848,10 @@ func (g *gen) emitStmt(st *frontend.Stmt) error {
 	case frontend.StmtForC:
 		return g.emitForC(st)
 	case frontend.StmtFunc:
-		// nested named func: emit as a closure binding (no captures checked
-		// here — Go enforces capture safety at build time).
+		// Nested named func: emit as a closure binding.
 		if err := checkName(st.Name, "func", st.Line); err != nil {
 			return err
 		}
-		sig, err := g.localFuncSig(st)
-		if err != nil {
-			return err
-		}
-		g.define(st.Name, ntVoid) // placeholder; real type is the closure below
-		_ = sig
 		return g.emitNestedFunc(st)
 	case frontend.StmtReturn:
 		if !g.inFunc {
@@ -982,10 +975,19 @@ func (g *gen) closureSig(name string, params []string, ptypes []string, retAnn s
 			sig.ret = ret
 		}
 	}
+	// Restore inference-phase shadowing before the emission walk below.
+	if had {
+		g.closures[name] = outer
+	} else {
+		delete(g.closures, name)
+	}
+	if hadFn {
+		g.funcs[name] = outerFn
+	}
 	// Re-register for the emission walk, then restore.
 	outer2, had2 := g.closures[name]
 	g.closures[name] = sig
-	err = fn(sig)
+	err := fn(sig)
 	if had2 {
 		g.closures[name] = outer2
 	} else {
@@ -996,32 +998,28 @@ func (g *gen) closureSig(name string, params []string, ptypes []string, retAnn s
 
 // emitNestedFunc emits `name := func(params) [ret] { body }`.
 func (g *gen) emitNestedFunc(st *frontend.Stmt) error {
-	sig, err := g.localFuncSig(st)
-	if err != nil {
+	return g.closureSig(st.Name, st.Names, st.ParamTypes, st.ReturnType, st.Body, st.Line, func(sig *funcSig) error {
+		g.pushScope()
+		for i, p := range st.Names {
+			g.define(p, sig.params[i])
+		}
+		savedRet, savedIn := g.funcRet, g.inFunc
+		g.funcRet, g.inFunc = sig.ret, true
+		var params []string
+		for i, p := range st.Names {
+			params = append(params, p+" "+sig.params[i].goType())
+		}
+		if sig.ret == ntVoid {
+			g.emit("%s := func(%s) {\n", st.Name, strings.Join(params, ", "))
+		} else {
+			g.emit("%s := func(%s) %s {\n", st.Name, strings.Join(params, ", "), sig.ret.goType())
+		}
+		err := g.emitBlockBody(st.Body)
+		g.emit("}\n")
+		g.funcRet, g.inFunc = savedRet, savedIn
+		g.popScope()
 		return err
-	}
-	g.pushScope()
-	for i, p := range st.Names {
-		g.define(p, sig.params[i])
-	}
-	savedRet, savedIn := g.funcRet, g.inFunc
-	g.funcRet, g.inFunc = sig.ret, true
-	var params []string
-	for i, p := range st.Names {
-		params = append(params, p+" "+sig.params[i].goType())
-	}
-	if sig.ret == ntVoid {
-		g.emit("%s := func(%s) {\n", st.Name, strings.Join(params, ", "))
-	} else {
-		g.emit("%s := func(%s) %s {\n", st.Name, strings.Join(params, ", "), sig.ret.goType())
-	}
-	if err := g.emitBlockBody(st.Body); err != nil {
-		return err
-	}
-	g.emit("}\n")
-	g.funcRet, g.inFunc = savedRet, savedIn
-	g.popScope()
-	return nil
+	})
 }
 
 func (g *gen) emitLet(st *frontend.Stmt) error {
@@ -1069,86 +1067,37 @@ func (g *gen) emitLet(st *frontend.Stmt) error {
 	return nil
 }
 
-// emitLetFunc emits `let f = func(params) [ret] { body }`.
+// emitLetFunc emits `let f = func(params) [ret] { body }` via a
+// pre-declared var so the closure can recurse.
 func (g *gen) emitLetFunc(st *frontend.Stmt) error {
 	e := st.Expr
-	var params []ntype
-	for i, p := range e.FuncParams {
-		if err := checkName(p, "param", st.Line); err != nil {
-			return err
-		}
-		pt := ""
-		if i < len(e.FuncParamTypes) {
-			pt = e.FuncParamTypes[i]
-		}
-		t, err := parseAnn(pt, st.Line)
-		if err != nil {
-			return err
-		}
-		params = append(params, t)
-	}
-	// Infer return type from the literal body.
-	saved := g.vars
-	g.vars = []map[string]ntype{{}}
-	for i, p := range e.FuncParams {
-		g.vars[0][p] = params[i]
-	}
-	types, err := g.collectReturns(e.FuncBody)
-	g.vars = saved
-	if err != nil {
-		return err
-	}
-	ret := ntVoid
-	if len(types) > 0 {
-		ret = types[0]
-		for _, t := range types[1:] {
-			var err error
-			ret, err = unify(ret, t, st.Line)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	if e.FuncReturnType != "" {
-		want, err := parseAnn(e.FuncReturnType, st.Line)
-		if err != nil {
-			return err
-		}
-		ret = want
-	}
 	if _, exists := g.vars[len(g.vars)-1][st.Name]; exists {
 		return fmt.Errorf("line %d: %q already defined in this block", st.Line, st.Name)
 	}
-	g.pushScope()
-	for i, p := range e.FuncParams {
-		g.define(p, params[i])
-	}
-	savedRet, savedIn := g.funcRet, g.inFunc
-	g.funcRet, g.inFunc = ret, true
-	var ps []string
-	for i, p := range e.FuncParams {
-		ps = append(ps, p+" "+params[i].goType())
-	}
-	// Recursion through the binding needs a pre-declared var.
-	if ret == ntVoid {
-		g.emit("var %s func(%s)\n", st.Name, strings.Join(ps, ", "))
-		g.emit("%s = func(%s) {\n", st.Name, strings.Join(ps, ", "))
-	} else {
-		g.emit("var %s func(%s) %s\n", st.Name, strings.Join(ps, ", "), ret.goType())
-		g.emit("%s = func(%s) %s {\n", st.Name, strings.Join(ps, ", "), ret.goType())
-	}
-	err = g.emitBlockBody(e.FuncBody)
-	g.emit("}\n")
-	g.funcRet, g.inFunc = savedRet, savedIn
-	g.popScope()
-	if err != nil {
+	return g.closureSig(st.Name, e.FuncParams, e.FuncParamTypes, e.FuncReturnType, e.FuncBody, st.Line, func(sig *funcSig) error {
+		g.pushScope()
+		for i, p := range e.FuncParams {
+			g.define(p, sig.params[i])
+		}
+		savedRet, savedIn := g.funcRet, g.inFunc
+		g.funcRet, g.inFunc = sig.ret, true
+		var ps []string
+		for i, p := range e.FuncParams {
+			ps = append(ps, p+" "+sig.params[i].goType())
+		}
+		if sig.ret == ntVoid {
+			g.emit("var %s func(%s)\n", st.Name, strings.Join(ps, ", "))
+			g.emit("%s = func(%s) {\n", st.Name, strings.Join(ps, ", "))
+		} else {
+			g.emit("var %s func(%s) %s\n", st.Name, strings.Join(ps, ", "), sig.ret.goType())
+			g.emit("%s = func(%s) %s {\n", st.Name, strings.Join(ps, ", "), sig.ret.goType())
+		}
+		err := g.emitBlockBody(e.FuncBody)
+		g.emit("}\n")
+		g.funcRet, g.inFunc = savedRet, savedIn
+		g.popScope()
 		return err
-	}
-	g.define(st.Name, ret)
-	// Record the closure type for later calls: stash in vars as ret and
-	// remember params via a synthetic func entry.
-	g.funcs["closure\x00"+st.Name] = &funcSig{params: params, ret: ret}
-	return nil
+	})
 }
 
 func (g *gen) emitAssign(st *frontend.Stmt, implicit bool) error {
