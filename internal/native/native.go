@@ -378,6 +378,181 @@ func (g *gen) verifyReturns(st *frontend.Stmt, body *frontend.Stmt, want ntype) 
 			}
 		}
 	}
+	types, err := g.collectReturnsNested(body, st.Line)
+	g.vars = saved
+	if err != nil {
+		return err
+	}
+	for _, t := range types {
+		if want == ntVoid {
+			if t != ntVoid {
+				return fmt.Errorf("line %d: value return in void func %q", st.Line, st.Name)
+			}
+			continue
+		}
+		if t == ntVoid || !assignable(want, t) {
+			return fmt.Errorf("line %d: return %s in %s func %q", st.Line, t, want, st.Name)
+		}
+	}
+	return nil
+}
+
+// collectReturnsNested collects return types with directly-nested func
+// definitions pre-registered and inferred in a temp scope.
+func (g *gen) collectReturnsNested(body *frontend.Stmt, line int) ([]ntype, error) {
+	var types []ntype
+	err := g.withNested(body, line, func() error {
+		var err error
+		types, err = g.collectReturns(body)
+		return err
+	})
+	return types, err
+}
+
+// nestedDef is one func definition directly nested in a body: a StmtFunc
+// statement or a let-bound func literal.
+type nestedDef struct {
+	name   string
+	params []string
+	ptypes []string
+	retAnn string
+	body   *frontend.Stmt
+	line   int
+}
+
+// collectNestedDefs finds directly-nested func defs in a body subtree
+// (never descending into deeper func bodies — those belong to inner defs).
+func collectNestedDefs(body *frontend.Stmt) []nestedDef {
+	var out []nestedDef
+	var walk func(s *frontend.Stmt)
+	walk = func(s *frontend.Stmt) {
+		if s == nil {
+			return
+		}
+		if s.Kind == frontend.StmtFunc {
+			out = append(out, nestedDef{name: s.Name, params: s.Names, ptypes: s.ParamTypes, retAnn: s.ReturnType, body: s.Body, line: s.Line})
+			return // inner body belongs to the inner def
+		}
+		if s.Kind == frontend.StmtLet && s.Expr != nil && s.Expr.Kind == frontend.ExprFunc {
+			e := s.Expr
+			out = append(out, nestedDef{name: s.Name, params: e.FuncParams, ptypes: e.FuncParamTypes, retAnn: e.FuncReturnType, body: e.FuncBody, line: s.Line})
+			return
+		}
+		for _, c := range children(s) {
+			walk(c)
+		}
+	}
+	walk(body)
+	return out
+}
+
+// withNested registers and infers all directly-nested func defs in a temp
+// scope, runs fn, then drops the scope. Annotated defs verify first (any
+// order); unannotated infer in reverse textual order so "caller first,
+// helper after" style resolves.
+func (g *gen) withNested(body *frontend.Stmt, line int, fn func() error) error {
+	defs := collectNestedDefs(body)
+	if len(defs) == 0 {
+		return fn()
+	}
+	_ = line
+	g.pushScope()
+	defer g.popScope()
+	for _, d := range defs {
+		var ps []ntype
+		for i, p := range d.params {
+			if err := checkName(p, "param", d.line); err != nil {
+				return err
+			}
+			pt := ""
+			if i < len(d.ptypes) {
+				pt = d.ptypes[i]
+			}
+			t, err := parseAnn(pt, d.line)
+			if err != nil {
+				return err
+			}
+			ps = append(ps, t)
+		}
+		if _, dup := g.closures[len(g.closures)-1][d.name]; dup {
+			return fmt.Errorf("line %d: duplicate func %q", d.line, d.name)
+		}
+		g.defineClosure(d.name, &funcSig{params: ps})
+		g.pending[d.name] = true
+	}
+	lookup := func(name string) *funcSig {
+		s, _ := g.lookupClosure(name)
+		return s
+	}
+	var todos []nestedDef
+	for _, d := range defs {
+		sig := lookup(d.name)
+		if d.retAnn == "" {
+			todos = append(todos, d)
+			continue
+		}
+		want, err := parseAnn(d.retAnn, d.line)
+		if err != nil {
+			return err
+		}
+		sig.ret = want
+		delete(g.pending, d.name)
+	}
+	// Verify annotated bodies first (recursion into them checks).
+	for _, d := range defs {
+		if d.retAnn == "" {
+			continue
+		}
+		sig := lookup(d.name)
+		fake := &frontend.Stmt{Kind: frontend.StmtFunc, Name: d.name, Names: d.params, ParamTypes: d.ptypes, Body: d.body, Line: d.line}
+		g.inferring = d.name
+		err := g.verifyNested(fake, d.body, sig.ret)
+		g.inferring = ""
+		if err != nil {
+			return err
+		}
+	}
+	for i := len(todos) - 1; i >= 0; i-- {
+		d := todos[i]
+		sig := lookup(d.name)
+		if callsSelf(d.body, d.name) {
+			return fmt.Errorf("line %d: recursive func %q needs a `: type` return annotation in native subset", d.line, d.name)
+		}
+		g.inferring = d.name
+		types, err := g.collectReturns(d.body)
+		g.inferring = ""
+		if err != nil {
+			return err
+		}
+		if len(types) > 0 {
+			ret := types[0]
+			for _, t := range types[1:] {
+				var err error
+				ret, err = unify(ret, t, d.line)
+				if err != nil {
+					return err
+				}
+			}
+			sig.ret = ret
+		}
+		delete(g.pending, d.name)
+	}
+	return fn()
+}
+
+// verifyNested checks returns in a nested body against want. Params come
+// from the already-registered closure signature.
+func (g *gen) verifyNested(st *frontend.Stmt, body *frontend.Stmt, want ntype) error {
+	sig, _ := g.lookupClosure(st.Name)
+	saved := g.vars
+	g.vars = []map[string]ntype{{}}
+	if sig != nil {
+		for i, p := range st.Names {
+			if i < len(sig.params) {
+				g.vars[0][p] = sig.params[i]
+			}
+		}
+	}
 	types, err := g.collectReturns(body)
 	g.vars = saved
 	if err != nil {
