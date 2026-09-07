@@ -6,11 +6,11 @@ import "frontend/store/app.ks"
 func dashboard_page(props) {
   let st = unwrap_or(app_fetch_stats(), {count: 0, total: 0, avg: 0, min: nil, max: nil})
   let cards = [
-    {key: "stat-count", type: "stat", props: {label: "count", value: st.count}, children: []},
-    {key: "stat-total", type: "stat", props: {label: "total", value: st.total}, children: []},
-    {key: "stat-avg", type: "stat", props: {label: "avg", value: st.avg}, children: []},
-    {key: "stat-min", type: "stat", props: {label: "min", value: st.min}, children: []},
-    {key: "stat-max", type: "stat", props: {label: "max", value: st.max}, children: []}
+  {key: "stat-count", type: "stat", props: {label: "count", value: st.count}, children: []},
+  {key: "stat-total", type: "stat", props: {label: "total", value: st.total}, children: []},
+  {key: "stat-avg", type: "stat", props: {label: "avg", value: st.avg}, children: []},
+  {key: "stat-min", type: "stat", props: {label: "min", value: st.min}, children: []},
+  {key: "stat-max", type: "stat", props: {label: "max", value: st.max}, children: []}
   ]
   return {
     key: "dashboard",

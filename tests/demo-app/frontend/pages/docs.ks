@@ -5,9 +5,9 @@ import "frontend/store/app.ks"
 
 func docs_page(props) {
   let sections = [
-    {h: "Routing", p: "File pages/<name>.ks serves /<name> via <name>_page(props)."},
-    {h: "State", p: "store/app.ks owns state; pages stay pure view-models."},
-    {h: "API", p: "backend/api/<name>.ks serves /api/<name> via api_<name>(req)."}
+  {h: "Routing", p: "File pages/<name>.ks serves /<name> via <name>_page(props)."},
+  {h: "State", p: "store/app.ks owns state; pages stay pure view-models."},
+  {h: "API", p: "backend/api/<name>.ks serves /api/<name> via api_<name>(req)."}
   ]
   let rows = map(sections, func(s) { return s.h + ": " + s.p })
   let kids = map(sections, func(s) {

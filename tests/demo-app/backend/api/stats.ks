@@ -1,7 +1,7 @@
 # backend/api/stats.ks - "/api/stats" route.
 # Contract: func api_stats(req) -> map {count, total, avg, min, max}.
 # req = {query: {...}, path: "/api/stats"} (see webjs.go runAPIRouteWithQuery).
-# Optional query: ?nums=1,2,3 (defaults to a fixed sample).
+# Optional query: ?nums=1, 2, 3 (defaults to a fixed sample).
 
 func api_stats(req) {
   let q = req?.query ?? {}

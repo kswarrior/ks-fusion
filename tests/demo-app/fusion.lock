@@ -1,0 +1,10 @@
+{
+  "packages": [
+    {
+      "name": "demo-lib",
+      "version": "0.1.0",
+      "path": "test-releases/demo-lib-0.1.0.kslib"
+    }
+  ],
+  "version": 1
+}

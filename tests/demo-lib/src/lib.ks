@@ -41,9 +41,9 @@ func demo_stats(arr) {
 
 func demo_nav() {
   return [
-    {path: "/", label: "Home"},
-    {path: "/dashboard", label: "Dashboard"},
-    {path: "/about", label: "About"},
-    {path: "/docs", label: "Docs"}
+  {path: "/", label: "Home"},
+  {path: "/dashboard", label: "Dashboard"},
+  {path: "/about", label: "About"},
+  {path: "/docs", label: "Docs"}
   ]
 }
