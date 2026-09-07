@@ -901,22 +901,18 @@ func renderChromeBlocks(b *strings.Builder, typ, key string, props map[string]an
 		b.WriteString(`</nav>`)
 	}
 	// Each block triggers on props presence (any semantic type works).
-	// links and items render independently so a block may carry both.
-	if links, ok := props["links"].([]any); ok && len(links) > 0 {
+	// links and items render independently; shared keys stay stable.
+	links, _ := props["links"].([]any)
+	items, _ := props["items"].([]any)
+	if len(links) > 0 {
 		renderNav("nav", key+":nav", links)
 	}
-	if items, ok := props["items"].([]any); ok && len(items) > 0 {
-		cls := "sidenav"
-		if typ != "sidebar" && typ != "nav" && typ != "header" && typ != "div" && typ != "layout" && typ != "page" {
-			cls = "nav"
+	if len(items) > 0 {
+		ckey := key + ":nav"
+		if len(links) > 0 {
+			ckey = key + ":nav-items"
 		}
-		if _, hasLinks := props["links"]; !hasLinks && cls == "sidenav" {
-			renderNav(cls, key+":nav", items)
-		} else if hasLinks, _ := props["links"]; hasLinks == nil {
-			renderNav(cls, key+":nav", items)
-		} else {
-			renderNav(cls, key+":nav-items", items)
-		}
+		renderNav("sidenav", ckey, items)
 	}
 
 // vmToSSRHTML renders a VM JSON doc to SSR inner HTML for #app.
