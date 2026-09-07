@@ -284,3 +284,45 @@ func cmdDebug(args []string) error {
 	fmt.Print(tools.FormatHits(res))
 	return err
 }
+
+func cmdProfile(args []string) error {
+	target := ""
+	top := 0
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--help" || a == "-h":
+			fmt.Println("usage: fusion profile <file.ks> [--top N]\n  .ks-line profiler: exact statement counts per line (counts, not wall time)")
+			return nil
+		case a == "--top":
+			if i+1 >= len(args) {
+				return fmt.Errorf("usage: fusion profile <file.ks> [--top N]")
+			}
+			i++
+			v, err := strconv.Atoi(args[i])
+			if err != nil || v < 0 {
+				return fmt.Errorf("bad --top %q: want N >= 0", args[i])
+			}
+			top = v
+		case strings.HasPrefix(a, "--top="):
+			v, err := strconv.Atoi(strings.TrimPrefix(a, "--top="))
+			if err != nil || v < 0 {
+				return fmt.Errorf("bad --top %q: want N >= 0", a)
+			}
+			top = v
+		case strings.HasPrefix(a, "-"):
+			return fmt.Errorf("unknown flag %q (usage: fusion profile <file.ks> [--top N])", a)
+		default:
+			if target != "" {
+				return fmt.Errorf("usage: fusion profile <file.ks> (single target only)")
+			}
+			target = a
+		}
+	}
+	if target == "" {
+		return fmt.Errorf("usage: fusion profile <file.ks> [--top N]")
+	}
+	res, err := tools.ProfileFile(target)
+	fmt.Print(tools.FormatProfile(res, top))
+	return err
+}

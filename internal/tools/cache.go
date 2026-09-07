@@ -10,7 +10,10 @@ import (
 	"time"
 )
 
-// Build cache (v2.3): hash .ks + fusion.toml, skip redundant parse-check/repack.
+// Build cache (v2.3, vendor-aware v2.6): hash .ks + fusion.toml, skip redundant parse-check/repack.
+// v2.6 fix: vendor/ swaps now bust the cache (v2.5 wrongly skipped vendor/,
+// so swapping a vendored .kslib never invalidated). We hash every file under
+// vendor/ (any extension) plus the main .ks set.
 
 type buildCache struct {
 	Hash string `json:"hash"`
@@ -56,6 +59,27 @@ func hashDir(appDir string) (string, error) {
 	})
 	if err != nil {
 		return "", err
+	}
+	// vendor/ (v2.6): hash every vendored file so swaps bust the cache.
+	// vendor/ holds .kslib/.ksx bundles (not .ks), hence the separate walk.
+	vendorDir := filepath.Join(appDir, "vendor")
+	if fi, err := os.Stat(vendorDir); err == nil && fi.IsDir() {
+		_ = filepath.Walk(vendorDir, func(p string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return nil
+			}
+			data, err := os.ReadFile(p)
+			if err != nil {
+				return nil
+			}
+			rel, _ := filepath.Rel(appDir, p)
+			h.Write([]byte("vendor:"))
+			h.Write([]byte(rel))
+			h.Write([]byte{0})
+			h.Write(data)
+			h.Write([]byte{0})
+			return nil
+		})
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

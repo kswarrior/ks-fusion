@@ -188,3 +188,24 @@ func TestCache(t *testing.T) {
 		t.Fatalf("want hit after write: %v %v", hit, err)
 	}
 }
+
+func TestCacheVendorBusts(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "fusion.toml"), []byte("[package]\nname=\"x\"\nversion=\"0.1.0\"\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "a.ks"), []byte("print 1\n"), 0o644)
+	if err := os.MkdirAll(filepath.Join(dir, "vendor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(dir, "vendor", "lib.kslib"), []byte("v1"), 0o644)
+	if err := WriteCache(dir); err != nil {
+		t.Fatal(err)
+	}
+	if hit, _, _ := CheckCache(dir); !hit {
+		t.Fatal("want hit before vendor swap")
+	}
+	// swapping vendored content must bust the cache (v2.5 skipped vendor/)
+	os.WriteFile(filepath.Join(dir, "vendor", "lib.kslib"), []byte("v2"), 0o644)
+	if hit, _, _ := CheckCache(dir); hit {
+		t.Fatal("want miss after vendor swap (vendor-aware cache)")
+	}
+}
