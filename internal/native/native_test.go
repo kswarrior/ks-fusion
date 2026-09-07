@@ -1,6 +1,7 @@
 package native
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,18 +12,28 @@ import (
 	"github.com/kswarrior/ks-fusion/internal/frontend"
 )
 
-// interp runs src with the tree-walk interpreter and returns stdout.
+// interp runs src with the tree-walk interpreter and returns stdout
+// (captured by swapping os.Stdout around backend.Run).
 func interp(t *testing.T, src string) string {
 	t.Helper()
 	prog, err := frontend.ParseSource(src, "<test>")
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	out, err := backend.RunCapture(prog, t.TempDir())
+	r, w, err := os.Pipe()
 	if err != nil {
-		t.Fatalf("interp: %v", err)
+		t.Fatal(err)
 	}
-	return out
+	old := os.Stdout
+	os.Stdout = w
+	runErr := backend.Run(prog)
+	w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	if runErr != nil {
+		t.Fatalf("interp: %v", runErr)
+	}
+	return string(out)
 }
 
 // nativeOut transpiles src to Go, builds it, runs it, returns stdout.
