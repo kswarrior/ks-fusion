@@ -121,6 +121,8 @@ type gen struct {
 	loop       int
 	funcRet    ntype // current function return type (ntVoid outside funcs)
 	inFunc     bool
+	pending    map[string]bool // funcs whose return type is not final yet
+	inferring  string          // func whose return type is being inferred
 	useMath    bool
 	useTime    bool
 	useUTF8    bool
@@ -190,7 +192,7 @@ func TranspileSource(src, path string) (string, error) {
 
 // TranspileProgram emits Go source for an already-parsed program.
 func TranspileProgram(prog *frontend.Program) (string, error) {
-	g := &gen{funcs: map[string]*funcSig{}}
+	g := &gen{funcs: map[string]*funcSig{}, pending: map[string]bool{}}
 	// Phase 1: register top-level func signatures (annotations required).
 	for _, st := range prog.Statements {
 		if st.Kind != frontend.StmtFunc {
@@ -218,6 +220,20 @@ func TranspileProgram(prog *frontend.Program) (string, error) {
 			params = append(params, t)
 		}
 		g.funcs[st.Name] = &funcSig{params: params}
+		g.pending[st.Name] = true
+	}
+	// Phase 1b: annotated return types are final before any body is read,
+	// so annotated (even recursive) calls check during every later walk.
+	for _, st := range prog.Statements {
+		if st.Kind != frontend.StmtFunc || st.ReturnType == "" {
+			continue
+		}
+		want, err := parseAnn(st.ReturnType, st.Line)
+		if err != nil {
+			return "", err
+		}
+		g.funcs[st.Name].ret = want
+		delete(g.pending, st.Name)
 	}
 	// Phase 2: determine return types (annotations verified, else inferred).
 	for _, st := range prog.Statements {
@@ -1408,6 +1424,9 @@ func (g *gen) emitCall(e *frontend.Expr) (string, error) {
 		if !found {
 			return "", fmt.Errorf("unknown func %q", name)
 		}
+	}
+	if g.pending[name] && name != g.inferring {
+		return ntVoid, fmt.Errorf("func %q used before its return type is known — annotate it with `: type`", name)
 	}
 	var args []string
 	for i, a := range e.Args {
