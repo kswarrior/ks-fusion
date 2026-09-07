@@ -369,7 +369,7 @@ func callsSelf(st *frontend.Stmt, name string) bool {
 			return
 		}
 		if e.Kind == frontend.ExprCall {
-			if c, ok := e.Callee.(*frontend.Expr); ok && c.Kind == frontend.ExprVar && c.Name == name {
+			if c := e.Callee; c != nil && c.Kind == frontend.ExprVar && c.Name == name {
 				found = true
 				return
 			}
@@ -400,7 +400,9 @@ func callsSelf(st *frontend.Stmt, name string) bool {
 		for _, e := range s.Exprs {
 			walkExpr(e)
 		}
-		walkExpr(s.Inner)
+		if s.Inner != nil {
+			walkStmt(s.Inner)
+		}
 		for _, c := range children(s) {
 			walkStmt(c)
 		}
@@ -641,8 +643,8 @@ func (g *gen) arithType(e *frontend.Expr) (ntype, error) {
 
 // callType types user-func calls and len(string).
 func (g *gen) callType(e *frontend.Expr) (ntype, error) {
-	name, ok := e.Callee.(*frontend.Expr)
-	if !ok || name.Kind != frontend.ExprVar {
+	name := e.Callee
+	if name == nil || name.Kind != frontend.ExprVar {
 		return ntVoid, fmt.Errorf("method calls are not in the native-0.1 subset — runs in interpreter")
 	}
 	if name.Name == "len" {
@@ -1385,7 +1387,11 @@ func (g *gen) emitArith(e *frontend.Expr) (string, error) {
 }
 
 func (g *gen) emitCall(e *frontend.Expr) (string, error) {
-	name := e.Callee.(*frontend.Expr).Name
+	callee := e.Callee
+	if callee == nil || callee.Kind != frontend.ExprVar {
+		return "", fmt.Errorf("method calls are not in the native-0.1 subset — runs in interpreter")
+	}
+	name := callee.Name
 	if name == "len" {
 		a, err := g.emitExpr(e.Args[0], ntString)
 		if err != nil {
@@ -1424,12 +1430,12 @@ func (g *gen) emitForIn(st *frontend.Stmt) error {
 	if len(st.Names) != 1 {
 		return fmt.Errorf("line %d: only single-var for-in is native-0.1 (no maps/arrays yet)", st.Line)
 	}
-	call, ok := st.Expr.(*frontend.Expr)
-	if !ok || call.Kind != frontend.ExprCall {
+	call := st.Expr
+	if call == nil || call.Kind != frontend.ExprCall {
 		return fmt.Errorf("line %d: for-in needs range(n) in native-0.1 — runs in interpreter", st.Line)
 	}
-	callee, ok := call.Callee.(*frontend.Expr)
-	if !ok || callee.Kind != frontend.ExprVar || callee.Name != "range" {
+	callee := call.Callee
+	if callee == nil || callee.Kind != frontend.ExprVar || callee.Name != "range" {
 		return fmt.Errorf("line %d: for-in needs range(n) in native-0.1 — runs in interpreter", st.Line)
 	}
 	if len(call.Args) < 1 || len(call.Args) > 3 {
@@ -1525,7 +1531,7 @@ func (g *gen) emitForC(st *frontend.Stmt) error {
 	}
 	g.emit("{\n")
 	g.pushScope()
-	if err := g.emitAssign(st.Init, true); err != nil {
+	if err := g.emitForInit(st.Init); err != nil {
 		return err
 	}
 	if err := g.emitForCInner(st); err != nil {
@@ -1534,6 +1540,41 @@ func (g *gen) emitForC(st *frontend.Stmt) error {
 	g.popScope()
 	g.emit("}\n")
 	return nil
+}
+
+// emitForInit emits a for-c init statement (let or assign) into the
+// loop's scope.
+func (g *gen) emitForInit(init *frontend.Stmt) error {
+	switch init.Kind {
+	case frontend.StmtLet:
+		return g.emitLet(init)
+	case frontend.StmtAssign:
+		return g.emitAssign(init, true)
+	default:
+		return fmt.Errorf("line %d: bad for init in native subset", init.Line)
+	}
+}
+
+// emitForPost renders a for-c post statement (assign or call) inline.
+func (g *gen) emitForPost(post *frontend.Stmt) (string, error) {
+	saved := g.sb
+	var tmp strings.Builder
+	g.sb = tmp
+	var err error
+	switch post.Kind {
+	case frontend.StmtAssign:
+		err = g.emitAssign(post, false)
+	case frontend.StmtExpr:
+		err = g.emitStmt(post)
+	default:
+		err = fmt.Errorf("line %d: bad for post in native subset", post.Line)
+	}
+	s := strings.TrimSuffix(strings.TrimSpace(g.sb.String()), "\n")
+	g.sb = saved
+	if err != nil {
+		return "", err
+	}
+	return s, nil
 }
 
 // emitForCInner emits the `for ; cond; post {` header and body.
@@ -1545,14 +1586,11 @@ func (g *gen) emitForCInner(st *frontend.Stmt) error {
 	}
 	var post string
 	if st.Post != nil {
-		saved := g.sb
-		var tmp strings.Builder
-		g.sb = tmp
-		if err := g.emitAssign(st.Post, false); err != nil {
+		var err error
+		post, err = g.emitForPost(st.Post)
+		if err != nil {
 			return err
 		}
-		post = strings.TrimSuffix(strings.TrimSpace(g.sb.String()), "\n")
-		g.sb = saved
 	}
 	g.emit("for ; %s; %s {\n", cond, post)
 	g.pushScope()
