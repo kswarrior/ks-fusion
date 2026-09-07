@@ -6,8 +6,8 @@ import "frontend/store/app.ks"
 func home_page(props) {
   let title = props?.title ?? app_title
   let ctas = [
-    {key: "cta-dash", type: "a", props: {href: "/dashboard", class: "btn btn-primary", text: "Open dashboard"}, children: []},
-    {key: "cta-docs", type: "a", props: {href: "/docs", class: "btn", text: "Read docs"}, children: []}
+  {key: "cta-dash", type: "a", props: {href: "/dashboard", class: "btn btn-primary", text: "Open dashboard"}, children: []},
+  {key: "cta-docs", type: "a", props: {href: "/docs", class: "btn", text: "Read docs"}, children: []}
   ]
   return {
     key: "home",

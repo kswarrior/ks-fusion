@@ -2,6 +2,7 @@
 import "frontend/store/app.ks"
 import "frontend/components/header.ks"
 import "frontend/components/sidebar.ks"
+import "frontend/components/footer.ks"
 import "frontend/layouts/app.ks"
 import "frontend/pages/home.ks"
 import "frontend/pages/dashboard.ks"
@@ -14,18 +15,26 @@ let home = home_page(app_state())
 assert(home.key == "home")
 assert(home.type == "page")
 assert(home.props.title == "Demo Full-Stack")
-assert(len(home.props.rows) == 2)
+assert(len(home.props.rows) == 1)
+assert(len(home.children) == 2)
+assert(home.children[0].type == "a")
+assert(home.children[0].props.href == "/dashboard")
 
 let dash = dashboard_page(app_state())
 assert(dash.key == "dashboard")
 assert(dash.props.stats.total == 108)
 assert(dash.props.stats.count == 6)
-assert(len(dash.children) == 5)
+assert(len(dash.children) == 6)
 assert(dash.children[0].key == "stat-count")
+assert(dash.children[5].key == "nums-table")
+assert(dash.children[5].type == "table")
+assert(len(dash.children[5].children) == 7)
 
 let about = about_page(app_state())
 assert(about.key == "about")
 assert(about.props.path == "/about")
+assert(len(about.children) == 3)
+assert(about.children[0].type == "section")
 
 let docs = docs_page(app_state())
 assert(docs.key == "docs")
@@ -46,4 +55,9 @@ assert(app.key == "app")
 assert(app.children[0].key == "header")
 assert(app.children[1].key == "sidebar")
 assert(app.children[2].key == "home")
+assert(app.children[3].key == "footer")
 assert(app.children[1].props.active == "/")
+
+let foot = footer_render({})
+assert(foot.key == "footer")
+assert(foot.type == "footer")
