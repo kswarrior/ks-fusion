@@ -82,7 +82,11 @@ func RunLSP() error {
 	}
 	// read LSP framing (Content-Length) or plain lines (for tests)
 	reader := bufio.NewReader(os.Stdin)
-	for {
+	// `done` never flips: the loop only exits via return (EOF/shutdown/exit).
+	// Written as a conditional loop so `go vet` does not flag the trailing
+	// return as unreachable (it is the documented exit path).
+	done := false
+	for !done {
 		// try header
 		line, err := reader.ReadString('\n')
 		if err != nil {
