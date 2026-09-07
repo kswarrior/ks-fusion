@@ -18,6 +18,9 @@ import (
 type buildCache struct {
 	Hash string `json:"hash"`
 	When string `json:"when"`
+	// Profile distinguishes debug vs release lib builds (v2.7 fix: a debug
+	// build must not satisfy a later --release build — outputs differ).
+	Profile string `json:"profile,omitempty"`
 }
 
 func cachePath(appDir string) string {
