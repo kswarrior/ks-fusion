@@ -1,4 +1,4 @@
-// VM + bundle I/O for the ks-fusion compiler (v0.2 expanded subset).
+// VM + bundle I/O for the ks-fusion compiler (v0.3 expanded subset).
 package compiler
 
 import (
@@ -635,7 +635,7 @@ func (vm *VM) exec(in Instr) error {
 	case OpCall:
 		return vm.opCall(in.Arg)
 	case OpMakeFunc:
-		return fmt.Errorf("closures not yet supported by VM v0.1")
+		return fmt.Errorf("closures not yet supported by VM v0.3")
 	case OpReturn:
 		v, err := vm.pop()
 		if err != nil {
@@ -739,7 +739,7 @@ func (vm *VM) exec(in Instr) error {
 			return err
 		}
 	case OpSleep:
-		return fmt.Errorf("sleep not yet supported by VM v0.1")
+		return fmt.Errorf("sleep not yet supported by VM v0.3")
 	case OpSlice:
 		endV, err := vm.pop()
 		if err != nil {
@@ -819,7 +819,7 @@ func (vm *VM) exec(in Instr) error {
 		}
 		vm.trys = vm.trys[:len(vm.trys)-1]
 	case OpDefer:
-		return fmt.Errorf("defer not yet supported by VM v0.2 (use the interpreter)")
+		return fmt.Errorf("defer not yet supported by VM v0.3 (use the interpreter)")
 	}
 	return nil
 }

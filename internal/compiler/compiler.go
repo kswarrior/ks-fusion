@@ -1,6 +1,7 @@
 // Package compiler is the ks-fusion ahead-of-time step toward Go/Rust parity.
 //
-// v0.2 (expanded subset): .ks source -> portable bytecode (.ksb-1, JSON) -> stack VM.
+// v0.3 (expanded subset): .ks source -> portable bytecode (.ksb-1, JSON) -> stack VM.
+// v0.3 adds: range-int for-in fast path, sleep builtin, try/catch (no finally).
 // It proves the pipeline (parse -> compile -> save -> load -> run) and now
 // covers slices, `is`/`?.`/`??`, typed params/lets (runtime-checked, nilable),
 // and `switch` (desugared to an Eq-chain, first match wins).
@@ -70,7 +71,8 @@ const (
 	OpMap
 	OpIndex
 	OpSetIndex
-	OpSleep // reserved: emitted never in v0.1 (sleep is a compile error)
+	OpSleep // reserved, never emitted: sleep compiles to a builtin call
+	// (kept for .ksb format compat; the VM rejects raw OpSleep).
 	// v0.2 (full-language roadmap): slices, type tests, nil-coalescing,
 	// safe access, typed params, switch/try/defer desugar targets.
 	OpSlice
@@ -430,7 +432,7 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 		return c.compileFuncDefTyped(st.Name, st.Names, st.ParamTypes, st.ReturnType, st.Body, st.Line)
 	case frontend.StmtReturn:
 		if len(c.frames) == 1 {
-			return fmt.Errorf("line %d: return outside function (compiler v0.2)", st.Line)
+			return fmt.Errorf("line %d: return outside function (compiler v0.3)", st.Line)
 		}
 		if err := c.compileExpr(st.Expr); err != nil {
 			return err
@@ -503,7 +505,7 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 	case frontend.StmtStruct, frontend.StmtEnum:
 		return fmt.Errorf("line %d: `struct`/`enum` declarations not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
 	}
-	return fmt.Errorf("line %d: unknown statement (compiler v0.2)", st.Line)
+	return fmt.Errorf("line %d: unknown statement (compiler v0.3)", st.Line)
 }
 
 // compileTry compiles `try Body catch e { CaBody }` (no finally) to
@@ -609,7 +611,7 @@ func (c *compiler) compileSwitch(st *frontend.Stmt) error {
 		parent := &c.loops[len(c.loops)-1]
 		parent.continues = append(parent.continues, sw.continues...)
 	} else if len(sw.continues) > 0 {
-		return fmt.Errorf("line %d: continue outside loop (compiler v0.2)", st.Line)
+		return fmt.Errorf("line %d: continue outside loop (compiler v0.3)", st.Line)
 	}
 	c.endScope(st.Line)
 	return nil
@@ -1232,7 +1234,7 @@ func isTypeName(e *frontend.Expr) (string, error) {
 	case frontend.ExprString:
 		return e.StrVal, nil
 	}
-	return "", fmt.Errorf("`is` type must be a name or string literal (compiler v0.2)")
+	return "", fmt.Errorf("`is` type must be a name or string literal (compiler v0.3)")
 }
 
 // ---------------------------------------------------------------------------
@@ -1407,7 +1409,7 @@ func (c *compiler) compileExpr(e *frontend.Expr) error {
 		// v0.2: typed params/returns allowed (runtime-checked, nilable).
 		name := c.hiddenName("fn")
 		if e.FuncBody == nil {
-			return fmt.Errorf("bad func literal (compiler v0.2)")
+			return fmt.Errorf("bad func literal (compiler v0.3)")
 		}
 		topLevel := len(c.frames) == 1 && c.frames[0].depth == 0
 		if err := c.compileFuncDefTyped(name, e.FuncParams, e.FuncParamTypes, e.FuncReturnType, e.FuncBody, 0); err != nil {
@@ -1416,7 +1418,7 @@ func (c *compiler) compileExpr(e *frontend.Expr) error {
 		if topLevel {
 			code := &c.cur().fn.Chunk.Code
 			if len(*code) == 0 || (*code)[len(*code)-1].Op != OpDefineGlobal {
-				return fmt.Errorf("bad func literal (compiler v0.2)")
+				return fmt.Errorf("bad func literal (compiler v0.3)")
 			}
 			*code = (*code)[:len(*code)-1]
 			delete(c.gindex, name)
@@ -1424,12 +1426,12 @@ func (c *compiler) compileExpr(e *frontend.Expr) error {
 		} else {
 			cur := c.cur()
 			if len(cur.locals) == 0 || cur.locals[len(cur.locals)-1].name != name {
-				return fmt.Errorf("bad func literal (compiler v0.2)")
+				return fmt.Errorf("bad func literal (compiler v0.3)")
 			}
 			cur.locals = cur.locals[:len(cur.locals)-1]
 		}
 	default:
-		return fmt.Errorf("bad expression (compiler v0.2)")
+		return fmt.Errorf("bad expression (compiler v0.3)")
 	}
 	return nil
 }
