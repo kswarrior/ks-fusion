@@ -98,7 +98,9 @@ func TestCompileCollections(t *testing.T) {
 func TestCompileUnsupported(t *testing.T) {
 	mustFailCompile(t, "go print \"hi\"\n")
 	mustFailCompile(t, "import \"lib.ks\"\n")
-	mustFailCompile(t, "try {\n print 1\n} catch e {\n print e\n}\n")
+	// try/catch compiles since v0.3 (see TestCompileTryCatch); try/finally
+	// stays interpreter-only.
+	mustFailCompile(t, "try {\n print 1\n} finally {\n print 2\n}\n")
 	mustFailCompile(t, "func f() {\n defer print 1\n}\n")
 	// sleep compiles since v0.3 (see TestCompileSleep).
 	// v0.2 covers switch/slices/is/??/?./typed — these must compile now.
@@ -165,6 +167,35 @@ func TestCompileV02Typed(t *testing.T) {
 	// nominal struct/enum annotations: VM skips the check (interpreter
 	// validates); maps must not fail with "wants User, got map".
 	mustRun(t, "let u: User = {name: \"a\"}\nassert(u.name == \"a\")\n")
+}
+
+func TestCompileTryCatch(t *testing.T) {
+	// caught error binds its message; success skips the handler.
+	mustRun(t, "let r = \"\"\ntry {\n r = \"ok\"\n} catch e {\n r = \"bad:\" + e\n}\nassert(r == \"ok\")\n")
+	mustRun(t, "let r = \"\"\ntry {\n print nope\n} catch e {\n r = \"caught\"\n}\nassert(r == \"caught\")\n")
+	mustRun(t, "let r = \"\"\ntry {\n assert(false, \"boom\")\n} catch e {\n r = e\n}\nassert(r == \"assert failed: boom\")\n")
+	// catch without a variable.
+	mustRun(t, "let r = 0\ntry {\n print nope\n} catch {\n r = 1\n}\nassert(r == 1)\n")
+	// bare try without catch/finally is transparent.
+	mustRun(t, "let r = 0\ntry {\n r = 7\n}\nassert(r == 7)\n")
+	mustFailRun(t, "try {\n print nope\n}\n")
+	// errors inside calls unwind through frames to the handler.
+	mustRun(t, "func f() {\n print nope\n}\nlet r = \"\"\ntry {\n f()\n} catch e {\n r = \"caught\"\n}\nassert(r == \"caught\")\n")
+	// errors in the handler propagate (no double-catch).
+	mustFailRun(t, "try {\n print nope\n} catch e {\n print alsobad\n}\n")
+	// nested trys: inner catches inner failures only.
+	mustRun(t, "let r = \"\"\ntry {\n try {\n print nope\n } catch e {\n r = \"inner\"\n }\n print alsobad\n} catch e {\n r = r + \"+outer\"\n}\nassert(r == \"inner+outer\")\n")
+	// return inside try never triggers the catch (mirrors interpreter).
+	mustRun(t, "func f() {\n try {\n return 42\n } catch e {\n return -1\n }\n}\nassert(f() == 42)\n")
+	// break/continue out of a try inside a loop pop the record cleanly.
+	mustRun(t, "let s = 0\nfor i in range(5) {\n try {\n if i == 2 { break }\n s = s + 1\n } catch e {\n s = 99\n }\n}\nassert(s == 2)\n")
+	mustRun(t, "let s = 0\nfor i in range(5) {\n try {\n if i < 3 { continue }\n s = s + 1\n } catch e {\n s = 99\n }\n}\nassert(s == 2)\n")
+	// a caught error per iteration does not poison later iterations.
+	mustRun(t, "let s = 0\nfor i in range(4) {\n try {\n if i == 1 { print nope }\n s = s + 1\n } catch e {\n s = s + 10\n }\n}\nassert(s == 13)\n")
+	// try inside a function called from a loop.
+	mustRun(t, "func g(x) {\n try {\n if x == 1 { print nope }\n return x * 10\n } catch e {\n return -1\n }\n}\nassert(g(2) == 20)\nassert(g(1) == -1)\nassert(g(3) == 30)\n")
+	// finally forms stay interpreter-only with a clear error.
+	mustFailCompile(t, "try {\n print 1\n} catch e {\n print e\n} finally {\n print 2\n}\n")
 }
 
 func TestCompileSleep(t *testing.T) {
