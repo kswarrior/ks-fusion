@@ -603,21 +603,28 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
   `stdlib_ext4.go:64` `wsReadFrame`, `stdlib_ext4.go:119` `wsReadText`
   (fragments, ping/pong, close; binary rejected as text-only).
 - SQL extended dialect on the JSON-file engine: `UPDATE`
-  (`stdlib_ext3.go:206` `reUpdate`, exec at `stdlib_ext3.go:260`,
-  `stdlib_ext3.go:297` `parseSetClause`), `JOIN` (`stdlib_ext3.go:428`
-  `innerJoin`, `=`-only `ON`), `GROUP BY`+`COUNT(*)` (`stdlib_ext3.go:467`
-  `groupCount`), `ORDER BY`/`LIMIT`/`OFFSET` (select at `stdlib_ext3.go:313`),
+  (`stdlib_ext3.go:208` `reUpdate`, exec at `stdlib_ext3.go:262`,
+  `stdlib_ext3.go:299` `parseSetClause`), `JOIN` (`stdlib_ext3.go:430`
+  `innerJoin`, `=`-only `ON`), `GROUP BY`+`COUNT(*)` (`stdlib_ext3.go:469`
+  `groupCount`), `ORDER BY`/`LIMIT`/`OFFSET` (select at `stdlib_ext3.go:314`),
   `postgres_*` compat names on the same engine (`stdlib_ext3.go:97-100`).
-  WHERE is AND-only (`stdlib_ext3.go:676`); no OR/transactions/indexes/prepared.
+  WHERE has AND/OR + LIKE/NOT LIKE (v2.6: `stdlib_ext3.go:676` `evalWhere`
+  OR-split, `stdlib_ext3.go:697` `evalWhereAnd`, `stdlib_ext3.go:712`
+  `evalWhereCond`, `stdlib_ext3.go:787` `matchLike` with `%`/`_`; OR looser
+  than AND, no parens, no AND/OR inside string literals); still no
+  transactions/indexes/prepared.
 - Pipes/signals: `exec_pipes` (`stdlib_ext4.go:220`), `spawn`/`proc_wait`/
   `proc_kill` (`stdlib_ext4.go:291,332,370`).
 - Tests: `backend_test.go:336` (UPDATE/ORDER/LIMIT/COUNT/GROUP),
-  `backend_test.go:362` (JOIN), `backend_test.go:377` (postgres-compat),
+  `backend_test.go:362` (`TestRunSqliteOrLike`: OR precedence, LIKE `%`/`_`,
+  NOT LIKE, OR in UPDATE/DELETE), `backend_test.go:383` (JOIN),
+  `backend_test.go:398` (postgres-compat),
   `stdlib_ext4_test.go` (WS frame round-trip, `ws_recv`, pipes).
 - Count: 177 distinct (`96` base + `52` ext + `11` ext2 + `12` ext3 + `6` ext4;
   `grep -ohP ... | sort -u | wc -l`; tests `>=166`/`>=177`).
 - Verdict: real depth inside 9 (ties Go breadth). A +1 (tying Python 10) needs
-  native sqlite/postgres (server, indexes, transactions, OR) + data-stack depth — not claimed.
+  native sqlite/postgres (server, indexes, transactions, prepared) + data-stack
+  depth — not claimed (OR/LIKE narrow the gap; they don't close it).
 
 ### E4. Ecosystem 7→8: real audit (+1, meets the bar)
 
@@ -630,22 +637,38 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
   server, no git deps, no docs.rs, token env-hint only. 8 ties Go/Rust
   file-registry depth for scripts.
 
-### E5. Tooling holds 9: full LSP + non-interactive debugger + ext (a +1 needs interactive depth)
+### E5. Tooling holds 9: full LSP (incl. completion) + debugger + profiler + ext v0.3.0 (a +1 needs interactive DAP + time-profiling)
 
-- LSP: diagnostics (`lsp.go:240` parse, `lsp.go:259` vet on save,
-  publishes at `lsp.go:141,155,172`), rename (`lsp.go:347` cross-file),
-  formatting (`lsp.go:320` via `FormatSource`), hover/goto (`lsp.go:184,196`;
-  goto returns real `st.Line - 1`, not a stub).
-- Debugger: `backend.go:715` `OnStmt` hook + `backend.go:1019` `stmtKindName`,
-  `debug.go:35` `DebugFile` (breakpoints + trace + globals snapshot,
-  non-interactive), `tools_cmd.go:cmdDebug` (`fusion debug --break/--trace`).
-- VS Code ext v0.2.0: hover/goto/rename/diagnostics/format providers + `ks-fusion`
-  debugger contribution (`editors/vscode/package.json`, `extension.js`,
-  `node --check` clean; no vscode-test harness).
-- Tests: `lsp_test.go` (diagnostics/rename/format), `debug_test.go:5`
+- LSP (v2.6, verified current): `initialize` advertises `completionProvider`
+  (`lsp.go:129`), `textDocument/completion` handler (`lsp.go:240`),
+  `completionItems` (`lsp.go:264`: builtins kind 3 + 30 keywords kind 14 via
+  `ksKeywords` at `lsp.go:252` + workspace funcs/structs/enums with file detail,
+  prefix-filtered via `completionPrefix` at `lsp.go:343`), diagnostics
+  (`parseDiagnostics` at `lsp.go:428`, vet-on-save `diagnosticsParamsSaved`,
+  publishes at `lsp.go:147,161,178`), rename (`renameEdits` at `lsp.go:482`,
+  cross-file), formatting (`formattingEdits` at `lsp.go:457` via
+  `FormatSource`), hover/goto (`hoverFor` at `lsp.go:625`, `definitionFor` at
+  `lsp.go:667`; goto returns real `st.Line - 1`, not a stub).
+- Debugger: `backend.go:715` `OnStmt` hook + `backend.go:1076`
+  `stmtKindName` call-site, `debug.go:35` `DebugFile` (breakpoints + trace +
+  globals snapshot, non-interactive), `tools_cmd.go:cmdDebug` (`fusion debug
+  --break/--trace`).
+- Profiler (v2.6): `profile.go:35` `ProfileFile` (exact per-line statement
+  counts via `OnStmt`, sorted count-desc; counts, not wall time),
+  `profile.go:90` `FormatProfile`, `tools_cmd.go:288` `cmdProfile`
+  (`fusion profile <file.ks> [--top N]`).
+- VS Code ext v0.3.0: hover/goto/completion/rename/diagnostics/format providers
+  + `ks-fusion` debugger contribution (`editors/vscode/package.json`,
+  `extension.js` completion provider with `.`/`_` triggers, `node --check`
+  clean; no vscode-test harness).
+- Tests: `lsp_test.go:101` (`TestLSPCompletionBuiltinsAndKeywords`:
+  prefix filtering), `lsp_test.go:141`
+  (`TestLSPCompletionWorkspaceFuncs`), `profile_test.go:5`
+  (`TestProfileCountsLoop`: loop body x5 + sorted-desc), `debug_test.go:5`
   (breakpoint hit + vars, trace, bad file).
 - Verdict: real depth inside 9 (Go/Rust parity for scripts). A +1 (beating both)
-  needs interactive DAP/step-REPL, completion, `.ks`-line profiler — not claimed.
+  needs interactive DAP/step-REPL + sampling time-profiler — not claimed
+  (completion + exact-count profiler narrow the gap; they don't close it).
 
 ### E6. Frontend 7→8: DOM-diff without reload + background ISR (+1, meets the bar)
 
@@ -662,20 +685,30 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
 - Limits: no hydrate-full (`on_mount` immediate), no CSS handling,
   `fetch_json` GET-only. 8 ties Node SSR-prototype depth.
 
-### E7. Maturity 7→8: release + timeout + repeat-safe + CI (+1, meets the bar)
+### E7. Maturity 8→9 (v2.6): release + E2E + in-repo CI + hygiene (+1, meets the bar)
 
 - Release: `release/fusion` rebuilt from source (`go build -o release/fusion
-  ./cmd/fusion`; `version` → `ks-fusion v2.5`, `toolVersion` at `main.go:332`).
-- Timeout: `fusion test --timeout` (`main.go:1098` `runTestFileTimeout`,
+  ./cmd/fusion`; `version` → `ks-fusion v2.6`, `toolVersion` at `main.go:341`).
+- Timeout: `fusion test --timeout` (`main.go:1104` `runTestFileTimeout`,
   default 30s; timed-out file reports `not ok`, run continues).
 - Repeat-safe: `stdlib_ext2_test.go:32` port 0 + `tcp_shutdown` (`stdlib_ext2.go:227`);
   `go test ./internal/backend/ -run TestV23TCP -count=3` green.
 - CI: `ci.sh` (`go vet` + `go test ./...` + repeat-safe + `fmt --check` +
-  `vet`/`check` apps; `bash ci.sh` → `CI OK`). Note: `.github/workflows/` is
-  deployment-managed in this environment (only `blank.yml` persists), so the
-  gate lives in `ci.sh`.
-- Tests: 125 `go test` funcs + 5 benchmarks + 2 `.ks` test files, all green.
-  Gaps: TLS-server/`--bin` E2E, `retest.log` leftover. 8 holds.
+  `vet`/`check` apps; `bash ci.sh` → `CI OK`) **plus** in-repo
+  `.github/workflows/ci.yml` (Go setup + `bash ci.sh` on push/PR/dispatch —
+  the gate now lives in the repo, not only in `ci.sh` prose).
+- `--bin` E2E (closes the v2.5 gap): `build_test.go:16` `TestBuildBinE2E`
+  (builds a minimal no-dep app via `BuildBin`, asserts a non-empty binary,
+  runs it, asserts backend+frontend output; skips cleanly without a Go
+  toolchain). Manually verified sibling: `--strip` builds and runs
+  (10.9M → 7.5M, ~31% smaller).
+- Hygiene: `retest.log` leftover deleted (`retest.sh` never existed);
+  pre-existing `go vet` unreachable-code in `RunLSP` fixed (conditional loop
+  with documented exit path); `go vet ./...` clean.
+- Tests: 133 `go test` funcs (125 + 8: OR/LIKE, completion x2, profile x3,
+  vendor-cache, `--bin` E2E) + 5 benchmarks + 2 `.ks` test files, all green.
+  Remaining gap (stated, not hidden): TLS-server E2E needs a `tls_serve`
+  feature. 9 holds.
 
 ## Why not Go/Rust-class (v2.5 gaps + what parity needs)
 
