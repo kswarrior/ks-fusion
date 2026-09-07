@@ -46,6 +46,7 @@ func dashboard_page(props) {
     props: {
       title: "Dashboard",
       path: "/dashboard",
+      text: "Live numbers computed in the store on every render.",
       stats: st,
       rows: ["count = " + st.count, "total = " + st.total, "avg = " + st.avg, "min = " + st.min, "max = " + st.max]
     },

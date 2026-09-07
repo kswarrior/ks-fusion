@@ -990,8 +990,8 @@ func fusionDefaultCSS() string {
 *{box-sizing:border-box}
 body{margin:0;font-family:Inter,ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
 div[data-type="layout"]>div.kids{display:flex;flex-wrap:wrap;min-height:100vh;align-content:flex-start;background:var(--surface-2)}
-header[data-type="header"]{flex:1 1 100%;background:var(--topbar);color:#fff;padding:12px 22px;min-height:64px}
-header[data-type="header"] h1{margin:0 0 8px;font-size:20px;font-weight:600}
+header[data-type="header"]{flex:1 1 100%;background:var(--topbar);color:#fff;padding:12px 22px 14px;min-height:64px;border-bottom:3px solid var(--primary)}
+header[data-type="header"] h1{margin:0 0 8px;font-size:20px;font-weight:700;letter-spacing:-.01em}
 nav.nav{display:flex;gap:6px;flex-wrap:wrap}
 nav.nav a{color:var(--topbar-dim);text-decoration:none;padding:7px 14px;border-radius:var(--radius-sm);font-size:14px;transition:background var(--duration-fast) ease,color var(--duration-fast) ease}
 nav.nav a.active{background:var(--primary);color:#fff}
@@ -1008,7 +1008,8 @@ ul.rows{list-style:none;margin:14px 0;padding:0;display:grid;gap:8px}
 ul.rows li{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px}
 div[data-type="page"]>div.kids{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:6px}
 div[data-type="stat"]{min-width:0;animation:fadeUp var(--duration-normal) var(--ease) both}
-.statbody{background:var(--topbar);color:#fff;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+div.kids:empty{display:none}
+.statbody{background:linear-gradient(135deg,#16213a,#243a6e);color:#fff;border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:4px;border:1px solid #2c3f66}
 .stat-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--topbar-dim)}
 .stat-value{font-size:24px;font-weight:700}
 div[data-type="section"]{grid-column:1/-1;min-width:0}
