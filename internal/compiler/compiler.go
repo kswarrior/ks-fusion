@@ -506,6 +506,47 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 	return fmt.Errorf("line %d: unknown statement (compiler v0.2)", st.Line)
 }
 
+// compileTry compiles `try Body catch e { CaBody }` (no finally) to
+// OpSetupTry/OpPopTry around the body. The VM pushes the raw error string
+// and jumps to the handler on failure (mirrors backend.execTry: catch var
+// binds err.Error(), control flow is never caught — break/continue/return
+// bypass records via emitTryPops/OpReturn cleanup). `finally` and bare
+// `try`+`finally` stay interpreter-only with a clear error; a bare `try`
+// without catch/finally compiles to just the body (errors propagate).
+func (c *compiler) compileTry(st *frontend.Stmt) error {
+	if st.FinBody != nil {
+		return fmt.Errorf("line %d: `try/finally` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
+	}
+	if st.CaBody == nil {
+		// bare `try Body`: transparent, errors propagate naturally.
+		return c.compileStmt(st.Then)
+	}
+	setup := c.emit(OpSetupTry, -1, st.Line)
+	c.tryDepth++
+	if err := c.compileStmt(st.Then); err != nil {
+		return err
+	}
+	c.tryDepth--
+	c.emit(OpPopTry, 0, st.Line)
+	jEnd := c.emit(OpJump, -1, st.Line)
+	c.patch(setup, len(c.cur().fn.Chunk.Code))
+	// handler entry: VM pushed the error string on top of the stack.
+	if st.Catch == "" {
+		c.emit(OpPop, 0, st.Line)
+	} else {
+		c.beginScope()
+		c.defineLocal(st.Catch)
+	}
+	if err := c.compileStmt(st.CaBody); err != nil {
+		return err
+	}
+	if st.Catch != "" {
+		c.endScope(st.Line)
+	}
+	c.patch(jEnd, len(c.cur().fn.Chunk.Code))
+	return nil
+}
+
 // compileSwitch desugars `switch x { case a,b {..} default {..} }` to a
 // hidden-target + Eq-chain (first match wins, no fallthrough). `break`
 // inside a case exits the switch; `continue` propagates to the enclosing loop.
@@ -1132,6 +1173,8 @@ func (c *compiler) compileFuncDefTyped(name string, params, paramTypes []string,
 	idx := len(c.funcs) - 1
 	// compile body in new frame
 	c.frames = append(c.frames, &funcCtx{fn: fn, returnType: returnType})
+	savedTry := c.tryDepth
+	c.tryDepth = 0
 	for _, p := range params {
 		c.defineLocal(p)
 	}
@@ -1164,6 +1207,7 @@ func (c *compiler) compileFuncDefTyped(name string, params, paramTypes []string,
 	c.emit(OpConst, c.addConst(Const{Kind: CKNil}), line)
 	c.emit(OpReturn, 0, line)
 	c.frames = c.frames[:len(c.frames)-1]
+	c.tryDepth = savedTry
 	// push func value in enclosing frame
 	c.emit(OpConst, c.addConst(Const{Kind: CKFunc, Func: idx}), line)
 	if len(c.frames) == 1 && c.frames[0].depth == 0 {
