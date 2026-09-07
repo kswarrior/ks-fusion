@@ -1252,6 +1252,7 @@ func Bench(target string, n int) error {
 		return fmt.Errorf("no .ks files under %s", target)
 	}
 	// if target is a file, files has 1 entry
+	failed := 0
 	for _, f := range files {
 		data, err := os.ReadFile(f)
 		if err != nil {
@@ -1276,10 +1277,15 @@ func Bench(target string, n int) error {
 		el := time.Since(start)
 		if lastErr != nil {
 			fmt.Printf("bench %s: FAIL (%v)\n", f, lastErr)
+			failed++
 			continue
 		}
 		avg := el / time.Duration(n)
 		fmt.Printf("bench %s: %d runs in %s (avg %s/op)\n", f, n, el.Round(time.Millisecond), avg)
+	}
+	// v2.7: non-zero exit when any file fails (same contract as `fusion test`).
+	if failed > 0 {
+		return fmt.Errorf("bench failed: %d of %d files failed", failed, len(files))
 	}
 	return nil
 }
