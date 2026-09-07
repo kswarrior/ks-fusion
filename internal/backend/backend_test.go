@@ -359,6 +359,27 @@ func TestRunSqliteExtended(t *testing.T) {
 		"sqlite_close(db)\n")
 }
 
+func TestRunSqliteOrLike(t *testing.T) {
+	dir := t.TempDir()
+	db := dir + "/orlike.db"
+	mustRun(t, "let db = sqlite_open(\""+db+"\")\n"+
+		"sqlite_exec(db, \"CREATE TABLE t (a, b)\")\n"+
+		"sqlite_exec(db, \"INSERT INTO t (a, b) VALUES (1, 'ada')\")\n"+
+		"sqlite_exec(db, \"INSERT INTO t (a, b) VALUES (2, 'bob')\")\n"+
+		"sqlite_exec(db, \"INSERT INTO t (a, b) VALUES (3, 'ada-x')\")\n"+
+		// OR (lower precedence than AND)
+		"let r1 = sqlite_query(db, \"SELECT a FROM t WHERE a = 1 OR a = 2\")\nassert(len(r1) == 2)\n"+
+		"let r2 = sqlite_query(db, \"SELECT a FROM t WHERE a = 1 OR b = 'bob' AND a = 2\")\nassert(len(r2) == 2)\n"+
+		// LIKE / NOT LIKE (% and _ wildcards)
+		"let r3 = sqlite_query(db, \"SELECT a FROM t WHERE b LIKE 'ada%'\")\nassert(len(r3) == 2)\n"+
+		"let r4 = sqlite_query(db, \"SELECT a FROM t WHERE b LIKE 'b_b'\")\nassert(len(r4) == 1)\nassert(r4[0].a == 2)\n"+
+		"let r5 = sqlite_query(db, \"SELECT a FROM t WHERE b NOT LIKE 'ada%'\")\nassert(len(r5) == 1)\nassert(r5[0].a == 2)\n"+
+		// OR + LIKE combined, incl. UPDATE/DELETE paths (same evalWhere)
+		"assert(sqlite_exec(db, \"UPDATE t SET a = 9 WHERE b LIKE 'ada%' OR a = 2\") == 3)\n"+
+		"assert(sqlite_exec(db, \"DELETE FROM t WHERE a = 9 OR b = 'zzz'\") == 3)\n"+
+		"sqlite_close(db)\n")
+}
+
 func TestRunSqliteJoin(t *testing.T) {
 	dir := t.TempDir()
 	db := dir + "/join.db"

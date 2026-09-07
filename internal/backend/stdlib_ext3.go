@@ -23,11 +23,13 @@ var (
 	cancelNext int
 )
 
-// v2.4 sqlite-compatible subset (file-backed, no cgo):
+// v2.4 sqlite-compatible subset (file-backed, no cgo), extended v2.6:
 // sqlite_open(path) -> id, sqlite_exec(id, sql), sqlite_query(id, sql) -> array,
 // sqlite_close(id). Supports CREATE TABLE IF NOT EXISTS, DROP TABLE,
 // INSERT INTO, SELECT * FROM ... [JOIN ... ON ...] [WHERE ...] [GROUP BY ...]
 // [ORDER BY ...] [LIMIT ...] [OFFSET ...], DELETE FROM, UPDATE ... SET ....
+// WHERE is AND/OR with LIKE/NOT LIKE (OR looser than AND; % and _ wildcards;
+// no parens, no AND/OR inside string literals). Still no transactions/indexes/prepared.
 // postgres_open/exec/query/close (v2.5) are the same embedded engine under a
 // postgres-compatible name (no server required).
 
@@ -672,12 +674,69 @@ func parseSQLVal(s string) Value {
 }
 
 func evalWhere(row map[string]Value, where string) (bool, error) {
+	// subset: <and-group> [OR <and-group> ...], each and-group is
+	// col = val [AND col = val ...] with =, !=, <>, >, <, >=, <=, LIKE, NOT LIKE.
+	// OR binds looser than AND (standard SQL precedence). LIKE uses % (any run)
+	// and _ (single char). No parentheses, no AND/OR inside string literals.
+	orParts := regexp.MustCompile(`(?i)\s+OR\s+`).Split(where, -1)
+	if len(orParts) > 1 {
+		for _, part := range orParts {
+			ok, err := evalWhereAnd(row, part)
+			if err != nil {
+				return false, err
+			}
+			if ok {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	return evalWhereAnd(row, where)
+}
+
+func evalWhereAnd(row map[string]Value, where string) (bool, error) {
 	// subset: col = val [AND col = val ...], col != val, col > N etc for ints
 	parts := regexp.MustCompile(`(?i)\s+AND\s+`).Split(where, -1)
 	for _, p := range parts {
-		m := regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(=|!=|<>|>|<|>=|<=)\s*(.+?)\s*$`).FindStringSubmatch(p)
+		ok, err := evalWhereCond(row, p)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func evalWhereCond(row map[string]Value, cond string) (bool, error) {
+	// LIKE / NOT LIKE first (case-insensitive keyword, % and _ wildcards).
+	if m := regexp.MustCompile(`(?i)^\s*([A-Za-z_][A-Za-z0-9_]*)\s+(NOT\s+LIKE|LIKE)\s*(.+?)\s*$`).FindStringSubmatch(cond); m != nil {
+		col := m[1]
+		op := strings.ToUpper(strings.Join(strings.Fields(m[2]), " "))
+		raw := strings.TrimSpace(m[3])
+		v, ok := row[col]
+		if !ok {
+			v = Nil()
+		}
+		want := parseSQLVal(raw)
+		if want.Kind != VString {
+			return false, fmt.Errorf("LIKE pattern must be a quoted string, got %q", raw)
+		}
+		if v.Kind != VString {
+			// LIKE is a string operator: non-strings (incl. nil) never match
+			// LIKE, and always match NOT LIKE (nil-safe, mirrors `a ?? b` ethos).
+			return op == "NOT LIKE", nil
+		}
+		hit := matchLike(v.Str, want.Str)
+		if op == "LIKE" {
+			return hit, nil
+		}
+		return !hit, nil
+	}
+		m := regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(=|!=|<>|>|<|>=|<=)\s*(.+?)\s*$`).FindStringSubmatch(cond)
 		if m == nil {
-			return false, fmt.Errorf("unsupported WHERE %q (subset: col = val AND ...)", p)
+			return false, fmt.Errorf("unsupported WHERE %q (subset: col = val [AND ...] [OR ...], LIKE/NOT LIKE with '%%'/'_')", cond)
 		}
 		col, op, raw := m[1], m[2], strings.TrimSpace(m[3])
 		v, ok := row[col]
@@ -720,8 +779,30 @@ func evalWhere(row map[string]Value, where string) (bool, error) {
 				}
 			}
 		}
-	}
 	return true, nil
+}
+
+// matchLike reports whether s matches SQL LIKE pattern (case-sensitive):
+// % = any run (incl. empty), _ = exactly one char, all else literal.
+func matchLike(s, pattern string) bool {
+	var b strings.Builder
+	b.WriteString("^")
+	for _, r := range pattern {
+		switch r {
+		case '%':
+			b.WriteString(".*")
+		case '_':
+			b.WriteString(".")
+		case '.', '+', '*', '?', '(', ')', '|', '[', ']', '{', '}', '^', '$', '\\':
+			b.WriteString("\\")
+			b.WriteRune(r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteString("$")
+	m, _ := regexp.MatchString(b.String(), s)
+	return m
 }
 
 func valuesEqual(a, b Value) bool {
