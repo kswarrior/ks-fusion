@@ -11,17 +11,15 @@ description: Write, edit, run, test and package KS Fusion (.ks) apps and libs. U
 > Toolchain (`fusion` CLI) is written in Go. Go is the implementation language — `.ks` is the real language.
 > 177 builtins. Interpreter runs the full language; `fusion compile` covers a subset only.
 
-## 1. Setup — get a working `fusion` binary
+## 1. Setup — check for a working `fusion` binary
 
 ```bash
-go build -o fusion ./cmd/fusion
 ./fusion version   # -> ks-fusion v2.7
-# this repo also ships a prebuilt binary:
-./release/fusion version
-export PATH="$PWD/release:$PATH"  # makes #!/usr/bin/env fusion shebangs work
 ```
 
-All commands below assume `fusion` is on PATH (or use `./fusion` / `./release/fusion`).
+If that command does not work, STOP. Do not try to build it, download it, or work around it. Tell the user to install it first, then continue.
+
+All commands below assume `fusion` is on PATH (or use `./fusion`).
 
 ## 2. Project shapes — ALWAYS check these first
 
