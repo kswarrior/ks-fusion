@@ -710,9 +710,26 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
   Remaining gap (stated, not hidden): TLS-server E2E needs a `tls_serve`
   feature. 9 holds.
 
-## Why not Go/Rust-class (v2.5 gaps + what parity needs)
+### E8. Build holds 8: vendor-aware cache + `--strip` (a +1 needs incremental + remote cache)
 
-> Score context: `.ks 83/100` vs `Go 82/100` vs `Rust 81/100` (ahead on balance for
+- Vendor-aware hash-skip cache (v2.6 fix): `cache.go:13-16` (doc),
+  `cache.go:63-81` (second walk hashes every file under `vendor/`, so swaps
+  bust the cache — v2.5 skipped `vendor/` and never invalidated).
+- `--strip`: `build.go:459` `BuildBinWithOptions(appDir, out, target, strip)`,
+  `build.go:553` (`-ldflags "-s -w"` when set), CLI `fusion build --bin
+  [--strip]` (`main.go` build case + `build_ext.go:18`
+  `cmdBuildBinStrip`; old `cmdBuildBin` kept as the non-strip path).
+  Measured: minimal app 10.9M → 7.5M (~31% smaller), binary runs clean.
+- Tests: `registry_test.go:192` `TestCacheVendorBusts` (hit → swap vendor →
+  miss); `--bin` E2E in `build_test.go:16` covers the embed path `--strip`
+  rides on.
+- Verdict: real correctness/size depth inside 8. A +1 needs incremental
+  per-file rebuilds + remote cache (plus losing the Go-toolchain requirement,
+  which is structural) — not claimed.
+
+## Why not Go/Rust-class (v2.6 gaps + what parity needs)
+
+> Score context: `.ks 84/100` vs `Go 82/100` vs `Rust 81/100` (ahead on balance for
 > scripts/services; behind on native depth). The lead comes from Simplicity 9 and
 > script breadth; every native-depth row still trails. Rows 6/14 stay intentionally
 > different (GC stays, `unsafe` stays opt-in).
@@ -734,15 +751,17 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
   (`kslib-1`), but `fusion build --bin` embeds `.ks`+`.kslib` (+ `fusion.lock`) into a
   temp-module `main.go` and runs `go build -trimpath` (requires a Go toolchain;
   `GOOS/GOARCH` + `CGO_ENABLED=0` passthrough); deterministic embed order,
-  `GOFLAGS=-trimpath`. Cache is a whole-app sha256 over `fusion.toml` +
-  `fusion.lock` + every `.ks` (skips `.git/target/vendor/test-releases`, so `vendor/`
-  swaps do not invalidate) — hash-skip, not incremental; no TTL/size/remote.
+  `GOFLAGS=-trimpath`; `--strip` adds `-ldflags "-s -w"` (measured 10.9M → 7.5M,
+  ~31% smaller). Cache is a whole-app sha256 over `fusion.toml` +
+  `fusion.lock` + every `.ks` **plus every file under `vendor/`** (v2.6 fix:
+  vendor swaps now bust the cache) — hash-skip, not incremental; no TTL/size/remote.
   `docs/bench.md` measures VM fib ≈2x interp but VM loop ≈0.7x (desugar cost).
 * Go level still needs: full-language VM coverage (concurrency, `import`/`try`/`defer`,
   nominal checks), consistent wins, then IR-level checks (have source `vet`/`check`; have hash-skip cache).
-* Rust level still needs: LLVM/opt backend or full bytecode VM + AOT, LTO, strip/symbol options.
+* Rust level still needs: LLVM/opt backend or full bytecode VM + AOT, LTO (have `--strip` for symbols;
+  still no profile-guided/LTO pipeline).
   Minimum viable: full-subset VM first, then native AOT (have embed `--bin` now).
-* Planned: `docs/futures.md` P1 runtime; `--bin`/`--target`/host-`--cpuprofile`/hash-skip cache/`-trimpath` done, VM full coverage left.
+* Planned: `docs/futures.md` P1 runtime; `--bin`/`--target`/`--strip`/host-`--cpuprofile`/`.ks`-line-`profile`/vendor-aware-cache/`-trimpath` done, VM full coverage left.
 * Score impact: Perf 7 holds (above Python for scripts on breadth; VM v0.2 is progress
   inside 7); Perf 7→8 left for full VM with consistent measured wins.
 
@@ -797,7 +816,7 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
   `sha256/md5/hmac_sha256/base64_encode/decode/hex_encode/decode/uuid/random_bytes`,
   `stat/cp/mv|copy/glob/path_join/abs_path/remove_all`, `exec/shell/cwd/env_all` + `exec_pipes`/`spawn`/`proc_wait`/`proc_kill`,
   `format_time/parse_time/time_parts` (+ `now()` ms; no ticker), `db_put/get/delete/list` (JSON-file KV),
-  sqlite extended dialect (JSON-file; UPDATE/JOIN/ORDER BY/LIMIT/OFFSET/GROUP BY+COUNT; WHERE AND-only, no OR;
+  sqlite extended dialect (JSON-file; UPDATE/JOIN/ORDER BY/LIMIT/OFFSET/GROUP BY+COUNT; WHERE with AND/OR + LIKE/NOT LIKE, no parens;
   no transactions/indexes/prepared) + `postgres_*` compat names on the same engine,
   `log_info/warn/error` (stderr), `assert_eq/ne/contains`,
   `with_timeout/parallel`, `struct_validate/assert/enum_create/valid/is_number` + `use_state/set_state/on_mount` +
@@ -809,11 +828,11 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
 * Rust level still needs: `tokio`-like async IO story (or documented blocking + workers),
   `serde`-like JSON schema validation (`struct_validate` is start), real `sqlite`/`postgres` native
   (have JSON-file dialect + KV + TCP + text-frame WS).
-* Planned: `futures.md` P1 stdlib; left: native DB (server/indexes/transactions/OR/prepared), `watch`/ticker/`tls_serve`/WS-server.
+* Planned: `futures.md` P1 stdlib; left: native DB (server/indexes/transactions/prepared), `watch`/ticker/`tls_serve`/WS-server.
 * Score impact: Stdlib 9 holds on breadth + extended dialect (Go breadth for scripts);
   Stdlib 9→10 left (native DB + data-stack depth).
 
-### 5. Ecosystem 8 (file-registry + real audit), Tooling 9 (LSP + non-interactive debug), Maturity 8 (release + CI)
+### 5. Ecosystem 8 (file-registry + real audit), Tooling 9 (LSP + completion + debug + profile), Maturity 9 (release + E2E + CI)
 
 * Today: `fusion.toml` + `fusion.lock` + semver (`^ ~ >= > < *` + `,` + path; git deps left) + `vendor/` offline +
   file-local registry (`publish/pull/yank`, sha256 sidecar + verify on pull, `scope/name` → subdir mapping,
@@ -822,23 +841,26 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
   update-available / private-token-hint + `VerifyRegistry` recompute + `checkTransitive` closure) +
   `fusion test [target] [--timeout SECS]` (`*_test.ks` + `assert`, TAP, per-file isolation, per-file timeout —
   timed-out file reports `not ok`, run continues) +
-  `fusion fmt/vet/doc/check/repl/bench/debug` (incl. enum-aware exhaustive-`switch` vet), hash-skip cache,
-  host-`--cpuprofile` + `fusion debug --break/--trace` (breakpoints + trace + globals; non-interactive),
-  full `fusion lsp` (stdio JSON-RPC: `initialize` advertises hover/definition/formatting/rename + `shutdown`/`exit`;
+  `fusion fmt/vet/doc/check/repl/bench/debug/profile` (incl. enum-aware exhaustive-`switch` vet), vendor-aware hash-skip cache,
+  host-`--cpuprofile` + `.ks`-line `fusion profile --top N` (exact per-line statement counts, not wall time) +
+  `fusion debug --break/--trace` (breakpoints + trace + globals; non-interactive),
+  full `fusion lsp` (stdio JSON-RPC: `initialize` advertises hover/definition/formatting/rename/completion + `shutdown`/`exit`;
   hover works for top-level funcs + builtins; goto-definition returns real `st.Line - 1` lines;
   formatting returns real `FormatSource` edits; didOpen/didChange/didSave publish diagnostics; rename is cross-file;
-  no completion yet) + VS Code ext v0.2.0 (providers + debugger contribution; hand-rolled client, no test harness) +
-  `compile --dis/--run` + `test` + `build --bin/--target` + cache + `vendor` + `publish/pull/yank/registry/audit/lsp/debug` +
-  `run-web`/`build-js`/`build-ssg` all wired in `cmd/fusion/main.go` (source build; `release/fusion` is v2.5).
+  completion returns prefix-filtered builtins + keywords + workspace funcs/structs/enums) + VS Code ext v0.3.0
+  (hover/goto/completion/rename/diagnostics/format providers + debugger contribution; hand-rolled client, no test harness) +
+  `compile --dis/--run` + `test` + `build --bin/--target/--strip` + cache + `vendor` + `publish/pull/yank/registry/audit/lsp/debug/profile` +
+  `run-web`/`build-js`/`build-ssg` all wired in `cmd/fusion/main.go` (source build; `release/fusion` is v2.6).
   Private-token is env-hint only (never sent/checked); no docs.rs-like docs, no criterion reports
-  (basic `bench` + host profile + `docs/bench.md`); `--race` is vet + env flag (+ “use `go run -race`” hint).
-* Go level done except central-registry depth (have file-local registry+checksums, resolver, `vendor/`, `fmt/vet/test/bench/doc/debug`, host profile, hash-skip cache, real audit).
+  (basic `bench` + host profile + `.ks`-line profile + `docs/bench.md`); `--race` is vet + env flag (+ “use `go run -race`” hint).
+* Go level done except central-registry depth (have file-local registry+checksums, resolver, `vendor/`, `fmt/vet/test/bench/doc/debug/profile`, host + `.ks`-line profiles, vendor-aware hash-skip cache, real audit).
 * Rust level left: central index, docs.rs-like docs, criterion-style benches, interactive debugging.
-* Planned: P2 DX (completion, DAP) left.
+* Planned: P2 DX (DAP, sampling time-profiler) left.
 * Score impact: Ecosystem 8 holds (real audit meets the bar; central server left);
-  Tooling 9 holds (full LSP + debugger + ext are depth inside 9; interactive/DAP/completion left);
-  Maturity 8 (release v2.5 + `ci.sh` + timeout + repeat-safe + 125 tests; `.github/workflows/`
-  deployment-managed, TLS-server/`--bin` E2E gaps remain).
+  Tooling 9 holds (full LSP + completion + debugger + `.ks`-line profiler + ext
+  v0.3.0 are depth inside 9; interactive DAP + time-profiling left);
+  Maturity 9 (release v2.6 + `ci.sh` + in-repo CI + `--bin` E2E + timeout +
+  repeat-safe + 133 tests; TLS-server E2E remains).
 
 ### Go/Rust-level checklist (all things, with owner doc)
 
