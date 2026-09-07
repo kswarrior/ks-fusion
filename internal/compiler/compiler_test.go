@@ -100,7 +100,7 @@ func TestCompileUnsupported(t *testing.T) {
 	mustFailCompile(t, "import \"lib.ks\"\n")
 	mustFailCompile(t, "try {\n print 1\n} catch e {\n print e\n}\n")
 	mustFailCompile(t, "func f() {\n defer print 1\n}\n")
-	mustFailCompile(t, "sleep 10\n")
+	// sleep compiles since v0.3 (see TestCompileSleep).
 	// v0.2 covers switch/slices/is/??/?./typed — these must compile now.
 	mustRun(t, "switch 1 {\n case 1 { print 1 }\n}\n")
 	mustRun(t, "let a = [1,2]\nassert(a[0:1] == [1])\n")
@@ -165,6 +165,13 @@ func TestCompileV02Typed(t *testing.T) {
 	// nominal struct/enum annotations: VM skips the check (interpreter
 	// validates); maps must not fail with "wants User, got map".
 	mustRun(t, "let u: User = {name: \"a\"}\nassert(u.name == \"a\")\n")
+}
+
+func TestCompileSleep(t *testing.T) {
+	mustRun(t, "sleep 1\nsleep(1)\n")
+	mustRun(t, "let s = 0\nfor i in range(3) {\n sleep 1\n s = s + i\n}\nassert(s == 3)\n")
+	mustFailRun(t, "sleep(-1)\n")
+	mustFailRun(t, "sleep(\"x\")\n")
 }
 
 func TestCompileV02Switch(t *testing.T) {
