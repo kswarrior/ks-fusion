@@ -114,16 +114,17 @@ type funcSig struct {
 }
 
 type gen struct {
-	sb      strings.Builder
-	funcs   map[string]*funcSig
-	vars    []map[string]ntype // scope stack
-	loop    int
-	funcRet ntype // current function return type (ntVoid outside funcs)
-	inFunc  bool
-	useMath bool
-	useTime bool
-	useUTF8 bool
-	tmp     int
+	sb       strings.Builder
+	funcs    map[string]*funcSig
+	closures map[string]*funcSig // nested funcs + let-bound closures in scope
+	vars     []map[string]ntype  // scope stack
+	loop     int
+	funcRet  ntype // current function return type (ntVoid outside funcs)
+	inFunc   bool
+	useMath  bool
+	useTime  bool
+	useUTF8  bool
+	tmp      int
 }
 
 func (g *gen) lookup(name string) (ntype, bool) {
@@ -168,7 +169,7 @@ func TranspileSource(src, path string) (string, error) {
 
 // TranspileProgram emits Go source for an already-parsed program.
 func TranspileProgram(prog *frontend.Program) (string, error) {
-	g := &gen{funcs: map[string]*funcSig{}}
+	g := &gen{funcs: map[string]*funcSig{}, closures: map[string]*funcSig{}}
 	// Phase 1: register top-level func signatures (annotations required).
 	for _, st := range prog.Statements {
 		if st.Kind != frontend.StmtFunc {
@@ -388,6 +389,9 @@ func (g *gen) typeOf(e *frontend.Expr) (ntype, error) {
 	case frontend.ExprNil:
 		return ntVoid, fmt.Errorf("nil is not in the native subset — runs in interpreter")
 	case frontend.ExprVar:
+		if _, isFunc := g.closures[e.Name]; isFunc {
+			return ntVoid, fmt.Errorf("%q is a func — call it", e.Name)
+		}
 		t, ok := g.lookup(e.Name)
 		if !ok {
 			return ntVoid, fmt.Errorf("unknown variable %q (native needs declaration before use)", e.Name)
@@ -549,6 +553,9 @@ func (g *gen) callType(e *frontend.Expr) (ntype, error) {
 	}
 	sig, ok := g.funcs[name.Name]
 	if !ok {
+		sig, ok = g.closures[name.Name]
+	}
+	if !ok {
 		return ntVoid, fmt.Errorf("unknown func %q in native subset (no builtins besides len) — runs in interpreter", name.Name)
 	}
 	if len(e.Args) != len(sig.params) {
@@ -573,4 +580,562 @@ func assignable(want, got ntype) bool {
 		return true
 	}
 	return want == ntFloat && got == ntInt
+}
+
+// ---------------------------------------------------------------------------
+// emission
+// ---------------------------------------------------------------------------
+
+func (g *gen) emit(format string, args ...any) {
+	fmt.Fprintf(&g.sb, format, args...)
+}
+
+// emitTop emits a top-level (main body) statement.
+func (g *gen) emitTop(st *frontend.Stmt) error {
+	switch st.Kind {
+	case frontend.StmtReturn:
+		return fmt.Errorf("line %d: return outside function", st.Line)
+	case frontend.StmtBreak, frontend.StmtContinue:
+		return fmt.Errorf("line %d: break/continue outside loop", st.Line)
+	}
+	return g.emitStmt(st)
+}
+
+func (g *gen) emitFunc(st *frontend.Stmt, out *strings.Builder, top bool) error {
+	sig := g.funcs[st.Name]
+	saved := g.sb
+	g.sb = *out
+	g.pushScope()
+	for i, p := range st.Names {
+		g.define(p, sig.params[i])
+	}
+	g.funcRet = sig.ret
+	g.inFunc = true
+	var params []string
+	for i, p := range st.Names {
+		params = append(params, p+" "+sig.params[i].goType())
+	}
+	if sig.ret == ntVoid {
+		g.emit("func %s(%s) {\n", st.Name, strings.Join(params, ", "))
+	} else {
+		g.emit("func %s(%s) %s {\n", st.Name, strings.Join(params, ", "), sig.ret.goType())
+	}
+	if err := g.emitBlockBody(st.Body); err != nil {
+		return err
+	}
+	g.emit("}\n\n")
+	g.popScope()
+	g.inFunc = false
+	*out = g.sb
+	g.sb = saved
+	return nil
+}
+
+// emitBlockBody emits the statements of a block (already scoped by caller
+// except function bodies, which push their own scope in emitFunc).
+func (g *gen) emitBlockBody(b *frontend.Stmt) error {
+	if b == nil {
+		return nil
+	}
+	if b.Kind != frontend.StmtBlock {
+		return fmt.Errorf("line %d: expected block", b.Line)
+	}
+	g.pushScope()
+	for _, s := range b.List {
+		if err := g.emitStmt(s); err != nil {
+			return err
+		}
+	}
+	g.popScope()
+	return nil
+}
+
+func (g *gen) emitStmt(st *frontend.Stmt) error {
+	switch st.Kind {
+	case frontend.StmtLet:
+		return g.emitLet(st)
+	case frontend.StmtAssign:
+		return g.emitAssign(st, false)
+	case frontend.StmtPrint:
+		args := st.Exprs
+		if len(args) == 0 && st.Expr != nil {
+			args = []*frontend.Expr{st.Expr}
+		}
+		var parts []string
+		for _, a := range args {
+			t, err := g.typeOf(a)
+			if err != nil {
+				return err
+			}
+			if t == ntVoid {
+				return fmt.Errorf("line %d: print of void value", st.Line)
+			}
+			src, err := g.emitExpr(a, t)
+			if err != nil {
+				return err
+			}
+			parts = append(parts, printConv(t, src))
+		}
+		g.emit("fmt.Println(%s)\n", strings.Join(parts, ", "))
+		return nil
+	case frontend.StmtSleep:
+		t, err := g.typeOf(st.Expr)
+		if err != nil {
+			return err
+		}
+		if t != ntInt {
+			return fmt.Errorf("line %d: sleep needs int ms in native subset", st.Line)
+		}
+		src, err := g.emitExpr(st.Expr, ntInt)
+		if err != nil {
+			return err
+		}
+		g.useTime = true
+		g.emit("time.Sleep(time.Duration(%s) * time.Millisecond)\n", src)
+		return nil
+	case frontend.StmtIf:
+		t, err := g.typeOf(st.Expr)
+		if err != nil {
+			return err
+		}
+		if t != ntBool {
+			return fmt.Errorf("line %d: if needs bool (no truthiness in native) — runs in interpreter", st.Line)
+		}
+		cond, err := g.emitExpr(st.Expr, ntBool)
+		if err != nil {
+			return err
+		}
+		g.emit("if %s {\n", cond)
+		if err := g.emitBlockBody(st.Then); err != nil {
+			return err
+		}
+		if st.Else != nil {
+			if st.Else.Kind == frontend.StmtIf {
+				g.emit("} else ")
+				// else-if: emit without extra braces
+				saved := g.sb
+				var tmp strings.Builder
+				g.sb = tmp
+				err := g.emitStmt(st.Else)
+				tmpStr := g.sb.String()
+				g.sb = saved
+				if err != nil {
+					return err
+				}
+				g.emit("%s", tmpStr)
+			} else {
+				g.emit("} else {\n")
+				if err := g.emitBlockBody(st.Else); err != nil {
+					return err
+				}
+				g.emit("}\n")
+				return nil
+			}
+		} else {
+			g.emit("}\n")
+		}
+		return nil
+	case frontend.StmtWhile:
+		t, err := g.typeOf(st.Expr)
+		if err != nil {
+			return err
+		}
+		if t != ntBool {
+			return fmt.Errorf("line %d: while needs bool (no truthiness in native) — runs in interpreter", st.Line)
+		}
+		cond, err := g.emitExpr(st.Expr, ntBool)
+		if err != nil {
+			return err
+		}
+		g.emit("for %s {\n", cond)
+		g.loop++
+		err = g.emitBlockBody(st.Body)
+		g.loop--
+		if err != nil {
+			return err
+		}
+		g.emit("}\n")
+		return nil
+	case frontend.StmtForIn:
+		return g.emitForIn(st)
+	case frontend.StmtForC:
+		return g.emitForC(st)
+	case frontend.StmtFunc:
+		// nested named func: emit as a closure binding (no captures checked
+		// here — Go enforces capture safety at build time).
+		if err := checkName(st.Name, "func", st.Line); err != nil {
+			return err
+		}
+		sig, err := g.localFuncSig(st)
+		if err != nil {
+			return err
+		}
+		g.define(st.Name, ntVoid) // placeholder; real type is the closure below
+		_ = sig
+		return g.emitNestedFunc(st)
+	case frontend.StmtReturn:
+		if !g.inFunc {
+			return fmt.Errorf("line %d: return outside function", st.Line)
+		}
+		if st.Expr == nil {
+			if g.funcRet != ntVoid {
+				return fmt.Errorf("line %d: bare return in non-void func", st.Line)
+			}
+			g.emit("return\n")
+			return nil
+		}
+		t, err := g.typeOf(st.Expr)
+		if err != nil {
+			return err
+		}
+		if g.funcRet == ntVoid {
+			return fmt.Errorf("line %d: value return in void func", st.Line)
+		}
+		if !assignable(g.funcRet, t) {
+			return fmt.Errorf("line %d: return %s in %s func", st.Line, t, g.funcRet)
+		}
+		src, err := g.emitExpr(st.Expr, g.funcRet)
+		if err != nil {
+			return err
+		}
+		g.emit("return %s\n", src)
+		return nil
+	case frontend.StmtBreak:
+		if g.loop == 0 {
+			return fmt.Errorf("line %d: break outside loop", st.Line)
+		}
+		g.emit("break\n")
+		return nil
+	case frontend.StmtContinue:
+		if g.loop == 0 {
+			return fmt.Errorf("line %d: continue outside loop", st.Line)
+		}
+		g.emit("continue\n")
+		return nil
+	case frontend.StmtBlock:
+		g.emit("{\n")
+		if err := g.emitBlockBody(st); err != nil {
+			return err
+		}
+		g.emit("}\n")
+		return nil
+	case frontend.StmtExpr:
+		t, err := g.typeOf(st.Expr)
+		if err != nil {
+			return err
+		}
+		src, err := g.emitExpr(st.Expr, t)
+		if err != nil {
+			return err
+		}
+		g.emit("_ = %s\n", src)
+		return nil
+	default:
+		return fmt.Errorf("line %d: not in the native-0.1 subset — runs in interpreter", st.Line)
+	}
+}
+
+// localFuncSig infers the signature of a nested func statement.
+func (g *gen) localFuncSig(st *frontend.Stmt) (*funcSig, error) {
+	var params []ntype
+	for i, p := range st.Names {
+		if err := checkName(p, "param", st.Line); err != nil {
+			return nil, err
+		}
+		pt := ""
+		if i < len(st.ParamTypes) {
+			pt = st.ParamTypes[i]
+		}
+		t, err := parseAnn(pt, st.Line)
+		if err != nil {
+			return nil, err
+		}
+		params = append(params, t)
+	}
+	// Temporarily register so recursion type-checks.
+	name := st.Name + "\x00nested"
+	g.funcs[name] = &funcSig{params: params}
+	saved := g.vars
+	g.vars = []map[string]ntype{{}}
+	for i, p := range st.Names {
+		g.vars[0][p] = params[i]
+	}
+	// allow self-reference
+	outer, had := g.funcs[st.Name]
+	g.funcs[st.Name] = &funcSig{params: params}
+	types, err := g.collectReturns(st.Body)
+	if had {
+		g.funcs[st.Name] = outer
+	} else {
+		delete(g.funcs, st.Name)
+	}
+	delete(g.funcs, name)
+	g.vars = saved
+	if err != nil {
+		return nil, err
+	}
+	sig := &funcSig{params: params, ret: ntVoid}
+	if len(types) > 0 {
+		ret := types[0]
+		for _, t := range types[1:] {
+			var err error
+			ret, err = unify(ret, t, st.Line)
+			if err != nil {
+				return nil, err
+			}
+		}
+		sig.ret = ret
+	}
+	if st.ReturnType != "" {
+		want, err := parseAnn(st.ReturnType, st.Line)
+		if err != nil {
+			return nil, err
+		}
+		sig.ret = want
+	}
+	return sig, nil
+}
+
+// emitNestedFunc emits `name := func(params) [ret] { body }`.
+func (g *gen) emitNestedFunc(st *frontend.Stmt) error {
+	sig, err := g.localFuncSig(st)
+	if err != nil {
+		return err
+	}
+	g.pushScope()
+	for i, p := range st.Names {
+		g.define(p, sig.params[i])
+	}
+	savedRet, savedIn := g.funcRet, g.inFunc
+	g.funcRet, g.inFunc = sig.ret, true
+	var params []string
+	for i, p := range st.Names {
+		params = append(params, p+" "+sig.params[i].goType())
+	}
+	if sig.ret == ntVoid {
+		g.emit("%s := func(%s) {\n", st.Name, strings.Join(params, ", "))
+	} else {
+		g.emit("%s := func(%s) %s {\n", st.Name, strings.Join(params, ", "), sig.ret.goType())
+	}
+	if err := g.emitBlockBody(st.Body); err != nil {
+		return err
+	}
+	g.emit("}\n")
+	g.funcRet, g.inFunc = savedRet, savedIn
+	g.popScope()
+	return nil
+}
+
+func (g *gen) emitLet(st *frontend.Stmt) error {
+	if err := checkName(st.Name, "var", st.Line); err != nil {
+		return err
+	}
+	// `let f = func...`: closure binding.
+	if st.Expr != nil && st.Expr.Kind == frontend.ExprFunc {
+		return g.emitLetFunc(st)
+	}
+	t, err := g.typeOf(st.Expr)
+	if err != nil {
+		return err
+	}
+	if t == ntVoid {
+		return fmt.Errorf("line %d: cannot bind void value", st.Line)
+	}
+	if st.TypeAnn != "" {
+		want, err := parseAnn(st.TypeAnn, st.Line)
+		if err != nil {
+			return err
+		}
+		if !assignable(want, t) {
+			return fmt.Errorf("line %d: %s is not %s", st.Line, t, want)
+		}
+		t = want
+	}
+	if _, exists := g.vars[len(g.vars)-1][st.Name]; exists {
+		return fmt.Errorf("line %d: %q already defined in this block (use = to assign)", st.Line, st.Name)
+	}
+	src, err := g.emitExpr(st.Expr, t)
+	if err != nil {
+		return err
+	}
+	g.define(st.Name, t)
+	decl := "var"
+	if st.TypeAnn == "" {
+		decl = ""
+	}
+	if decl == "" {
+		g.emit("%s := %s\n", st.Name, src)
+	} else {
+		g.emit("var %s %s = %s\n", st.Name, t.goType(), src)
+	}
+	return nil
+}
+
+// emitLetFunc emits `let f = func(params) [ret] { body }`.
+func (g *gen) emitLetFunc(st *frontend.Stmt) error {
+	e := st.Expr
+	var params []ntype
+	for i, p := range e.FuncParams {
+		if err := checkName(p, "param", st.Line); err != nil {
+			return err
+		}
+		pt := ""
+		if i < len(e.FuncParamTypes) {
+			pt = e.FuncParamTypes[i]
+		}
+		t, err := parseAnn(pt, st.Line)
+		if err != nil {
+			return err
+		}
+		params = append(params, t)
+	}
+	// Infer return type from the literal body.
+	saved := g.vars
+	g.vars = []map[string]ntype{{}}
+	for i, p := range e.FuncParams {
+		g.vars[0][p] = params[i]
+	}
+	types, err := g.collectReturns(e.FuncBody)
+	g.vars = saved
+	if err != nil {
+		return err
+	}
+	ret := ntVoid
+	if len(types) > 0 {
+		ret = types[0]
+		for _, t := range types[1:] {
+			var err error
+			ret, err = unify(ret, t, st.Line)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if e.FuncReturnType != "" {
+		want, err := parseAnn(e.FuncReturnType, st.Line)
+		if err != nil {
+			return err
+		}
+		ret = want
+	}
+	if _, exists := g.vars[len(g.vars)-1][st.Name]; exists {
+		return fmt.Errorf("line %d: %q already defined in this block", st.Line, st.Name)
+	}
+	g.pushScope()
+	for i, p := range e.FuncParams {
+		g.define(p, params[i])
+	}
+	savedRet, savedIn := g.funcRet, g.inFunc
+	g.funcRet, g.inFunc = ret, true
+	var ps []string
+	for i, p := range e.FuncParams {
+		ps = append(ps, p+" "+params[i].goType())
+	}
+	// Recursion through the binding needs a pre-declared var.
+	if ret == ntVoid {
+		g.emit("var %s func(%s)\n", st.Name, strings.Join(ps, ", "))
+		g.emit("%s = func(%s) {\n", st.Name, strings.Join(ps, ", "))
+	} else {
+		g.emit("var %s func(%s) %s\n", st.Name, strings.Join(ps, ", "), ret.goType())
+		g.emit("%s = func(%s) %s {\n", st.Name, strings.Join(ps, ", "), ret.goType())
+	}
+	err = g.emitBlockBody(e.FuncBody)
+	g.emit("}\n")
+	g.funcRet, g.inFunc = savedRet, savedIn
+	g.popScope()
+	if err != nil {
+		return err
+	}
+	g.define(st.Name, ret)
+	// Record the closure type for later calls: stash in vars as ret and
+	// remember params via a synthetic func entry.
+	g.funcs["closure\x00"+st.Name] = &funcSig{params: params, ret: ret}
+	return nil
+}
+
+func (g *gen) emitAssign(st *frontend.Stmt, implicit bool) error {
+	op := st.Op
+	if op == "" {
+		op = "="
+	}
+	t, ok := g.lookup(st.Name)
+	if !ok {
+		// for-c `for i = 0; ...` implicitly defines the loop var.
+		if !implicit || op != "=" {
+			return fmt.Errorf("line %d: assign to unknown %q (native needs let first)", st.Line, st.Name)
+		}
+		et, err := g.typeOf(st.Expr)
+		if err != nil {
+			return err
+		}
+		if et == ntVoid {
+			return fmt.Errorf("line %d: cannot bind void value", st.Line)
+		}
+		src, err := g.emitExpr(st.Expr, et)
+		if err != nil {
+			return err
+		}
+		g.define(st.Name, et)
+		g.emit("%s := %s\n", st.Name, src)
+		return nil
+	}
+	et, err := g.typeOf(st.Expr)
+	if err != nil {
+		return err
+	}
+	if op == "=" {
+		if !assignable(t, et) {
+			return fmt.Errorf("line %d: %s is not %s (native vars keep their type)", st.Line, et, t)
+		}
+		src, err := g.emitExpr(st.Expr, t)
+		if err != nil {
+			return err
+		}
+		g.emit("%s = %s\n", st.Name, src)
+		return nil
+	}
+	// Compound ops: .ks `x += v` ≡ `x = x + v` (float division included).
+	if t != ntInt && t != ntFloat && !(t == ntString && op == "+=") {
+		return fmt.Errorf("line %d: %s not supported for %s in native subset", st.Line, op, t)
+	}
+	if t == ntString {
+		rhs, err := g.emitExpr(st.Expr, ntString)
+		if err != nil {
+			return err
+		}
+		_ = et
+		g.emit("%s += %s\n", st.Name, rhs)
+		return nil
+	}
+	var want ntype
+	if op == "/=" {
+		want = ntFloat
+		if t != ntFloat {
+			return fmt.Errorf("line %d: /= always yields float — %q must be float in native subset", st.Line, st.Name)
+		}
+		rhs, err := g.emitExpr(st.Expr, ntFloat)
+		if err != nil {
+			return err
+		}
+		g.emit("%s = ksDiv(%s, %s)\n", st.Name, st.Name, rhs)
+		return nil
+	}
+	want = t
+	if !assignable(want, et) {
+		return fmt.Errorf("line %d: %s is not %s", st.Line, et, want)
+	}
+	rhs, err := g.emitExpr(st.Expr, want)
+	if err != nil {
+		return err
+	}
+	gop := map[string]string{"+=": "+=", "-=": "-=", "*=": "*=", "%=": "%="}[op]
+	if op == "%=" {
+		if t != ntInt {
+			return fmt.Errorf("line %d: %%= needs ints", st.Line)
+		}
+		g.emit("%s = ksMod(%s, %s)\n", st.Name, st.Name, rhs)
+		return nil
+	}
+	g.emit("%s %s %s\n", st.Name, gop, rhs)
+	return nil
 }
