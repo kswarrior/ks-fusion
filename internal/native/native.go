@@ -998,6 +998,12 @@ func (g *gen) closureSig(name string, params []string, ptypes []string, retAnn s
 
 // emitNestedFunc emits `name := func(params) [ret] { body }`.
 func (g *gen) emitNestedFunc(st *frontend.Stmt) error {
+	if _, dup := g.closures[len(g.closures)-1][st.Name]; dup {
+		return fmt.Errorf("line %d: %q already defined in this block", st.Line, st.Name)
+	}
+	if _, dup := g.vars[len(g.vars)-1][st.Name]; dup {
+		return fmt.Errorf("line %d: %q already defined in this block", st.Line, st.Name)
+	}
 	return g.closureSig(st.Name, st.Names, st.ParamTypes, st.ReturnType, st.Body, st.Line, func(sig *funcSig) error {
 		g.pushScope()
 		for i, p := range st.Names {
@@ -1072,6 +1078,9 @@ func (g *gen) emitLet(st *frontend.Stmt) error {
 func (g *gen) emitLetFunc(st *frontend.Stmt) error {
 	e := st.Expr
 	if _, exists := g.vars[len(g.vars)-1][st.Name]; exists {
+		return fmt.Errorf("line %d: %q already defined in this block", st.Line, st.Name)
+	}
+	if _, exists := g.closures[len(g.closures)-1][st.Name]; exists {
 		return fmt.Errorf("line %d: %q already defined in this block", st.Line, st.Name)
 	}
 	return g.closureSig(st.Name, e.FuncParams, e.FuncParamTypes, e.FuncReturnType, e.FuncBody, st.Line, func(sig *funcSig) error {
@@ -1185,4 +1194,386 @@ func (g *gen) emitAssign(st *frontend.Stmt, implicit bool) error {
 	}
 	g.emit("%s %s %s\n", st.Name, gop, rhs)
 	return nil
+}
+
+// printConv renders a typed Go value as its .ks Display string.
+func printConv(t ntype, src string) string {
+	switch t {
+	case ntInt:
+		return "strconv.FormatInt(" + src + ", 10)"
+	case ntFloat:
+		return "strconv.FormatFloat(" + src + ", 'f', -1, 64)"
+	case ntBool:
+		return "strconv.FormatBool(" + src + ")"
+	default:
+		return src
+	}
+}
+
+// emitExpr emits Go code for e, converting to want when int→float.
+func (g *gen) emitExpr(e *frontend.Expr, want ntype) (string, error) {
+	got, err := g.typeOf(e)
+	if err != nil {
+		return "", err
+	}
+	src, err := g.emitExprRaw(e)
+	if err != nil {
+		return "", err
+	}
+	if got == want {
+		return src, nil
+	}
+	if want == ntFloat && got == ntInt {
+		return "float64(" + src + ")", nil
+	}
+	return "", fmt.Errorf("%s is not %s in native subset", got, want)
+}
+
+func (g *gen) emitExprRaw(e *frontend.Expr) (string, error) {
+	switch e.Kind {
+	case frontend.ExprInt:
+		return strconv.FormatInt(int64(e.IntVal), 10), nil
+	case frontend.ExprFloat:
+		return strconv.FormatFloat(e.FloatVal, 'f', -1, 64), nil
+	case frontend.ExprString:
+		return strconv.Quote(e.StrVal), nil
+	case frontend.ExprBool:
+		if e.BoolVal {
+			return "true", nil
+		}
+		return "false", nil
+	case frontend.ExprVar:
+		return e.Name, nil
+	case frontend.ExprAdd, frontend.ExprSub, frontend.ExprMul:
+		return g.emitArith(e)
+	case frontend.ExprDiv:
+		l, err := g.emitExpr(e.Left, ntFloat)
+		if err != nil {
+			return "", err
+		}
+		r, err := g.emitExpr(e.Right, ntFloat)
+		if err != nil {
+			return "", err
+		}
+		return "ksDiv(" + l + ", " + r + ")", nil
+	case frontend.ExprMod:
+		l, err := g.emitExpr(e.Left, ntInt)
+		if err != nil {
+			return "", err
+		}
+		r, err := g.emitExpr(e.Right, ntInt)
+		if err != nil {
+			return "", err
+		}
+		return "ksMod(" + l + ", " + r + ")", nil
+	case frontend.ExprPow:
+		lt, _ := g.typeOf(e.Left)
+		rt, _ := g.typeOf(e.Right)
+		if lt == ntFloat || rt == ntFloat {
+			g.useMath = true
+			l, err := g.emitExpr(e.Left, ntFloat)
+			if err != nil {
+				return "", err
+			}
+			r, err := g.emitExpr(e.Right, ntFloat)
+			if err != nil {
+				return "", err
+			}
+			return "math.Pow(" + l + ", " + r + ")", nil
+		}
+		l, err := g.emitExpr(e.Left, ntInt)
+		if err != nil {
+			return "", err
+		}
+		// typeOf guarantees a non-negative int literal exponent here.
+		return "ksPowI(" + l + ", " + strconv.FormatInt(int64(e.Right.IntVal), 10) + ")", nil
+	case frontend.ExprNeg:
+		t, _ := g.typeOf(e.Left)
+		s, err := g.emitExpr(e.Left, t)
+		if err != nil {
+			return "", err
+		}
+		return "-(" + s + ")", nil
+	case frontend.ExprNot:
+		s, err := g.emitExpr(e.Left, ntBool)
+		if err != nil {
+			return "", err
+		}
+		return "!(" + s + ")", nil
+	case frontend.ExprAnd, frontend.ExprOr:
+		op := "&&"
+		if e.Kind == frontend.ExprOr {
+			op = "||"
+		}
+		l, err := g.emitExpr(e.Left, ntBool)
+		if err != nil {
+			return "", err
+		}
+		r, err := g.emitExpr(e.Right, ntBool)
+		if err != nil {
+			return "", err
+		}
+		return "(" + l + " " + op + " " + r + ")", nil
+	case frontend.ExprEq, frontend.ExprNe:
+		op := "=="
+		if e.Kind == frontend.ExprNe {
+			op = "!="
+		}
+		lt, _ := g.typeOf(e.Left)
+		rt, _ := g.typeOf(e.Right)
+		want := lt
+		if rt == ntFloat {
+			want = ntFloat
+		}
+		l, err := g.emitExpr(e.Left, want)
+		if err != nil {
+			return "", err
+		}
+		r, err := g.emitExpr(e.Right, want)
+		if err != nil {
+			return "", err
+		}
+		return "(" + l + " " + op + " " + r + ")", nil
+	case frontend.ExprLt, frontend.ExprLe, frontend.ExprGt, frontend.ExprGe:
+		op := map[frontend.ExprKind]string{
+			frontend.ExprLt: "<", frontend.ExprLe: "<=",
+			frontend.ExprGt: ">", frontend.ExprGe: ">=",
+		}[e.Kind]
+		lt, _ := g.typeOf(e.Left)
+		rt, _ := g.typeOf(e.Right)
+		want := lt
+		if rt == ntFloat {
+			want = ntFloat
+		}
+		l, err := g.emitExpr(e.Left, want)
+		if err != nil {
+			return "", err
+		}
+		r, err := g.emitExpr(e.Right, want)
+		if err != nil {
+			return "", err
+		}
+		return "(" + l + " " + op + " " + r + ")", nil
+	case frontend.ExprCall:
+		return g.emitCall(e)
+	}
+	return "", fmt.Errorf("not in the native-0.1 subset — runs in interpreter")
+}
+
+func (g *gen) emitArith(e *frontend.Expr) (string, error) {
+	lt, _ := g.typeOf(e.Left)
+	rt, _ := g.typeOf(e.Right)
+	want := lt
+	if rt == ntFloat {
+		want = ntFloat
+	}
+	op := map[frontend.ExprKind]string{
+		frontend.ExprAdd: "+", frontend.ExprSub: "-", frontend.ExprMul: "*",
+	}[e.Kind]
+	l, err := g.emitExpr(e.Left, want)
+	if err != nil {
+		return "", err
+	}
+	r, err := g.emitExpr(e.Right, want)
+	if err != nil {
+		return "", err
+	}
+	if want == ntString {
+		return "(" + l + " + " + r + ")", nil
+	}
+	return "(" + l + " " + op + " " + r + ")", nil
+}
+
+func (g *gen) emitCall(e *frontend.Expr) (string, error) {
+	name := e.Callee.(*frontend.Expr).Name
+	if name == "len" {
+		a, err := g.emitExpr(e.Args[0], ntString)
+		if err != nil {
+			return "", err
+		}
+		g.useUTF8 = true
+		return "int64(utf8.RuneCountInString(" + a + "))", nil
+	}
+	sig, ok := g.funcs[name]
+	if !ok {
+		var found bool
+		sig, found = g.lookupClosure(name)
+		if !found {
+			return "", fmt.Errorf("unknown func %q", name)
+		}
+	}
+	var args []string
+	for i, a := range e.Args {
+		s, err := g.emitExpr(a, sig.params[i])
+		if err != nil {
+			return "", err
+		}
+		args = append(args, s)
+	}
+	call := name + "(" + strings.Join(args, ", ") + ")"
+	if sig.ret == ntVoid {
+		// void call in value position is rejected by callers via typeOf;
+		// StmtExpr handles it through emitExpr with want=void.
+		return call, nil
+	}
+	return call, nil
+}
+
+// emitForIn handles `for v in range(...)` (ints only).
+func (g *gen) emitForIn(st *frontend.Stmt) error {
+	if len(st.Names) != 1 {
+		return fmt.Errorf("line %d: only single-var for-in is native-0.1 (no maps/arrays yet)", st.Line)
+	}
+	call, ok := st.Expr.(*frontend.Expr)
+	if !ok || call.Kind != frontend.ExprCall {
+		return fmt.Errorf("line %d: for-in needs range(n) in native-0.1 — runs in interpreter", st.Line)
+	}
+	callee, ok := call.Callee.(*frontend.Expr)
+	if !ok || callee.Kind != frontend.ExprVar || callee.Name != "range" {
+		return fmt.Errorf("line %d: for-in needs range(n) in native-0.1 — runs in interpreter", st.Line)
+	}
+	if len(call.Args) < 1 || len(call.Args) > 3 {
+		return fmt.Errorf("line %d: range wants 1-3 int args", st.Line)
+	}
+	for _, a := range call.Args {
+		t, err := g.typeOf(a)
+		if err != nil {
+			return err
+		}
+		if t != ntInt {
+			return fmt.Errorf("line %d: range wants ints in native subset", st.Line)
+		}
+	}
+	if err := checkName(st.Names[0], "var", st.Line); err != nil {
+		return err
+	}
+	start, end, step := "int64(0)", "", "int64(1)"
+	switch len(call.Args) {
+	case 1:
+		s, err := g.emitExpr(call.Args[0], ntInt)
+		if err != nil {
+			return err
+		}
+		end = s
+	case 2:
+		s, err := g.emitExpr(call.Args[0], ntInt)
+		if err != nil {
+			return err
+		}
+		start = s
+		s, err = g.emitExpr(call.Args[1], ntInt)
+		if err != nil {
+			return err
+		}
+		end = s
+	case 3:
+		s, err := g.emitExpr(call.Args[0], ntInt)
+		if err != nil {
+			return err
+		}
+		start = s
+		s, err = g.emitExpr(call.Args[1], ntInt)
+		if err != nil {
+			return err
+		}
+		end = s
+		s, err = g.emitExpr(call.Args[2], ntInt)
+		if err != nil {
+			return err
+		}
+		step = s
+		if lit, ok := isIntLit(call.Args[2]); ok && lit == 0 {
+			return fmt.Errorf("line %d: range step cannot be 0", st.Line)
+		}
+	}
+	// Evaluate bounds once, like the interpreter's range array.
+	sT, eT, pT := g.tmpName(), g.tmpName(), g.tmpName()
+	g.emit("%s := %s\n", sT, start)
+	g.emit("%s := %s\n", eT, end)
+	g.emit("%s := %s\n", pT, step)
+	g.emit("if %s == 0 {\n", pT)
+	g.emit("panic(\"range step cannot be 0\")\n")
+	g.emit("}\n")
+	v := st.Names[0]
+	g.emit("for %s := %s; (%s > 0 && %s < %s) || (%s < 0 && %s > %s); %s += %s {\n",
+		v, sT, pT, v, eT, pT, v, eT, v, pT)
+	g.pushScope()
+	g.define(v, ntInt)
+	g.loop++
+	err := g.emitBlockBody(st.Body)
+	g.loop--
+	g.popScope()
+	if err != nil {
+		return err
+	}
+	g.emit("}\n")
+	return nil
+}
+
+func isIntLit(e *frontend.Expr) (int64, bool) {
+	if e != nil && e.Kind == frontend.ExprInt {
+		return int64(e.IntVal), true
+	}
+	return 0, false
+}
+
+// emitForC handles C-style loops. With an init statement the loop gets
+// its own scope block: { init; for ; cond; post { body } }.
+func (g *gen) emitForC(st *frontend.Stmt) error {
+	if st.Init == nil {
+		return g.emitForCInner(st)
+	}
+	g.emit("{\n")
+	g.pushScope()
+	if err := g.emitAssign(st.Init, true); err != nil {
+		return err
+	}
+	if err := g.emitForCInner(st); err != nil {
+		return err
+	}
+	g.popScope()
+	g.emit("}\n")
+	return nil
+}
+
+// emitForCInner emits the `for ; cond; post {` header and body.
+// Callers hold the scope where init vars (if any) are defined.
+func (g *gen) emitForCInner(st *frontend.Stmt) error {
+	cond, err := g.boolCond(st.Expr, st.Line)
+	if err != nil {
+		return err
+	}
+	var post string
+	if st.Post != nil {
+		saved := g.sb
+		var tmp strings.Builder
+		g.sb = tmp
+		if err := g.emitAssign(st.Post, false); err != nil {
+			return err
+		}
+		post = strings.TrimSuffix(strings.TrimSpace(g.sb.String()), "\n")
+		g.sb = saved
+	}
+	g.emit("for ; %s; %s {\n", cond, post)
+	g.pushScope()
+	g.loop++
+	err = g.emitBlockBody(st.Body)
+	g.loop--
+	g.popScope()
+	if err != nil {
+		return err
+	}
+	g.emit("}\n")
+	return nil
+}
+
+func (g *gen) boolCond(e *frontend.Expr, line int) (string, error) {
+	t, err := g.typeOf(e)
+	if err != nil {
+		return "", err
+	}
+	if t != ntBool {
+		return "", fmt.Errorf("line %d: loop condition needs bool (no truthiness in native) — runs in interpreter", line)
+	}
+	return g.emitExpr(e, ntBool)
 }
