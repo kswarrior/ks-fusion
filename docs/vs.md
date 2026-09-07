@@ -209,13 +209,14 @@ Details in `More` below. Frontend breakdown:
 
 Same ideas: `go func(){...}()`, `chan(1)`, `send/recv/close`, `select`, `defer` LIFO.
 Difference: Go is compiled + statically typed; `.ks` runs on a tree-walk interpreter
-(full language, literal folding) with an opt-in bytecode subset v0.2 (`fusion compile`:
-slices/`is`/`?.`/`??`/typed/`switch` added; still no `go`/`chan`/`select`/`sleep`,
-no `import`/`try`/`defer` — each rejected with a clear error) + gradual types
+(full language, literal folding) with an opt-in bytecode subset v0.3 (`fusion compile`:
+slices/`is`/`?.`/`??`/typed/`switch` + range-int `for-in` + `sleep` + `try/catch`;
+still no `go`/`chan`/`select`, no `import`/`defer`/`try`-`finally`/`struct`-decls —
+each rejected with a clear error) + gradual types
 (optional `: type` incl. union/generic annotations + struct/enum syntax checked at
 runtime, `is`/`?.`/`??`, `struct`/`enum` declarations) + `fusion build --bin` via `go build`.
 Concurrency matches Go’s *spelling* (`with_timeout`/`parallel`/`with_cancel`, `--race` flag exists) but `--race`
-is `VetTarget` error-gate + `FUSION_RACE=1` env (`cmd/fusion/main.go:793-809`), not data-race instrumentation;
+is `VetTarget` error-gate + `FUSION_RACE=1` env (`cmd/fusion/main.go:804-816`), not data-race instrumentation;
 for a real race run the message itself tells you to use `go run -race ./cmd/fusion run`.
 
 ```go
@@ -305,7 +306,7 @@ Pick `.ks` for config-driven logic on top of those engines.
 
 Node gives V8, `npm` (2M+ packages), `fetch/http`, event loop, TypeScript.
 `.ks` gives simpler blocking `recv`/`select` + 177 sync builtins in the
-interpreter (VM v0.2 subset + 7 user builtins `assert/len/range/str/int/float/type`
+interpreter (VM v0.3 subset + 8 user builtins `assert/len/range/str/int/float/type/sleep`
 plus 5 hidden `__iter_*` helpers), plus `http_get/post/fetch_json/http_serve`,
 `regex_*`, `exec`/`exec_pipes`/`spawn`, extended sqlite dialect + postgres-compat.
 `http_serve` is minimal (handler `func(path)->string`, always `application/json`,
@@ -563,31 +564,52 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
 > Re-verify with `go test ./...`, `go test -bench`, `bash ci.sh`, and “How to verify”.
 > Scores change only with implementation; progress inside a score is documented, not scored.
 
-### E1. Perf holds 7: VM v0.2 measured, partial (a +1 needs full coverage + consistent wins)
+### E1. Perf holds 7: VM v0.3 measured on both benches, partial (8 needs full coverage; 10 needs native codegen)
 
-- Ops: `internal/compiler/compiler.go:76-84` (`OpSlice/OpIs/OpCoalesce/OpSafeIndex/`
-  `OpCheckType/OpSetupTry/OpPopTry/OpDefer/OpJumpIfNotNil`), `String()` at
-  `compiler.go:157-175`.
-- Compile: slices (`compiler.go:1168-1193`), `is` (`compiler.go:1155-1162` via
-  `isTypeName` at `compiler.go:1034`), `??` short-circuit (`compiler.go:1164-1172`
-  via `OpJumpIfNotNil`), safe `?.` (`compiler.go:1148-1150` → `OpSafeIndex`),
-  typed lets (`compiler.go:588` `OpCheckType`), typed func params + returns
-  (`compiler.go:999-1005`, return check at `compiler.go:439`), `switch` desugar
-  (`compiler.go:495` `compileSwitch`: hidden target + Eq-chain, break-to-end).
-- VM: `vm.go:1019` `safeIndexVal`, `vm.go:1052` `sliceVal`, `vm.go:1134` `vmIsType`
-  (base/union only), `vm.go:1110` `isKnownVMType` (nominals skip — interpreter
-  validates), `vm.go:887-900` O(log n) int `**` (was O(n) loop).
-- Rejects left (clear errors, run in interpreter): `go`/`sleep`/`import`
-  (`compiler.go:473-477`), `try`/`select`/`defer` (`compiler.go:479-485`),
-  `struct`/`enum` decls (`compiler.go:486-487`), closure capture, `OpSetupTry`/
-  `OpPopTry`/`OpDefer` VM stubs.
-- Tests: `compiler_test.go:145`/`152`/`160`/`167`
-  (`V02Slices`/`V02IsCoalesceSafe`/`V02Typed` incl. nominal-skip, `V02Switch`),
-  `compiler_test.go:98` (switch/slices/is/??/typed must run).
-- Bench: `internal/backend/bench_test.go` + `internal/compiler/bench_test.go`,
-  artifact `docs/bench.md` (fib ≈2x VM win; loop ≈0.7x VM regression).
-- Verdict: real progress inside 7. A +1 (tying Go 8) needs full-language coverage
-  with consistent wins — not claimed.
+- Ops: `internal/compiler/compiler.go:78-86` (`OpSlice/OpIs/…/OpCheckType/`
+  `OpSetupTry`/`OpPopTry`/`OpJumpIfNotNil`; `OpSleep` stays reserved-never-
+  emitted — sleep compiles to a builtin call).
+- Compile: slices, `is` (via `isTypeName` at `compiler.go:1230`),
+  `??` short-circuit via `OpJumpIfNotNil`, safe `?.` → `OpSafeIndex`,
+  typed lets (`compiler.go:663` `OpCheckType`), typed func params
+  (`compiler.go:1172`), `switch` desugar (`compiler.go:555`
+  `compileSwitch`: hidden target + Eq-chain, break-to-end).
+- v0.3 range-int loop: `compiler.go:988` `isRangeLoop` (name-based detection
+  mirroring `backend.rangeArgs`, so VM and interpreter agree on every input),
+  `compiler.go:1005` `compileForInRange` (hidden counter + end slots, one
+  `Lt` + slot binds per iteration, existing opcodes only — no `.ksb` format
+  change; 3-arg `range(a,b,step)` keeps the generic path).
+- v0.3 `sleep`: statement + call forms compile to the `sleep` builtin
+  (`vm.go:1372` `bSleep`, mirrors `backend.toMillis` incl. errors).
+- v0.3 `try/catch` (no `finally`): `compiler.go:518` `compileTry` (finally
+  form rejected with a clear error) + real `OpSetupTry`/`OpPopTry` in the VM
+  (`vm.go:814/816`, handler stack in `vm.go:323` `tryRecord` with frame/stack
+  unwind; catch binds the raw error string like the interpreter; control flow
+  never caught; `break`/`continue` pop records via lexical tryDepth at
+  `compiler.go:638` `emitTryPops`; `OpReturn` drops frame-local records).
+  `OpDefer` stays a clear stub error.
+- VM: `vm.go:1065` `safeIndexVal`, `vm.go:1098` `sliceVal`, `vm.go:1180`
+  `vmIsType` (base/union only), `vm.go:1156` `isKnownVMType` (nominals skip —
+  interpreter validates), `vm.go:941` O(log n) int `**` by squaring.
+  Parity fix: VM `assert(x, msg)` reports `assert failed: msg` like the
+  interpreter. VM builtins 7 → 8 (`+sleep`; + 5 hidden `__iter_*`).
+- Rejects left (clear errors, run in interpreter): `go`/`import`
+  (`compiler.go:479/496`), `select`/`defer` (`compiler.go:502/504`),
+  `struct`/`enum` decls (`compiler.go:506`), `try/finally` form
+  (`compiler.go:520`), closure capture. Six `runs in interpreter` sites total.
+- Tests: `compiler_test.go:172` (`TestCompileTryCatch`: bind/propagate/nest/
+  return/break/continue/func/finally-reject), `compiler_test.go:199`
+  (`TestCompileSleep`), `compiler_test.go:212` (`TestCompileRangeFastPath`:
+  1-arg/2-arg/2-var/empty/break/nest/shadow/assign-loop-var/3-arg/ non-int
+  errors), plus the pre-existing v0.2 suite.
+- Bench: `internal/backend/bench_test.go` + `internal/compiler/bench_test.go`
+  (`bench_test.go:16/21`), artifact `docs/bench.md` (v0.3: fib ≈1.7–3.4x VM
+  win; loop ≈1.3–1.4x VM win — v0.2 loop regression fixed).
+- Verdict: real, measured progress inside 7 — both VM benches now beat the
+  interpreter on every run. A +1 (tying Go 8) needs full-language coverage
+  (concurrency, `import`/`defer`, nominal checks) with consistent wins —
+  not claimed. A +3 (Rust/C/C++ 10) needs a native backend — explicitly
+  not started (see “Corrections v2.7”).
 
 ### E2. Types holds 8: struct/enum syntax + real exhaustive vet (a +1 needs methods/variadics/VM nominals)
 
