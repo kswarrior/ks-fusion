@@ -763,7 +763,7 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
   per-file rebuilds + remote cache (plus losing the Go-toolchain requirement,
   which is structural) — not claimed.
 
-## Why not Go/Rust-class (v2.6 gaps + what parity needs)
+## Why not Go/Rust-class (v2.7 gaps + what parity needs)
 
 > Score context: `.ks 84/100` vs `Go 82/100` vs `Rust 81/100` (ahead on balance for
 > scripts/services; behind on native depth). The lead comes from Simplicity 9 and
@@ -773,16 +773,22 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
 ### 1. Compiler partial — full language tree-walk + `--bin` embed via `go build`, no LLVM/JIT
 
 * Today: tree-walk interpreter (`internal/backend`, full language, 177 builtins, struct/enum syntax, literal folding) +
-  bytecode subset v0.2 (`internal/compiler`, `.ksb-1` JSON + stack VM):
+  bytecode subset v0.3 (`internal/compiler`, `.ksb-1` JSON + stack VM, same format as v0.2):
   `fusion compile prog.ks [--out prog.ksb] [--dis] [--run]`, `fusion prog.ksb`.
   Compiled: literals/arrays/maps, `let` (+ `: type` base check, nominals skip)/
   `=`/`+=`-family, `+ - * / % **` (O(log n) int `**`)/`== != < <= > >=`/`in`/`is`/`??`,
   `?.` safe index, `a[l:r]` slices, calls (user funcs + typed params/return check +
-  `assert/len/range/str/int/float/type`), `a[i]`/`m.key`, `print/if/while/for-in/for-c/func/return/break/continue/switch`.
-  Explicitly rejected (run in interpreter): `go`/`chan`/`select`, `sleep`, `import`,
-  `try/catch`, `defer`, `struct`/`enum` decls, closures capturing outer locals
-  (`compiler.go:473-487`; VM `OpSetupTry`/`OpPopTry`/`OpDefer` are reserved stubs).
-  VM limits: 7 user builtins (+ 5 hidden `__iter_*` = 12 map entries),
+  `assert/len/range/str/int/float/type/sleep`), `a[i]`/`m.key`, `print/if/while/for-in/for-c/func/return/break/continue/switch`/`sleep`/`try`-`catch`.
+  `for [k,] v in range(e) | range(a, b)` compiles to a call-free integer loop
+  (no array alloc, no `__iter_*` calls; 3-arg + non-range iterables keep the
+  generic path with identical values). `try/catch` without `finally` uses real
+  `OpSetupTry`/`OpPopTry` (frame/stack unwind, catch binds the error string,
+  control flow never caught).
+  Explicitly rejected (run in interpreter): `go`/`chan`/`select`, `import`,
+  `defer`, `try`+`finally`, `struct`/`enum` decls, closures capturing outer locals
+  (`compiler.go:479-520`, six `runs in interpreter` sites; `OpDefer` stays a
+  reserved stub).
+  VM limits: 8 user builtins (+ 5 hidden `__iter_*` = 13 map entries),
   `maxFrames 1024` / `maxSteps 20M`, `line N:` errors. `.kslib` stays source JSON
   (`kslib-1`), but `fusion build --bin` embeds `.ks`+`.kslib` (+ `fusion.lock`) into a
   temp-module `main.go` and runs `go build -trimpath` (requires a Go toolchain;
@@ -791,15 +797,18 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
   ~31% smaller). Cache is a whole-app sha256 over `fusion.toml` +
   `fusion.lock` + every `.ks` **plus every file under `vendor/`** (v2.6 fix:
   vendor swaps now bust the cache) — hash-skip, not incremental; no TTL/size/remote.
-  `docs/bench.md` measures VM fib ≈2x interp but VM loop ≈0.7x (desugar cost).
-* Go level still needs: full-language VM coverage (concurrency, `import`/`try`/`defer`,
+  `docs/bench.md` measures VM fib ≈1.7–3.4x interp and VM loop ≈1.3–1.4x interp
+  (v0.3 fixed the v0.2 loop regression; numbers vary ±30% by machine).
+* Go level still needs: full-language VM coverage (concurrency, `import`/`defer`,
   nominal checks), consistent wins, then IR-level checks (have source `vet`/`check`; have hash-skip cache).
-* Rust level still needs: LLVM/opt backend or full bytecode VM + AOT, LTO (have `--strip` for symbols;
-  still no profile-guided/LTO pipeline).
+* Rust level still needs: a native backend (LLVM/Cranelift opt backend or full
+  bytecode VM + AOT with LTO and PGO — have embed `--bin` + `--strip` for symbols
+  only; native codegen explicitly not started).
   Minimum viable: full-subset VM first, then native AOT (have embed `--bin` now).
-* Planned: `docs/futures.md` P1 runtime; `--bin`/`--target`/`--strip`/host-`--cpuprofile`/`.ks`-line-`profile`/vendor-aware-cache/`-trimpath` done, VM full coverage left.
-* Score impact: Perf 7 holds (above Python for scripts on breadth; VM v0.2 is progress
-  inside 7); Perf 7→8 left for full VM with consistent measured wins.
+* Planned: `docs/futures.md` P1 runtime; `--bin`/`--target`/`--strip`/host-`--cpuprofile`/`.ks`-line-`profile`/vendor-aware-cache/`-trimpath`/VM-v0.3 done, VM full coverage + native backend left.
+* Score impact: Perf 7 holds (above Python for scripts on breadth; VM v0.3 wins on
+  both benches but coverage is partial); Perf 7→8 left for full VM with consistent
+  measured wins; Perf 10 (Rust/C/C++) left for a native backend.
 
 ### 2. Gradual types (annotations + struct/enum syntax + vet; methods/variadics left)
 
@@ -834,7 +843,7 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
   `tcp_shutdown(port)` for repeat-safe listeners +
   `fusion run/launch --race` (error-level vet gate + `FUSION_RACE=1` env + “use `go run -race`” hint;
   `launch --race` is env+print only). `go defer` is explicitly rejected.
-  Compiler v0.2 rejects `go/chan/select/sleep` with a clear error (run those files in the interpreter).
+  Compiler v0.3 rejects `go/chan/select` with a clear error (run those files in the interpreter).
 * Go level done for script spelling (9/10 held). Left: structured cancel/context polish,
   buffered-chan spec docs, deterministic test scheduler, real race instrumentation.
 * Rust level still needs: `send/sync`-like docs, cancel/context, deterministic test scheduler for `go` blocks.
@@ -902,7 +911,7 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
 
 | # | Area | Go bar | Rust bar | .ks v2.6 (honest) | Needed to close | Closes in |
 |---|---|---|---|---|---|---|
-| 1 | Compiler | `go build` static bin | `rustc` LLVM + LTO | tree-walk (full, struct/enum syntax, folding, 177 builtins) + VM v0.2 (`.ksb-1`, no `go`/`chan`/`select`/`sleep`/`import`/`try`/`defer`/`struct`-decl/closure-capture; nominals skip) + `--bin` embed via `go build -trimpath` (+`--strip`) + `docs/bench.md` (fib ≈2x, loop ≈0.7x) | full VM (consistent wins) → native AOT + real benchmarks | `futures.md` P1 runtime |
+| 1 | Compiler | `go build` static bin | `rustc` LLVM + LTO | tree-walk (full, struct/enum syntax, folding, 177 builtins) + VM v0.3 (`.ksb-1` same format, +range-int loop/sleep/try-catch; no `go`/`chan`/`select`/`import`/`defer`/`try`-`finally`/`struct`-decl/closure-capture; nominals skip) + `--bin` embed via `go build -trimpath` (+`--strip`) + `docs/bench.md` (fib ≈1.7–3.4x, loop ≈1.3–1.4x) | full VM (consistent wins) → native AOT + real benchmarks | `futures.md` P1 runtime |
 | 2 | Targets | `GOOS/GOARCH` | tiers + WASM | `--target` GOOS/GOARCH passthrough + vendor-aware hash-skip cache + host `--cpuprofile` + `.ks`-line `profile` + `-trimpath` repro (needs Go toolchain) | WASM run polish, remote/incremental cache | `futures.md` P1 runtime |
 | 3 | Types | structs/interfaces/generics | traits/enums/`Result` | gradual `: type` incl. union/generic annotations + struct/enum syntax + `is`/`?.`/`??` + helpers + `vet`/`check` + enum-aware exhaustive vet (no methods/variadics; VM nominals skip) | methods/variadics, full-VM nominals | `futures.md` P1 core |
 | 4 | Errors | multi-return | `Result/Option/?` | `ok/err` values + `error()`+`try/catch` + `assert_eq/ne/contains` + `with_cancel` error paths | exhaustive `Result` checks | `futures.md` P0 done, P1 polish |
@@ -929,25 +938,28 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
 3. 100k RPS / embedded / game loop? → Go / Rust / C++ / C.
 4. Matrices / science / simulations? → Julia (or Python + numpy; `.ks` leads Julia on rubric balance but not on numerics).
 5. Script, bot, rule engine, teaching `go/chan/select`, prototype/service? → `.ks` (interpreter + `--bin`).
-   Pure arithmetic/control-flow/funcs with slices/`is`/`??`/typed/`switch`? → try `fusion compile --run` (VM v0.2; else interpreter).
+   Pure arithmetic/control-flow/funcs with slices/`is`/`??`/typed/`switch`/range-loops/`sleep`/`try`-`catch`? → try `fusion compile --run` (VM v0.3; else interpreter).
 6. Need `http/DB/net` today? → yes for basics: `http_*`/`fetch_json` (GET-only JSON helper), KV-file `db_*`,
    JSON-file extended-dialect SQL (UPDATE/JOIN/ORDER/GROUP/LIMIT, WHERE with AND/OR + LIKE/NOT LIKE) + postgres-compat names,
    `exec_pipes`/`spawn` (signals TERM/KILL/INT/HUP/QUIT), `regex/crypto`, WS text frames, minimal `tcp/tls`, `use_state`, cancel — breadth done,
    native depth left; need transactions/indexes/prepared/native server? → wait.
 
-## Honest limits of `.ks` v2.6 (do not hide)
+## Honest limits of `.ks` v2.7 (do not hide)
 
 * Full language is tree-walk + struct/enum syntax + literal folding, no JIT/LLVM
-  codegen; `--bin`/`--target`/`--strip`/cache/repro ride on `go build` (needs Go toolchain;
+  codegen — a Go-hosted VM tops out at small-integer multiples of the
+  interpreter, never at LLVM-native Rust/C/C++ speed on compute (see §1).
+  `--bin`/`--target`/`--strip`/cache/repro ride on `go build` (needs Go toolchain;
   cache is whole-app hash-skip over `.ks` + `fusion.toml`/`fusion.lock` + `vendor/`
   contents — vendor-aware since v2.6 — no TTL/size/remote, no incremental rebuild).
-  Compiler v0.2
+  Compiler v0.3
   narrows but does not close this: `.ksb-1` is portable JSON run by `fusion`
   (not a static binary — that is `--bin`), partial subset (no `go`/`chan`/`select`/
-  `sleep`/`import`/`try`/`defer`/`struct`-decls/closure-capture; nominals skip),
-  7 user (+ 5 hidden) builtins, `maxFrames 1024` / `maxSteps 20M`.
-  Int `**` is O(log n) in both engines. `docs/bench.md` shows VM fib ≈2x interp
-  but VM loop ≈0.7x — no uniform speedup claim.
+  `import`/`defer`/`try`-`finally`/`struct`-decls/closure-capture; nominals skip),
+  8 user (+ 5 hidden) builtins, `maxFrames 1024` / `maxSteps 20M`.
+  Int `**` is O(log n) in both engines. `docs/bench.md` shows VM fib ≈1.7–3.4x
+  and VM loop ≈1.3–1.4x interp — consistent wins on the two VM benches, still
+  far from native.
 * Gradual types only: struct/enum *syntax* + enum-aware vet done; variadics/named
   params and methods/interfaces missing; `==` uses deep equality. VM checks base
   types and skips nominals (interpreter validates; `vm.go:1110`). `is`/`in`/unary
