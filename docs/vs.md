@@ -518,33 +518,34 @@ Pick `.ks` for sidecar scripts/services (data munging, checks, bots, `--bin` wor
 
 ## Totals & ranking (out of 100)
 
-| Rank | Stack | Total /100 | Verdict vs .ks (83) |
+| Rank | Stack | Total /100 | Verdict vs .ks (84) |
 |---:|---|---:|---|
-| 1 | **ks-fusion v2.5 source (177 builtins = 96+52+11+12+6; struct/enum + exhaustive vet; VM v0.2 + bench; WS-text + extended SQL/postgres-compat + pipes; real audit; LSP + debug + VS Code ext; diff + bg-ISR; release v2.5 + ci.sh)** | **83** | **baseline — leads on simplicity (9/10) + script breadth; behind on native depth (see “What 83 means” + “Honest limits”).** |
-| 2 | Go | 82 | -1, prod servers / single binary depth |
-| 3 | Rust | 81 | -2, systems / safety depth |
-| 4 | Next.js | 79 | -4, browser UI depth (different category) |
-| 4 | TypeScript | 79 | -4, typed UI/logic depth |
-| 6 | Java/Kotlin/Spring | 78 | -5, enterprise depth |
-| 7 | Node.js | 77 | -6, APIs / npm depth |
-| 7 | Vite | 77 | -6, frontend build/HMR depth (different category) |
-| 7 | Deno/Bun | 77 | -6, typed runtime |
-| 10 | React | 76 | -7, UI components (different category) |
-| 11 | Python | 74 | -9, data/AI/ecosystem depth |
-| 12 | C++ | 73 | -10, engines/trading |
-| 13 | Julia | 69 | -14, numerics/science depth |
-| 14 | Ruby/Rails | 68 | -15, convention CRUD |
-| 15 | PHP Laravel | 67 | -16, monolith CRUD |
-| 16 | C | 62 | -21, kernels/embedded |
-| 17 | Lua | 58 | -25, embedding |
-| 18 | Bash | 45 | -38, tiny pipes |
+| 1 | **ks-fusion v2.6 source (177 builtins = 96+52+11+12+6; struct/enum + exhaustive vet; VM v0.2 + bench; WS-text + extended SQL (OR/LIKE)/postgres-compat + pipes; real audit; LSP + completion + debug + profile + VS Code ext v0.3.0; diff + bg-ISR; vendor-aware cache + --strip; release v2.6 + ci.sh + ci.yml + --bin E2E)** | **84** | **baseline — leads on simplicity (9/10) + script breadth; behind on native depth (see “What 84 means” + “Honest limits”).** |
+| 2 | Go | 82 | -2, prod servers / single binary depth |
+| 3 | Rust | 81 | -3, systems / safety depth |
+| 4 | Next.js | 79 | -5, browser UI depth (different category) |
+| 4 | TypeScript | 79 | -5, typed UI/logic depth |
+| 6 | Java/Kotlin/Spring | 78 | -6, enterprise depth |
+| 7 | Node.js | 77 | -7, APIs / npm depth |
+| 7 | Vite | 77 | -7, frontend build/HMR depth (different category) |
+| 7 | Deno/Bun | 77 | -7, typed runtime |
+| 10 | React | 76 | -8, UI components (different category) |
+| 11 | Python | 74 | -10, data/AI/ecosystem depth |
+| 12 | C++ | 73 | -11, engines/trading |
+| 13 | Julia | 69 | -15, numerics/science depth |
+| 14 | Ruby/Rails | 68 | -16, convention CRUD |
+| 15 | PHP Laravel | 67 | -17, monolith CRUD |
+| 16 | C | 62 | -22, kernels/embedded |
+| 17 | Lua | 58 | -26, embedding |
+| 18 | Bash | 45 | -39, tiny pipes |
 
-Grand total (sum of all 18 totals) = `1314 / 1800`, average `73.0/100`.
-`.ks` total `83/100` = v2.4 honest 80 +3 for fully-met bars (real audit, DOM-diff
-without reload + background ISR, release + timeout + repeat-safe + CI).
-VM v0.2 + exhaustive-switch + extended SQL/WS/pipes + LSP/debug/ext are real,
-tested depth inside their current scores (see “v2.5 evidence”); they do not move
-scores alone (see “Corrections” for why the interim 87 overshot).
+Grand total (sum of all 18 totals) = `1315 / 1800`, average `73.1/100`.
+`.ks` total `84/100` = v2.5 honest 83 +1 for a fully-met bar (Maturity 8→9:
+`--bin` E2E + in-repo CI + hygiene + 133 tests; evidence in “v2.6 evidence”).
+SQL OR/LIKE + LSP completion + `.ks`-line profiler + vendor-aware cache +
+`--strip` are real, tested depth inside their current scores (see “v2.6
+evidence”); they do not move scores alone — each documented +1 bar still needs
+native DB / interactive DAP + time-profiling / incremental+remote cache.
 
 ## v2.5 evidence (file:line for every scored claim)
 
