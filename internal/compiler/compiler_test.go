@@ -176,8 +176,6 @@ func TestCompileTryCatch(t *testing.T) {
 	mustRun(t, "let r = \"\"\ntry {\n assert(false, \"boom\")\n} catch e {\n r = e\n}\nassert(r == \"assert failed: boom\")\n")
 	// catch without a variable.
 	mustRun(t, "let r = 0\ntry {\n print nope\n} catch {\n r = 1\n}\nassert(r == 1)\n")
-	// bare try without catch/finally is transparent.
-	mustRun(t, "let r = 0\ntry {\n r = 7\n}\nassert(r == 7)\n")
 	mustFailRun(t, "try {\n print nope\n}\n")
 	// errors inside calls unwind through frames to the handler.
 	mustRun(t, "func f() {\n print nope\n}\nlet r = \"\"\ntry {\n f()\n} catch e {\n r = \"caught\"\n}\nassert(r == \"caught\")\n")

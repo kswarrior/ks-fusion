@@ -1242,7 +1242,7 @@ func bAssert(args []Val) (Val, error) {
 	}
 	if !isTruthy(args[0]) {
 		if len(args) == 2 {
-			return Nil(), fmt.Errorf("%s", args[1].display())
+			return Nil(), fmt.Errorf("assert failed: %s", args[1].display())
 		}
 		return Nil(), fmt.Errorf("assert failed")
 	}
