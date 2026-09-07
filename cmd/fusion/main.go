@@ -633,8 +633,19 @@ func cmdBuildSecure(dir string, release, secure bool, password, out string) erro
 	}
 	// v2.3 build cache: skip redundant work when hash matches
 	// (secure builds always rebuild so --secure never returns a stale plain hit).
+	// v2.7: lib builds are profile-aware — a debug build never satisfies
+	// --release and vice versa (outputs go to different dirs).
+	profile := "debug"
+	if release {
+		profile = "release"
+	}
 	if !secure {
-		if hit, _, _ := tools.CheckCache(cfg.Dir); hit {
+		if cfg.IsLib() {
+			if hit, _, _ := tools.CheckCacheProfile(cfg.Dir, profile); hit {
+				fmt.Printf("build cached: %s (%s, no changes)\n", cfg.Dir, profile)
+				return nil
+			}
+		} else if hit, _, _ := tools.CheckCache(cfg.Dir); hit {
 			fmt.Printf("build cached: %s (no changes)\n", cfg.Dir)
 			return nil
 		}
@@ -663,13 +674,9 @@ func cmdBuildSecure(dir string, release, secure bool, password, out string) erro
 		if err != nil {
 			return err
 		}
-		profile := "debug"
-		if release {
-			profile = "release"
-		}
 		fmt.Printf("built %s v%s (%s): %s\n", cfg.LibName, cfg.Version, profile, artifact)
 		fmt.Printf("use it with: import %q\n", cfg.LibName)
-		_ = tools.WriteCache(cfg.Dir)
+		_ = tools.WriteCacheProfile(cfg.Dir, profile)
 		return nil
 	}
 	if secure {

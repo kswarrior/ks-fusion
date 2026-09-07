@@ -88,7 +88,15 @@ func hashDir(appDir string) (string, error) {
 }
 
 // CheckCache returns true if cache hit (hash matches).
+// It ignores build profile (use CheckCacheProfile for lib builds).
 func CheckCache(appDir string) (bool, string, error) {
+	return CheckCacheProfile(appDir, "")
+}
+
+// CheckCacheProfile returns true when the stored hash matches AND the stored
+// profile matches ("" matches only ""). A debug build never satisfies a
+// release check and vice versa.
+func CheckCacheProfile(appDir, profile string) (bool, string, error) {
 	want, err := hashDir(appDir)
 	if err != nil {
 		return false, "", err
@@ -101,11 +109,19 @@ func CheckCache(appDir string) (bool, string, error) {
 	if err := json.Unmarshal(data, &c); err != nil {
 		return false, want, nil
 	}
+	if c.Profile != profile {
+		return false, want, nil
+	}
 	return c.Hash == want, want, nil
 }
 
 // WriteCache stores current hash.
 func WriteCache(appDir string) error {
+	return WriteCacheProfile(appDir, "")
+}
+
+// WriteCacheProfile stores current hash with a build profile tag.
+func WriteCacheProfile(appDir, profile string) error {
 	h, err := hashDir(appDir)
 	if err != nil {
 		return err
@@ -113,6 +129,6 @@ func WriteCache(appDir string) error {
 	if err := os.MkdirAll(filepath.Join(appDir, "target"), 0o755); err != nil {
 		return err
 	}
-	data, _ := json.Marshal(buildCache{Hash: h, When: time.Now().UTC().Format("2006-01-02T15:04:05Z")})
+	data, _ := json.Marshal(buildCache{Hash: h, When: time.Now().UTC().Format("2006-01-02T15:04:05Z"), Profile: profile})
 	return os.WriteFile(cachePath(appDir), append(data, '\n'), 0o644)
 }

@@ -117,7 +117,7 @@ func cmdBuildJS(args []string) error {
 		a := args[i]
 		switch {
 		case a == "--help" || a == "-h":
-			fmt.Println("usage: fusion build-js [appdir] [--out DIR] [--strict|--no-strict]\n  transpile safe .ks subset to JS per-route (split/shake/minify analogue)\n  STRICT (default): fail on unsupported constructs with file:line (for-c, select, go, ...).\n  --strict=false keeps v2.2 lenient output (// unsupported comments, null).")
+			fmt.Println("usage: fusion build-js [appdir] [--out DIR] [--strict|--no-strict]\n  transpile safe .ks subset to JS per-route (split/shake/minify analogue)\n  STRICT (default): fail on unsupported constructs with file:line (for-c, select, go, ...).\n  --strict=false keeps lenient output (// unsupported comments, null).")
 			return nil
 		case a == "--out" || a == "-o":
 			if i+1 >= len(args) {

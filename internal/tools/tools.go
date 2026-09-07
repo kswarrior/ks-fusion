@@ -1187,7 +1187,7 @@ func CheckTarget(target string) ([]VetIssue, error) {
 // ---------------------------------------------------------------------------
 
 func Repl() error {
-	fmt.Println("ks-fusion v2.2 repl (type :quit to exit, :help for help)")
+	fmt.Println("ks-fusion v2.7 repl (type :quit to exit, :help for help)")
 	in := backend.New()
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 1024*1024), 1024*1024)
@@ -1261,7 +1261,10 @@ func Bench(target string, n int) error {
 		if err != nil {
 			return fmt.Errorf("bench %s: %w", f, err)
 		}
-		dir := filepath.Dir(f)
+		// v2.7: resolve imports from the app root (nearest fusion.toml),
+		// like `fusion test` does — not from the file's own directory —
+		// so nested files importing app-root-relative paths work.
+		dir := appRootFor(f)
 		start := time.Now()
 		var lastErr error
 		for i := 0; i < n; i++ {

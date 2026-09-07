@@ -222,8 +222,13 @@ func Pull(name, spec, outDir string) (string, error) {
 }
 
 // Yank marks version yanked (or removes if --remove).
-func Yank(name, version string, remove bool) error {
+// registryRoot overrides the search roots ("" = all roots: $FUSION_REGISTRY,
+// ./registry, $HOME/.fusion/registry).
+func Yank(name, version string, remove bool, registryRoot string) error {
 	roots := registryRoots()
+	if registryRoot != "" {
+		roots = []string{registryRoot}
+	}
 	for _, root := range roots {
 		entries := loadIndex(root)
 		changed := false
