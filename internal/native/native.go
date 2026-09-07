@@ -116,8 +116,8 @@ type funcSig struct {
 type gen struct {
 	sb       strings.Builder
 	funcs    map[string]*funcSig
-	closures map[string]*funcSig // nested funcs + let-bound closures in scope
-	vars     []map[string]ntype  // scope stack
+	closures []map[string]*funcSig // closure sigs, scoped parallel to vars
+	vars     []map[string]ntype    // scope stack
 	loop     int
 	funcRet  ntype // current function return type (ntVoid outside funcs)
 	inFunc   bool
@@ -140,8 +140,28 @@ func (g *gen) define(name string, t ntype) {
 	g.vars[len(g.vars)-1][name] = t
 }
 
-func (g *gen) pushScope() { g.vars = append(g.vars, map[string]ntype{}) }
-func (g *gen) popScope()  { g.vars = g.vars[:len(g.vars)-1] }
+func (g *gen) pushScope() {
+	g.vars = append(g.vars, map[string]ntype{})
+	g.closures = append(g.closures, map[string]*funcSig{})
+}
+func (g *gen) popScope() {
+	g.vars = g.vars[:len(g.vars)-1]
+	g.closures = g.closures[:len(g.closures)-1]
+}
+
+// lookupClosure finds a closure/func-literal signature, innermost first.
+func (g *gen) lookupClosure(name string) (*funcSig, bool) {
+	for i := len(g.closures) - 1; i >= 0; i-- {
+		if s, ok := g.closures[i][name]; ok {
+			return s, true
+		}
+	}
+	return nil, false
+}
+
+func (g *gen) defineClosure(name string, sig *funcSig) {
+	g.closures[len(g.closures)-1][name] = sig
+}
 
 func (g *gen) tmpName() string {
 	g.tmp++
@@ -169,7 +189,7 @@ func TranspileSource(src, path string) (string, error) {
 
 // TranspileProgram emits Go source for an already-parsed program.
 func TranspileProgram(prog *frontend.Program) (string, error) {
-	g := &gen{funcs: map[string]*funcSig{}, closures: map[string]*funcSig{}}
+	g := &gen{funcs: map[string]*funcSig{}}
 	// Phase 1: register top-level func signatures (annotations required).
 	for _, st := range prog.Statements {
 		if st.Kind != frontend.StmtFunc {
@@ -310,7 +330,7 @@ func (g *gen) verifyReturns(st *frontend.Stmt, body *frontend.Stmt, want ntype) 
 	g.vars = []map[string]ntype{{}}
 	sig := g.funcs[st.Name]
 	if sig == nil {
-		sig = g.closures[st.Name]
+		sig, _ = g.lookupClosure(st.Name)
 	}
 	if sig != nil {
 		for i, p := range st.Names {
@@ -476,7 +496,7 @@ func (g *gen) typeOf(e *frontend.Expr) (ntype, error) {
 	case frontend.ExprNil:
 		return ntVoid, fmt.Errorf("nil is not in the native subset — runs in interpreter")
 	case frontend.ExprVar:
-		if _, isFunc := g.closures[e.Name]; isFunc {
+		if _, isFunc := g.lookupClosure(e.Name); isFunc {
 			return ntVoid, fmt.Errorf("%q is a func — call it", e.Name)
 		}
 		t, ok := g.lookup(e.Name)
@@ -640,7 +660,7 @@ func (g *gen) callType(e *frontend.Expr) (ntype, error) {
 	}
 	sig, ok := g.funcs[name.Name]
 	if !ok {
-		sig, ok = g.closures[name.Name]
+		sig, ok = g.lookupClosure(name.Name)
 	}
 	if !ok {
 		return ntVoid, fmt.Errorf("unknown func %q in native subset (no builtins besides len) — runs in interpreter", name.Name)
@@ -916,8 +936,9 @@ func (g *gen) emitStmt(st *frontend.Stmt) error {
 }
 
 // closureSig infers the signature of a nested func statement or func
-// literal. The signature is registered in g.closures for the duration of
-// fn (so recursion and body calls type-check), then restored.
+// literal and registers it in the current scope (so recursion, the body,
+// and later calls in the same scope type-check). Popping the scope drops
+// it again, like a variable.
 func (g *gen) closureSig(name string, params []string, ptypes []string, retAnn string, body *frontend.Stmt, line int, fn func(sig *funcSig) error) error {
 	var ps []ntype
 	for i, p := range params {
@@ -935,10 +956,7 @@ func (g *gen) closureSig(name string, params []string, ptypes []string, retAnn s
 		ps = append(ps, t)
 	}
 	sig := &funcSig{params: ps, ret: ntVoid}
-	outer, had := g.closures[name]
-	outerFn, hadFn := g.funcs[name]
-	g.closures[name] = sig
-	delete(g.funcs, name)
+	g.defineClosure(name, sig)
 	if retAnn != "" {
 		want, err := parseAnn(retAnn, line)
 		if err != nil {
@@ -975,25 +993,7 @@ func (g *gen) closureSig(name string, params []string, ptypes []string, retAnn s
 			sig.ret = ret
 		}
 	}
-	// Restore inference-phase shadowing before the emission walk below.
-	if had {
-		g.closures[name] = outer
-	} else {
-		delete(g.closures, name)
-	}
-	if hadFn {
-		g.funcs[name] = outerFn
-	}
-	// Re-register for the emission walk, then restore.
-	outer2, had2 := g.closures[name]
-	g.closures[name] = sig
-	err := fn(sig)
-	if had2 {
-		g.closures[name] = outer2
-	} else {
-		delete(g.closures, name)
-	}
-	return err
+	return fn(sig)
 }
 
 // emitNestedFunc emits `name := func(params) [ret] { body }`.
