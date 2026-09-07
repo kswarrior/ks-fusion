@@ -1292,7 +1292,7 @@ es.onmessage = function(e){
       dropBlock(el, key+':nav-items');
       if(!links) dropBlock(el, key+':nav');
     }
-    if(typ==='page' && props.rows && props.rows.length){
+    if(props.rows && props.rows.length){
       var ul = blockKid(el, key+':rows');
       if(!ul){ ul = document.createElement('ul'); ul.setAttribute('data-key', key+':rows'); ul.setAttribute('class', 'rows'); placeBlock(el, ul); }
       else ul.setAttribute('class', 'rows');
@@ -1304,7 +1304,7 @@ es.onmessage = function(e){
         ul.appendChild(li);
       }
     } else { dropBlock(el, key+':rows'); }
-    if(typ==='stat'){
+    if(props.label!=null || props.value!=null){
       var sb = blockKid(el, key+':statbody');
       if(!sb){ sb = document.createElement('div'); sb.setAttribute('data-key', key+':statbody'); placeBlock(el, sb); }
       sb.setAttribute('class', 'statbody');
@@ -1312,7 +1312,7 @@ es.onmessage = function(e){
       var lb = document.createElement('span'); lb.setAttribute('class', 'stat-label'); lb.textContent = strVal(props.label); sb.appendChild(lb);
       var vl = document.createElement('span'); vl.setAttribute('class', 'stat-value'); vl.textContent = strVal(props.value); sb.appendChild(vl);
     } else { dropBlock(el, key+':statbody'); }
-    if(typ==='section' && (props.h || props.p)){
+    if(props.h || props.p){
       var sc = blockKid(el, key+':secbody');
       if(!sc){ sc = document.createElement('div'); sc.setAttribute('data-key', key+':secbody'); placeBlock(el, sc); }
       sc.setAttribute('class', 'secbody');
