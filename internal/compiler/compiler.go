@@ -802,7 +802,9 @@ func (c *compiler) compileWhile(st *frontend.Stmt) error {
 // compileForIn desugars to a while loop over hidden iter/idx locals using
 // __iter_len/__iter_get/__iter_key/__iter_val builtins at runtime.
 func (c *compiler) compileForIn(st *frontend.Stmt) error {
-	c.beginScope()
+	if isRangeLoop(st) {
+		return c.compileForInRange(st)
+	}	c.beginScope()
 	iterTmp := c.hiddenName("iter")
 	idxTmp := c.hiddenName("idx")
 	needKeys := len(st.Names) == 2
@@ -899,6 +901,128 @@ var hiddenCounter int
 func (c *compiler) hiddenName(base string) string {
 	hiddenCounter++
 	return fmt.Sprintf("__ks_%s_%d", base, hiddenCounter)
+}
+
+// isRangeLoop detects `for [k,] v in range(e) | range(a, b)` for the integer
+// fast path. Detection is name-based, mirroring backend.rangeArgs (the
+// interpreter fast path), so VM and interpreter agree on every input —
+// including a user-shadowed `range`, which both engines treat as the builtin
+// here. Three-arg `range(a, b, step)` and non-range iterables stay on the
+// generic __iter_* path (same values, just slower).
+func isRangeLoop(st *frontend.Stmt) bool {
+	if len(st.Names) < 1 || len(st.Names) > 2 {
+		return false
+	}
+	e := st.Expr
+	if e == nil || e.Kind != frontend.ExprCall || e.Callee == nil ||
+		e.Callee.Kind != frontend.ExprVar || e.Callee.Name != "range" {
+		return false
+	}
+	return len(e.Args) == 1 || len(e.Args) == 2
+}
+
+// compileForInRange compiles the range-loop subset to a call-free integer
+// loop: hidden counter + end slots, one Lt + slot binds per iteration. No
+// array alloc, no __iter_* calls. Semantics mirror backend.execForIn step-1
+// path: one var gets the value; two vars get (0-based index, value); empty
+// when end <= start; non-int bounds are runtime errors in both engines.
+func (c *compiler) compileForInRange(st *frontend.Stmt) error {
+	two := len(st.Names) == 2
+	c.beginScope()
+	ctrTmp := c.hiddenName("rctr")
+	endTmp := c.hiddenName("rend")
+	// eval bounds once (same single-evaluation as the generic path)
+	if len(st.Expr.Args) == 1 {
+		// start = 0
+		c.emit(OpConst, c.addConst(Const{Kind: CKInt, Int: 0}), st.Line)
+		ctrSlot := c.defineLocal(ctrTmp)
+		_ = ctrSlot
+		if err := c.compileExpr(st.Expr.Args[0]); err != nil {
+			return err
+		}
+		c.emitNamed(OpCheckType, 0, "int", st.Line)
+		endSlot := c.defineLocal(endTmp)
+		_ = endSlot
+	} else {
+		if err := c.compileExpr(st.Expr.Args[0]); err != nil {
+			return err
+		}
+		c.emitNamed(OpCheckType, 0, "int", st.Line)
+		ctrSlot := c.defineLocal(ctrTmp)
+		_ = ctrSlot
+		if err := c.compileExpr(st.Expr.Args[1]); err != nil {
+			return err
+		}
+		c.emitNamed(OpCheckType, 0, "int", st.Line)
+		endSlot := c.defineLocal(endTmp)
+		_ = endSlot
+	}
+	_ = endTmp
+	keyTmp := ""
+	keySlot := -1
+	if two {
+		// key = 0-based index
+		keyTmp = c.hiddenName("rkey")
+		c.emit(OpConst, c.addConst(Const{Kind: CKInt, Int: 0}), st.Line)
+		keySlot = c.defineLocal(keyTmp)
+	}
+	// loop vars need real stack slots: push nil placeholders first
+	for _, n := range st.Names {
+		c.emit(OpConst, c.addConst(Const{Kind: CKNil}), st.Line)
+		c.defineLocal(n)
+	}
+	// re-resolve hidden slots (defineLocal above may have shifted nothing —
+	// slots are append-only, so captured indices stay valid; re-resolve the
+	// counter/end by name for clarity is unnecessary: keep captured slots).
+	ctrSlot, endSlot := c.slotOf(ctrTmp), c.slotOf(endTmp)
+	loopStart := len(c.cur().fn.Chunk.Code)
+	c.loops = append(c.loops, loopCtx{continueAt: -1, savedDepth: c.cur().depth, savedNLocals: len(c.cur().locals)})
+	// cond: ctr < end
+	c.emitGetLocal(ctrSlot, ctrTmp, st.Line)
+	c.emitGetLocal(endSlot, endTmp, st.Line)
+	c.emit(OpLt, 0, st.Line)
+	jFalse := c.emit(OpJumpIfFalse, -1, st.Line)
+	c.emit(OpPop, 0, st.Line)
+	// bind loop vars (value, then index for the two-var form)
+	c.emitGetLocal(ctrSlot, ctrTmp, st.Line)
+	if err := c.storeVar(st.Names[len(st.Names)-1], st.Line); err != nil {
+		return err
+	}
+	if two {
+		c.emitGetLocal(keySlot, keyTmp, st.Line)
+		if err := c.storeVar(st.Names[0], st.Line); err != nil {
+			return err
+		}
+	}
+	if err := c.compileStmt(st.Body); err != nil {
+		return err
+	}
+	// post: ctr += 1 (key += 1); continue jumps here
+	postPos := len(c.cur().fn.Chunk.Code)
+	for _, cp := range c.loops[len(c.loops)-1].continues {
+		c.patch(cp, postPos)
+	}
+	c.loops[len(c.loops)-1].continueAt = postPos
+	c.emitGetLocal(ctrSlot, ctrTmp, st.Line)
+	c.emit(OpConst, c.addConst(Const{Kind: CKInt, Int: 1}), st.Line)
+	c.emit(OpAdd, 0, st.Line)
+	c.emitNamed(OpSetLocal, ctrSlot, ctrTmp, st.Line)
+	if two {
+		c.emitGetLocal(keySlot, keyTmp, st.Line)
+		c.emit(OpConst, c.addConst(Const{Kind: CKInt, Int: 1}), st.Line)
+		c.emit(OpAdd, 0, st.Line)
+		c.emitNamed(OpSetLocal, keySlot, keyTmp, st.Line)
+	}
+	c.emit(OpJump, loopStart, st.Line)
+	c.patch(jFalse, len(c.cur().fn.Chunk.Code))
+	c.emit(OpPop, 0, st.Line)
+	l := c.loops[len(c.loops)-1]
+	for _, b := range l.breaks {
+		c.patch(b, len(c.cur().fn.Chunk.Code))
+	}
+	c.loops = c.loops[:len(c.loops)-1]
+	c.endScope(st.Line)
+	return nil
 }
 
 func (c *compiler) compileForC(st *frontend.Stmt) error {
