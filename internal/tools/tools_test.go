@@ -333,12 +333,15 @@ func TestVetFrontendKey(t *testing.T) {
 func TestBenchNestedImportAppRoot(t *testing.T) {
 	// v2.7: bench must resolve imports from the app root (nearest
 	// fusion.toml), like `fusion test` — not from the file's own dir.
+	// Three levels deep on purpose: with file-dir resolution even the
+	// parent-dir fallback misses (this mirrors tests/hello-app, whose
+	// *_test.ks files failed under `fusion bench`).
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "fusion.toml"), []byte("[package]\nname=\"b\"\nversion=\"0.1.0\"\n"), 0o644)
-	os.MkdirAll(filepath.Join(dir, "shared"), 0o755)
-	os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
-	os.WriteFile(filepath.Join(dir, "shared", "util.ks"), []byte("func bench_helper() {\n return 41\n}\n"), 0o644)
-	os.WriteFile(filepath.Join(dir, "sub", "nested.ks"), []byte("import \"shared/util.ks\"\nassert(bench_helper() == 41)\n"), 0o644)
+	os.MkdirAll(filepath.Join(dir, "frontend", "store"), 0o755)
+	os.MkdirAll(filepath.Join(dir, "frontend", "pages"), 0o755)
+	os.WriteFile(filepath.Join(dir, "frontend", "store", "app.ks"), []byte("func bench_helper() {\n return 41\n}\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "frontend", "pages", "nested.ks"), []byte("import \"frontend/store/app.ks\"\nassert(bench_helper() == 41)\n"), 0o644)
 	if err := Bench(dir, 1); err != nil {
 		t.Fatalf("bench failed: %v", err)
 	}
