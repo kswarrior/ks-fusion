@@ -198,7 +198,7 @@ func TranspileProgram(prog *frontend.Program) (string, error) {
 		}
 		g.funcs[st.Name] = &funcSig{params: params}
 	}
-	// Phase 2: infer return types by walking bodies (no emission).
+	// Phase 2: determine return types (annotations verified, else inferred).
 	for _, st := range prog.Statements {
 		if st.Kind != frontend.StmtFunc {
 			continue
@@ -207,20 +207,7 @@ func TranspileProgram(prog *frontend.Program) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		sig := g.funcs[st.Name]
-		if st.ReturnType != "" {
-			want, err := parseAnn(st.ReturnType, st.Line)
-			if err != nil {
-				return "", err
-			}
-			if ret == ntVoid {
-				// No returns in body: declared type must still hold only
-				// if the body never returns a value (checked at emit).
-			}
-			sig.ret = want
-		} else {
-			sig.ret = ret
-		}
+		g.funcs[st.Name].ret = ret
 	}
 	// Phase 3: emit.
 	var body strings.Builder
@@ -273,13 +260,28 @@ func TranspileProgram(prog *frontend.Program) (string, error) {
 	return out.String(), nil
 }
 
-// inferFuncRet unifies all return-statement types in a func body.
-// No returns at all means void.
+// inferFuncRet determines a top-level func's return type: the declared
+// annotation when present (verified against the body), otherwise unified
+// from the body. Unannotated recursion cannot be inferred and is rejected.
 func (g *gen) inferFuncRet(st *frontend.Stmt) (ntype, error) {
+	sig := g.funcs[st.Name]
+	if st.ReturnType != "" {
+		want, err := parseAnn(st.ReturnType, st.Line)
+		if err != nil {
+			return ntVoid, err
+		}
+		sig.ret = want // registered before walking, so recursion checks
+		if err := g.verifyReturns(st, st.Body, want); err != nil {
+			return ntVoid, err
+		}
+		return want, nil
+	}
+	if callsSelf(st.Body, st.Name) {
+		return ntVoid, fmt.Errorf("line %d: recursive func %q needs a `: type` return annotation in native subset", st.Line, st.Name)
+	}
 	// Seed scope with params so bodies type-check.
 	saved := g.vars
 	g.vars = []map[string]ntype{{}}
-	sig := g.funcs[st.Name]
 	for i, p := range st.Names {
 		g.vars[0][p] = sig.params[i]
 	}
@@ -300,6 +302,91 @@ func (g *gen) inferFuncRet(st *frontend.Stmt) (ntype, error) {
 		}
 	}
 	return ret, nil
+}
+
+// verifyReturns checks every return in body against the declared type.
+func (g *gen) verifyReturns(st *frontend.Stmt, body *frontend.Stmt, want ntype) error {
+	saved := g.vars
+	g.vars = []map[string]ntype{{}}
+	sig := g.funcs[st.Name]
+	if sig == nil {
+		sig = g.closures[st.Name]
+	}
+	if sig != nil {
+		for i, p := range st.Names {
+			if i < len(sig.params) {
+				g.vars[0][p] = sig.params[i]
+			}
+		}
+	}
+	types, err := g.collectReturns(body)
+	g.vars = saved
+	if err != nil {
+		return err
+	}
+	for _, t := range types {
+		if want == ntVoid {
+			if t != ntVoid {
+				return fmt.Errorf("line %d: value return in void func %q", st.Line, st.Name)
+			}
+			continue
+		}
+		if t == ntVoid || !assignable(want, t) {
+			return fmt.Errorf("line %d: return %s in %s func %q", st.Line, t, want, st.Name)
+		}
+	}
+	return nil
+}
+
+// callsSelf reports whether a body calls name (used to reject unannotated
+// recursion, whose return type cannot be inferred in one pass).
+func callsSelf(st *frontend.Stmt, name string) bool {
+	found := false
+	var walkStmt func(s *frontend.Stmt)
+	var walkExpr func(e *frontend.Expr)
+	walkExpr = func(e *frontend.Expr) {
+		if e == nil || found {
+			return
+		}
+		if e.Kind == frontend.ExprCall {
+			if c, ok := e.Callee.(*frontend.Expr); ok && c.Kind == frontend.ExprVar && c.Name == name {
+				found = true
+				return
+			}
+		}
+		walkExpr(e.Left)
+		walkExpr(e.Right)
+		walkExpr(e.Callee)
+		walkExpr(e.SliceStart)
+		walkExpr(e.SliceEnd)
+		for _, a := range e.Args {
+			walkExpr(a)
+		}
+		for _, el := range e.Elements {
+			walkExpr(el)
+		}
+		for _, v := range e.MapVals {
+			walkExpr(v)
+		}
+		if e.FuncBody != nil {
+			walkStmt(e.FuncBody)
+		}
+	}
+	walkStmt = func(s *frontend.Stmt) {
+		if s == nil || found {
+			return
+		}
+		walkExpr(s.Expr)
+		for _, e := range s.Exprs {
+			walkExpr(e)
+		}
+		walkExpr(s.Inner)
+		for _, c := range children(s) {
+			walkStmt(c)
+		}
+	}
+	walkStmt(st)
+	return found
 }
 
 // unify merges two types (int+float promotes to float).
@@ -835,65 +922,76 @@ func (g *gen) emitStmt(st *frontend.Stmt) error {
 	}
 }
 
-// localFuncSig infers the signature of a nested func statement.
-func (g *gen) localFuncSig(st *frontend.Stmt) (*funcSig, error) {
-	var params []ntype
-	for i, p := range st.Names {
-		if err := checkName(p, "param", st.Line); err != nil {
-			return nil, err
+// closureSig infers the signature of a nested func statement or func
+// literal. The signature is registered in g.closures for the duration of
+// fn (so recursion and body calls type-check), then restored.
+func (g *gen) closureSig(name string, params []string, ptypes []string, retAnn string, body *frontend.Stmt, line int, fn func(sig *funcSig) error) error {
+	var ps []ntype
+	for i, p := range params {
+		if err := checkName(p, "param", line); err != nil {
+			return err
 		}
 		pt := ""
-		if i < len(st.ParamTypes) {
-			pt = st.ParamTypes[i]
+		if i < len(ptypes) {
+			pt = ptypes[i]
 		}
-		t, err := parseAnn(pt, st.Line)
+		t, err := parseAnn(pt, line)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		params = append(params, t)
+		ps = append(ps, t)
 	}
-	// Temporarily register so recursion type-checks.
-	name := st.Name + "\x00nested"
-	g.funcs[name] = &funcSig{params: params}
-	saved := g.vars
-	g.vars = []map[string]ntype{{}}
-	for i, p := range st.Names {
-		g.vars[0][p] = params[i]
-	}
-	// allow self-reference
-	outer, had := g.funcs[st.Name]
-	g.funcs[st.Name] = &funcSig{params: params}
-	types, err := g.collectReturns(st.Body)
-	if had {
-		g.funcs[st.Name] = outer
-	} else {
-		delete(g.funcs, st.Name)
-	}
+	sig := &funcSig{params: ps, ret: ntVoid}
+	outer, had := g.closures[name]
+	outerFn, hadFn := g.funcs[name]
+	g.closures[name] = sig
 	delete(g.funcs, name)
-	g.vars = saved
-	if err != nil {
-		return nil, err
-	}
-	sig := &funcSig{params: params, ret: ntVoid}
-	if len(types) > 0 {
-		ret := types[0]
-		for _, t := range types[1:] {
-			var err error
-			ret, err = unify(ret, t, st.Line)
-			if err != nil {
-				return nil, err
-			}
-		}
-		sig.ret = ret
-	}
-	if st.ReturnType != "" {
-		want, err := parseAnn(st.ReturnType, st.Line)
+	if retAnn != "" {
+		want, err := parseAnn(retAnn, line)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		sig.ret = want
+		sig.ret = want // known upfront, so recursion checks during verify
+		fake := &frontend.Stmt{Kind: frontend.StmtFunc, Name: name, Names: params, ParamTypes: ptypes, Body: body, Line: line}
+		if err := g.verifyReturns(fake, body, want); err != nil {
+			return err
+		}
+	} else {
+		if callsSelf(body, name) {
+			return fmt.Errorf("line %d: recursive func needs a `: type` return annotation in native subset", line)
+		}
+		saved := g.vars
+		g.vars = []map[string]ntype{{}}
+		for i, p := range params {
+			g.vars[0][p] = ps[i]
+		}
+		types, err := g.collectReturns(body)
+		g.vars = saved
+		if err != nil {
+			return err
+		}
+		if len(types) > 0 {
+			ret := types[0]
+			for _, t := range types[1:] {
+				var err error
+				ret, err = unify(ret, t, line)
+				if err != nil {
+					return err
+				}
+			}
+			sig.ret = ret
+		}
 	}
-	return sig, nil
+	// Re-register for the emission walk, then restore.
+	outer2, had2 := g.closures[name]
+	g.closures[name] = sig
+	err = fn(sig)
+	if had2 {
+		g.closures[name] = outer2
+	} else {
+		delete(g.closures, name)
+	}
+	return err
 }
 
 // emitNestedFunc emits `name := func(params) [ret] { body }`.
