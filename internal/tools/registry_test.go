@@ -256,3 +256,25 @@ func TestYankExplicitRegistryRoot(t *testing.T) {
 		t.Fatal("want hello-lib 0.1.0 yanked in explicit root")
 	}
 }
+
+func TestSSGNoPhantomHi(t *testing.T) {
+	// v2.7: SSG must only render discovered routes — an app without
+	// hi.ks must not get a phantom hi.html (routes were hardcoded).
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "fusion.toml"), []byte("[package]\nname=\"s\"\nversion=\"0.1.0\"\nentry_backend=\"backend/main.ks\"\nentry_frontend=\"frontend/main.ks\"\n"), 0o644)
+	os.MkdirAll(filepath.Join(dir, "backend"), 0o755)
+	os.MkdirAll(filepath.Join(dir, "frontend", "pages"), 0o755)
+	os.WriteFile(filepath.Join(dir, "backend", "main.ks"), []byte("print 1\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "frontend", "main.ks"), []byte("print 1\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "frontend", "pages", "home.ks"), []byte("func home_page(props) {\n return {key: \"home\", type: \"page\", props: {title: \"h\"}, children: []}\n}\n"), 0o644)
+	out := t.TempDir()
+	if err := BuildSSG(dir, out); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "index.html")); err != nil {
+		t.Fatalf("want index.html: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "hi.html")); err == nil {
+		t.Fatal("want no phantom hi.html without hi.ks")
+	}
+}
