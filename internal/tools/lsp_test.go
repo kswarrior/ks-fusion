@@ -97,3 +97,72 @@ func TestLSPFormatting(t *testing.T) {
 		t.Fatalf("want no edits when clean, got %d", len(got))
 	}
 }
+
+func TestLSPCompletionBuiltinsAndKeywords(t *testing.T) {
+	uri := "file:///tmp/lsp-cmp-basic.ks"
+	setOpenDoc(uri, "prin")
+	defer dropOpenDoc(uri)
+	items := completionItems(uri, 0, 4)
+	foundPrint, foundBuiltin := false, false
+	for _, it := range items {
+		m := it.(map[string]any)
+		if m["label"] == "print" {
+			foundPrint = true
+		}
+		if m["label"] == "json_parse" {
+			foundBuiltin = true
+		}
+	}
+	// "prin" filters to print (+ friends); json_parse must NOT match "prin"
+	if !foundPrint {
+		t.Fatalf("want print in completions for prefix prin, got %d items", len(items))
+	}
+	if foundBuiltin {
+		t.Fatalf("prefix prin must filter out json_parse")
+	}
+	// empty prefix returns builtins + keywords
+	setOpenDoc(uri, "")
+	// cursor at (1,0) past the single empty line: line 0 len 0 -> use line 0 ch 0
+	all := completionItems(uri, 0, 0)
+	if len(all) < 200 {
+		t.Fatalf("want full set (>=200 builtins+keywords+workspace), got %d", len(all))
+	}
+	hasKw := false
+	for _, it := range all {
+		if it.(map[string]any)["label"] == "func" {
+			hasKw = true
+		}
+	}
+	if !hasKw {
+		t.Fatal("want keyword func in full completion set")
+	}
+}
+
+func TestLSPCompletionWorkspaceFuncs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "fusion.toml"), []byte("[package]\nname = \"r\"\nversion = \"0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := filepath.Join(dir, "a.ks")
+	if err := os.WriteFile(a, []byte("func greet_foo(name) {\n return name\n}\nstruct UserFoo { name: string }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	uri := "file://" + filepath.ToSlash(a)
+	setOpenDoc(uri, "greet_")
+	defer dropOpenDoc(uri)
+	// completionPrefix reads the open doc; position (0,6) is end of "greet_"
+	items := completionItems(uri, 0, 6)
+	found := false
+	for _, it := range items {
+		m := it.(map[string]any)
+		if m["label"] == "greet_foo" {
+			found = true
+			if m["detail"] == "" || m["kind"] != 3 {
+				t.Fatalf("want func detail+kind, got %v", m)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("want workspace func greet_foo, got %d items", len(items))
+	}
+}

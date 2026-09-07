@@ -237,7 +237,9 @@ func RunLSP() error {
 		default:
 			if req.ID != nil {
 				respond(req.ID, nil)
+			}
 		}
+		_ = sc
 	}
 	return nil
 }
@@ -356,7 +358,6 @@ func completionPrefix(uri string, line, ch int) string {
 		s--
 	}
 	return l[s:ch]
-}
 }
 
 func uriToPath(uri string) string {

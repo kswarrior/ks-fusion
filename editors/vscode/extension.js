@@ -1,7 +1,8 @@
-// VS Code client for `fusion lsp` (stdio JSON-RPC, v2.5 full LSP).
+// VS Code client for `fusion lsp` (stdio JSON-RPC, v2.6 full LSP).
 // Install: copy this folder to ~/.vscode/extensions/ks-fusion/ (needs node + fusion on PATH),
 // or point "ks-fusion.serverPath" at your fusion binary.
-// Features: hover, goto-def, rename, diagnostics (parse+vet), formatting,
+// Features: hover, goto-def, rename, diagnostics (parse+vet), formatting, completion
+// (builtins + keywords + workspace funcs via `textDocument/completion`),
 // plus `fusion debug` breakpoints via the ks-fusion debugger type.
 const { spawn } = require('child_process');
 
