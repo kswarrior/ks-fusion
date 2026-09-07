@@ -119,6 +119,7 @@ Rules:
 | Build / check deps | `fusion build [dir] [--release] [--out DIR]` |
 | Static binary | `fusion build [dir] --bin [-o FILE] [--target OS/ARCH] [--strip]` |
 | Bytecode subset | `fusion compile <file.ks> [--out file.ksb] [--dis] [--run]` |
+| Native machine code | `fusion native <file.ks> [-o FILE] [--target OS/ARCH] [--strip] [--emit]` — strict subset (scalars, control flow, typed funcs) to real binaries; rejects point back at the interpreter |
 | Tests | `fusion test [target]` — dir (recursive) or single file; `*_test.ks` with `assert`, TAP output |
 | Format | `fusion fmt [target]`, `fusion fmt [target] --check` (CI; idempotent) |
 | Lint | `fusion vet [target] [--deny-warns]` (unused let, arity, unknown var, env-in-frontend) |

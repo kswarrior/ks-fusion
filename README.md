@@ -281,6 +281,20 @@ tls_connect(host,port) ws_connect(host,port)
 variable up the scope chain. Functions capture their defining scope
 (closures). `for-in` loop variables are per-iteration (Go 1.22 semantics).
 
+## Native machine code (native-0.1, via Go codegen)
+
+```bash
+fusion native prog.ks -o prog          # real ELF binary (fib(30): ms, not s)
+fusion native prog.ks --emit           # print the generated Go source
+fusion native prog.ks --target linux/arm64 --strip
+```
+
+Strict subset: `int/float/string/bool` scalars, `let/assign/print/sleep`,
+`if/while/for-in-range/for-c`, typed `func` params (`func f(x: int): int`),
+closures, `len(string)`. Same output as the interpreter (`/` is float,
+`%`/div-by-zero parity, `**` by squaring). Everything else fails with a
+`line N:` error telling you to run it in the interpreter instead.
+
 ## Libraries (like Rust)
 
 ```bash
