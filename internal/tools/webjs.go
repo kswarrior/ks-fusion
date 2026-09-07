@@ -1021,6 +1021,7 @@ div[data-type="page"]>div.kids>a.btn{align-self:start}
 .btn-primary{background:var(--primary);border-color:var(--primary);color:#fff}
 .btn-primary:hover{background:var(--primary-hover)}
 table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;font-size:14px}
+table>div.kids,tr>div.kids,td>div.kids{display:contents}
 div[data-type="page"]>div.kids>table{grid-column:1/-1}
 td{padding:10px 14px;border-bottom:1px solid var(--border)}
 tr:last-child td{border-bottom:none}
