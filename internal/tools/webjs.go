@@ -1065,7 +1065,7 @@ var es = new EventSource('/events?route=' + encodeURIComponent("` + route + `"))
 es.onmessage = function(e){
   try{
     var msg = JSON.parse(e.data);
-    if(msg.ops && msg.vm && window.__applyPatch){ window.__applyPatch(msg.ops); window.__currentVM = msg.vm; document.getElementById('vm').textContent = JSON.stringify(msg.vm); }
+    if(msg.ops && msg.vm && window.__applyPatch){ window.__currentVM = msg.vm; document.getElementById('vm').textContent = JSON.stringify(msg.vm); window.__applyPatch(msg.ops); }
     else if(msg.vm && window.__renderVM){ window.__renderVM(msg.vm, document.getElementById('app')); }
     else if(msg.reload){ window.__banner('stale client: refresh to update'); }
   }catch(err){ window.__banner('update failed: ' + err.message); }
@@ -1215,6 +1215,101 @@ es.onmessage = function(e){
     if(el.hasAttribute('data-action') && !('on_click' in props) && !('onClick' in props)){
       if(el.getAttribute('data-action')!=='show_more'){ el.removeAttribute('data-action'); el.onclick=null; }
     }
+    refreshBlocks(el, node);
+  }
+  // refreshBlocks rebuilds the visible chrome blocks (nav links, rows,
+  // stat/section bodies) from node.props — the exact client mirror of the
+  // server renderChromeBlocks, so SSR, CSR patches and hydrate agree.
+  // All text goes through textContent (escaped by the browser), never
+  // innerHTML. Blocks live outside div.kids so keyed diffing never touches
+  // them; they refresh on paint (build/hydrate) and on prop patches.
+  function blockKid(el, ckey){
+    var list = el.children;
+    for(var i=0;i<list.length;i++){
+      if(list[i].getAttribute && list[i].getAttribute('data-key')===ckey) return list[i];
+    }
+    return null;
+  }
+  function dropBlock(el, ckey){
+    var n = blockKid(el, ckey);
+    if(n && n.parentNode) n.parentNode.removeChild(n);
+  }
+  function placeBlock(el, n){
+    var kb = null;
+    for(var j=0;j<el.children.length;j++){
+      var c = el.children[j];
+      if(c.tagName==='DIV' && c.className==='kids'){ kb = c; break; }
+    }
+    if(kb) el.insertBefore(n, kb); else el.appendChild(n);
+  }
+  function itemActive(item, props){
+    if(item && item.active===true) return true;
+    if(props && typeof props.active==='string' && props.active!=='' && item && item.path===props.active) return true;
+    return false;
+  }
+  function buildNav(doc, ckey, cls, items, props){
+    var nav = doc.createElement('nav');
+    nav.setAttribute('data-key', ckey);
+    nav.setAttribute('class', cls);
+    for(var i=0;i<items.length;i++){
+      var it = items[i]||{};
+      if(!it.path && !it.label) continue;
+      var a = doc.createElement('a');
+      a.setAttribute('href', it.path||'');
+      a.setAttribute('data-key', ckey+'-'+i);
+      if(itemActive(it, props)) a.setAttribute('class', 'active');
+      a.textContent = it.label||it.path||'';
+      nav.appendChild(a);
+    }
+    return nav;
+  }
+  function refreshBlocks(el, node){
+    if(!el || !node) return;
+    var props = node.props||{};
+    var key = node.key||'';
+    var typ = node.type||'';
+    var navArr = (typ==='header') ? props.links : ((typ==='sidebar') ? props.items : null);
+    if(navArr && navArr.length){
+      var cls = (typ==='header') ? 'nav' : 'sidenav';
+      var fresh = buildNav(document, key+':nav', cls, navArr, props);
+      var old = blockKid(el, key+':nav');
+      if(old) el.replaceChild(fresh, old); else placeBlock(el, fresh);
+    } else { dropBlock(el, key+':nav'); }
+    if(typ==='page' && props.rows && props.rows.length){
+      var ul = blockKid(el, key+':rows');
+      if(!ul){ ul = document.createElement('ul'); ul.setAttribute('data-key', key+':rows'); ul.setAttribute('class', 'rows'); placeBlock(el, ul); }
+      else ul.setAttribute('class', 'rows');
+      while(ul.firstChild) ul.removeChild(ul.firstChild);
+      for(var ri=0; ri<props.rows.length; ri++){
+        var li = document.createElement('li');
+        li.setAttribute('data-key', key+':rows-'+ri);
+        li.textContent = strVal(props.rows[ri]);
+        ul.appendChild(li);
+      }
+    } else { dropBlock(el, key+':rows'); }
+    if(typ==='stat'){
+      var sb = blockKid(el, key+':statbody');
+      if(!sb){ sb = document.createElement('div'); sb.setAttribute('data-key', key+':statbody'); placeBlock(el, sb); }
+      sb.setAttribute('class', 'statbody');
+      while(sb.firstChild) sb.removeChild(sb.firstChild);
+      var lb = document.createElement('span'); lb.setAttribute('class', 'stat-label'); lb.textContent = strVal(props.label); sb.appendChild(lb);
+      var vl = document.createElement('span'); vl.setAttribute('class', 'stat-value'); vl.textContent = strVal(props.value); sb.appendChild(vl);
+    } else { dropBlock(el, key+':statbody'); }
+    if(typ==='section' && (props.h || props.p)){
+      var sc = blockKid(el, key+':secbody');
+      if(!sc){ sc = document.createElement('div'); sc.setAttribute('data-key', key+':secbody'); placeBlock(el, sc); }
+      sc.setAttribute('class', 'secbody');
+      while(sc.firstChild) sc.removeChild(sc.firstChild);
+      if(props.h){ var h2 = document.createElement('h2'); h2.textContent = strVal(props.h); sc.appendChild(h2); }
+      if(props.p){ var pp = document.createElement('p'); pp.textContent = strVal(props.p); sc.appendChild(pp); }
+    } else { dropBlock(el, key+':secbody'); }
+  }
+  function findNodeByKey(vm, k){
+    if(!vm) return null;
+    if(vm.key===k) return vm;
+    var ch = vm.children||[];
+    for(var i=0;i<ch.length;i++){ var r = findNodeByKey(ch[i], k); if(r) return r; }
+    return null;
   }
   function build(node){
     var tag = tagForType(node.type||'div');
@@ -1295,6 +1390,17 @@ es.onmessage = function(e){
         if(rf) bx.insertBefore(el, rf); else bx.appendChild(el);
       }
     });
+    // Reconcile visible chrome blocks for touched subtrees against the
+    // (already updated) current VM — mirrors SSR renderChromeBlocks.
+    var seen = {};
+    ops.forEach(function(op){ if(op.key) seen[op.key]=true; if(op.parent) seen[op.parent]=true; });
+    for(var sk in seen){
+      if(!seen.hasOwnProperty(sk)) continue;
+      var sel = __byKey[sk];
+      if(!sel) continue;
+      var sn = findNodeByKey(window.__currentVM, sk);
+      if(sn) refreshBlocks(sel, sn);
+    }
   }
   window.__applyPatch = applyPatch;
   function hydrateEl(el, node){
