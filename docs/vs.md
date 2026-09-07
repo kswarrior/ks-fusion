@@ -94,7 +94,7 @@ Snapshot for ks-fusion `v2.7` (177 builtins = 96+52+11+12+6, struct/enum syntax 
 exhaustive-switch vet, VM v0.3 + `docs/bench.md`, WS text frames + extended SQL
 (OR/AND + LIKE) + postgres-compat + pipes/signals, file-registry + real audit,
 full LSP (incl. completion) + debug + profile + VS Code ext v0.3.0, DOM-diff
-without reload + background ISR, vendor-aware cache + `--strip`, release v2.6 +
+without reload + background ISR, vendor-aware cache + `--strip`, release v2.7 +
 `ci.sh` + `--bin`/`--strip` E2E + hygiene, lock/semver/vendor, cancel, literal folding).
 Higher = better, except simplicity where easier = higher. Scores are opinionated but rubric-based, not benchmarks.
 “Parity” below means **breadth for scripts/services**, not depth — every Go/Rust-parity claim has a
@@ -171,8 +171,8 @@ What the `.ks` 84 does and does not mean (read before citing 84; evidence for ev
   `fetch_json` GET-only. 8 ties Node SSR-prototype depth; React/Vite/Next UI
   depth still ahead.
 - Maturity 9 = “`docs/stability.md` semver/LTS + `docs/rfcs/` (2 RFCs) +
-  133 `go test` funcs (was 125: +8 for OR/LIKE, completion x2, profile x3,
-  vendor-cache, `--bin`/`--strip` E2E) + 5 benchmarks + 2 `.ks` test files +
+  136 `go test` funcs (was 125: +11 for OR/LIKE, completion x2, profile x3,
+  vendor-cache, `--bin`/`--strip` E2E, range/sleep/try-catch) + 5 benchmarks + 2 `.ks` test files +
   release v2.6 + `ci.sh` gate + per-file `test --timeout` + repeat-safe TCP +
   `--bin`/`--strip` E2E (both build + run a minimal app; stripped asserts
   smaller) + hygiene (`retest.log` leftover removed, `.gitignore` covers the
@@ -553,7 +553,8 @@ Pick `.ks` for sidecar scripts/services (data munging, checks, bots, `--bin` wor
 
 Grand total (sum of all 18 totals) = `1315 / 1800`, average `73.1/100`.
 `.ks` total `84/100` = v2.5 honest 83 +1 for a fully-met bar (Maturity 8→9:
-`--bin`/`--strip` E2E + hygiene + 133 tests; evidence in “v2.6 evidence”).
+`--bin`/`--strip` E2E + hygiene + 133 tests; evidence in “v2.6 evidence”,
+  plus v0.3 range/sleep/try-catch tests (136 total).
 SQL OR/LIKE + LSP completion + `.ks`-line profiler + vendor-aware cache +
 `--strip` are real, tested depth inside their current scores (see “v2.6
 evidence”); they do not move scores alone — each documented +1 bar still needs
@@ -741,8 +742,8 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
   (`tmp-fusion-bin-*/`, removed by `defer` but never snapshotted);
   pre-existing `go vet` unreachable-code in `RunLSP` fixed (conditional loop
   with documented exit path); `go vet ./...` clean.
-- Tests: 133 `go test` funcs (125 + 8: OR/LIKE, completion x2, profile x3,
-  vendor-cache, `--bin` E2E) + 5 benchmarks + 2 `.ks` test files, all green.
+- Tests: 136 `go test` funcs (125 + 11: OR/LIKE, completion x2, profile x3,
+  vendor-cache, `--bin` E2E, range/sleep/try-catch) + 5 benchmarks + 2 `.ks` test files, all green.
   Remaining gap (stated, not hidden): TLS-server E2E needs a `tls_serve`
   feature. 9 holds.
 
@@ -904,12 +905,12 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
 * Score impact: Ecosystem 8 holds (real audit meets the bar; central server left);
   Tooling 9 holds (full LSP + completion + debugger + `.ks`-line profiler + ext
   v0.3.0 are depth inside 9; interactive DAP + time-profiling left);
-  Maturity 9 (release v2.6 + `ci.sh` + `--bin`/`--strip` E2E + hygiene + timeout +
-  repeat-safe + 133 tests; TLS-server E2E remains).
+  Maturity 9 (release v2.7 + `ci.sh` + `--bin`/`--strip` E2E + hygiene + timeout +
+  repeat-safe + 136 tests; TLS-server E2E remains).
 
 ### Go/Rust-level checklist (all things, with owner doc)
 
-| # | Area | Go bar | Rust bar | .ks v2.6 (honest) | Needed to close | Closes in |
+| # | Area | Go bar | Rust bar | .ks v2.7 (honest) | Needed to close | Closes in |
 |---|---|---|---|---|---|---|
 | 1 | Compiler | `go build` static bin | `rustc` LLVM + LTO | tree-walk (full, struct/enum syntax, folding, 177 builtins) + VM v0.3 (`.ksb-1` same format, +range-int loop/sleep/try-catch; no `go`/`chan`/`select`/`import`/`defer`/`try`-`finally`/`struct`-decl/closure-capture; nominals skip) + `--bin` embed via `go build -trimpath` (+`--strip`) + `docs/bench.md` (fib ≈1.7–3.4x, loop ≈1.3–1.4x) | full VM (consistent wins) → native AOT + real benchmarks | `futures.md` P1 runtime |
 | 2 | Targets | `GOOS/GOARCH` | tiers + WASM | `--target` GOOS/GOARCH passthrough + vendor-aware hash-skip cache + host `--cpuprofile` + `.ks`-line `profile` + `-trimpath` repro (needs Go toolchain) | WASM run polish, remote/incremental cache | `futures.md` P1 runtime |
@@ -925,7 +926,7 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
 | 12 | IDE | `gopls` | `rust-analyzer` | LSP (hover/goto/completion/rename/diagnostics/format), ext v0.3.0, non-interactive debugger + exact-count profiler | DAP/step-REPL, ext test harness | `futures.md` P2 DX |
 | 13 | Frontend | `html/template`/WASM | WASM pkgs | console + `run-web` SSR (keyed diff, no reload; background ISR; nested layouts) + subset `build-js` (hashes/budgets/manifest) + `build-ssg` + `use_state` shim + API funcs + virtualize>100 | hydrate-full, CSS handling | `futures.md` P2 frontend |
 | 14 | FFI | `cgo` | `unsafe`/FFI | none | opt-in `ffi_*` + Go plugin API | `futures.md` P2 interop |
-| 15 | Stability | compat promise | editions | v2.6 source + `stability.md`/RFCs/LTS docs + `release/fusion` v2.6 + `ci.sh` + 133 tests + timeout + repeat-safe + `--bin`/`--strip` E2E + hygiene | TLS-server E2E (needs `tls_serve`) | `futures.md` §5 |
+| 15 | Stability | compat promise | editions | v2.7 source + `stability.md`/RFCs/LTS docs + `release/fusion` v2.7 + `ci.sh` + 136 tests + timeout + repeat-safe + `--bin`/`--strip` E2E + hygiene | TLS-server E2E (needs `tls_serve`) | `futures.md` §5 |
 
 Close full VM + DAP/time-profiler + native-DB + methods/variadics + hydrate-full + central
 registry with depth and `.ks` moves `84 → ~87–89/100`.
