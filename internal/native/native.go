@@ -114,17 +114,18 @@ type funcSig struct {
 }
 
 type gen struct {
-	sb       strings.Builder
-	funcs    map[string]*funcSig
-	closures []map[string]*funcSig // closure sigs, scoped parallel to vars
-	vars     []map[string]ntype    // scope stack
-	loop     int
-	funcRet  ntype // current function return type (ntVoid outside funcs)
-	inFunc   bool
-	useMath  bool
-	useTime  bool
-	useUTF8  bool
-	tmp      int
+	sb         strings.Builder
+	funcs      map[string]*funcSig
+	closures   []map[string]*funcSig // closure sigs, scoped parallel to vars
+	vars       []map[string]ntype    // scope stack
+	loop       int
+	funcRet    ntype // current function return type (ntVoid outside funcs)
+	inFunc     bool
+	useMath    bool
+	useTime    bool
+	useUTF8    bool
+	useStrconv bool
+	tmp        int
 }
 
 func (g *gen) lookup(name string) (ntype, bool) {
@@ -262,7 +263,9 @@ func TranspileProgram(prog *frontend.Program) (string, error) {
 	if g.useMath {
 		out.WriteString("\t\"math\"\n")
 	}
-	out.WriteString("\t\"strconv\"\n")
+	if g.useStrconv {
+		out.WriteString("\t\"strconv\"\n")
+	}
 	if g.useTime {
 		out.WriteString("\t\"time\"\n")
 	}
@@ -441,7 +444,11 @@ func (g *gen) collectReturns(st *frontend.Stmt) ([]ntype, error) {
 			}
 			out = append(out, t)
 			return nil
-		case frontend.StmtFunc, frontend.StmtGo:
+		case frontend.StmtFunc:
+			// Nested func: its returns belong to the inner func, which is
+			// checked separately at emission. Skip, do not descend.
+			return nil
+		case frontend.StmtGo:
 			return fmt.Errorf("line %d: not in the native subset — runs in interpreter", s.Line)
 		case frontend.StmtImport, frontend.StmtTry, frontend.StmtSwitch,
 			frontend.StmtSelect, frontend.StmtDefer, frontend.StmtStruct, frontend.StmtEnum:
@@ -682,13 +689,12 @@ func (g *gen) callType(e *frontend.Expr) (ntype, error) {
 	return sig.ret, nil
 }
 
-// assignable reports whether a value of type got fits a slot of type want
-// (int promotes to float, nothing else converts implicitly).
+// assignable reports whether a value of type got fits a slot of type want.
+// Native-0.1 is strict: types must match exactly (the interpreter also
+// rejects `let a: float = 7`). int+float mixing happens only inside
+// arithmetic operators, which promote to float like the interpreter.
 func assignable(want, got ntype) bool {
-	if want == got {
-		return true
-	}
-	return want == ntFloat && got == ntInt
+	return want == got
 }
 
 // ---------------------------------------------------------------------------
@@ -783,7 +789,7 @@ func (g *gen) emitStmt(st *frontend.Stmt) error {
 			if err != nil {
 				return err
 			}
-			parts = append(parts, printConv(t, src))
+			parts = append(parts, g.printConv(t, src))
 		}
 		g.emit("fmt.Println(%s)\n", strings.Join(parts, ", "))
 		return nil
@@ -1063,15 +1069,7 @@ func (g *gen) emitLet(st *frontend.Stmt) error {
 		return err
 	}
 	g.define(st.Name, t)
-	decl := "var"
-	if st.TypeAnn == "" {
-		decl = ""
-	}
-	if decl == "" {
-		g.emit("%s := %s\n", st.Name, src)
-	} else {
-		g.emit("var %s %s = %s\n", st.Name, t.goType(), src)
-	}
+	g.emit("var %s %s = %s\n", st.Name, t.goType(), src)
 	return nil
 }
 
@@ -1134,7 +1132,7 @@ func (g *gen) emitAssign(st *frontend.Stmt, implicit bool) error {
 			return err
 		}
 		g.define(st.Name, et)
-		g.emit("%s := %s\n", st.Name, src)
+		g.emit("var %s %s = %s\n", st.Name, et.goType(), src)
 		return nil
 	}
 	et, err := g.typeOf(st.Expr)
@@ -1199,13 +1197,16 @@ func (g *gen) emitAssign(st *frontend.Stmt, implicit bool) error {
 }
 
 // printConv renders a typed Go value as its .ks Display string.
-func printConv(t ntype, src string) string {
+func (g *gen) printConv(t ntype, src string) string {
 	switch t {
 	case ntInt:
+		g.useStrconv = true
 		return "strconv.FormatInt(" + src + ", 10)"
 	case ntFloat:
+		g.useStrconv = true
 		return "strconv.FormatFloat(" + src + ", 'f', -1, 64)"
 	case ntBool:
+		g.useStrconv = true
 		return "strconv.FormatBool(" + src + ")"
 	default:
 		return src

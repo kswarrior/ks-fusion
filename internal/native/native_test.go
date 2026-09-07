@@ -82,7 +82,7 @@ func TestNativeParity(t *testing.T) {
 		"fib":     "func fib(n: int): int {\n if n < 2 {\n return n\n }\n return fib(n - 1) + fib(n - 2)\n}\nprint fib(10)\n",
 		"closure": "let double = func(x: int): int {\n return x * 2\n}\nprint double(21)\n",
 		"nested":  "func outer(a: int): int {\n func inner(b: int): int {\n return b * 2\n }\n return inner(a) + 1\n}\nprint outer(20)\n",
-		"mixdiv":  "let a: float = 7\nprint a / 2\nlet b = 1\nb = 2\nprint b\n",
+		"mixdiv":  "let a: float = 7.0\nprint a / 2\nlet b = 1\nb = 2\nprint b\nprint 1 + 2.5\n",
 		"sleep0":  "sleep 1\nprint \"woke\"\n",
 	}
 	for name, src := range cases {
