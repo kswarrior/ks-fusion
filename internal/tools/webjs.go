@@ -973,37 +973,69 @@ func initialStateJSON() string {
 	return string(b)
 }
 
-// fusionDefaultCSS is the built-in run-web stylesheet (no dependencies).
-// Layout is driven by data-type selectors so SSR and the client renderer
-// (which only reproduces props, never extra classes) always agree.
+// fusionDefaultCSS is the built-in run-web design system (no dependencies).
+// Tokens + components follow a light theme with one blue primary; layout is
+// driven by data-type selectors so SSR and the client renderer (which only
+// reproduces props, never extra classes) always agree.
 func fusionDefaultCSS() string {
-	return `*{box-sizing:border-box}
-body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#eef1f7;color:#1b2333}
-div[data-type="layout"]>div.kids{display:flex;flex-wrap:wrap;min-height:100vh;align-content:flex-start}
-header[data-type="header"]{flex:1 1 100%;background:#16213a;color:#fff;padding:14px 22px}
-header[data-type="header"] h1{margin:0 0 10px;font-size:22px}
+	return `:root{
+--bg:#ffffff;--surface:#ffffff;--surface-2:#f8fafc;--surface-3:#eef2f7;
+--border:#e2e8f0;--border-strong:#cbd5e1;
+--text:#0f172a;--text-dim:#475569;--text-faint:#94a3b8;
+--primary:#2563eb;--primary-hover:#1d4ed8;--primary-bg:#eff6ff;
+--primary-ring:rgba(37,99,235,.3);
+--topbar:#16213a;--topbar-text:#e6ecf9;--topbar-dim:#9fb0d8;
+--radius:12px;--radius-sm:8px;
+--ease:cubic-bezier(.16,1,.3,1);--duration-fast:150ms;--duration-normal:220ms}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+div[data-type="layout"]>div.kids{display:flex;flex-wrap:wrap;min-height:100vh;align-content:flex-start;background:var(--surface-2)}
+header[data-type="header"]{flex:1 1 100%;background:var(--topbar);color:#fff;padding:12px 22px;min-height:64px}
+header[data-type="header"] h1{margin:0 0 8px;font-size:20px;font-weight:600}
 nav.nav{display:flex;gap:6px;flex-wrap:wrap}
-nav.nav a{color:#cdd8f3;text-decoration:none;padding:7px 14px;border-radius:8px;font-size:14px}
-nav.nav a.active{background:#3b5bd6;color:#fff}
+nav.nav a{color:var(--topbar-dim);text-decoration:none;padding:7px 14px;border-radius:var(--radius-sm);font-size:14px;transition:background var(--duration-fast) ease,color var(--duration-fast) ease}
+nav.nav a.active{background:var(--primary);color:#fff}
 nav.nav a:hover{background:#2a3f7d;color:#fff}
-nav.sidenav{flex:0 0 210px;background:#fff;border-right:1px solid #e3e8f5;padding:14px;display:flex;flex-direction:column;gap:6px}
-nav.sidenav a{color:#33415e;text-decoration:none;padding:9px 12px;border-radius:8px;font-size:14px}
-nav.sidenav a.active{background:#e7edff;color:#1f3fb8;font-weight:600}
-nav.sidenav a:hover{background:#f0f3fb}
-div[data-type="page"]{flex:1 1 0;min-width:280px;padding:22px}
-div[data-type="page"] h1{margin:0 0 6px;font-size:26px}
+nav.sidenav{flex:0 0 220px;background:var(--surface);border-right:1px solid var(--border);padding:12px;display:flex;flex-direction:column;gap:4px}
+nav.sidenav a{color:var(--text-dim);text-decoration:none;padding:9px 12px;border-radius:var(--radius-sm);font-size:14px;transition:background var(--duration-fast) ease}
+nav.sidenav a.active{background:var(--primary-bg);color:var(--primary);font-weight:600}
+nav.sidenav a:hover{background:var(--surface-3)}
+a:focus-visible{outline:0;box-shadow:0 0 0 3px var(--primary-ring)}
+div[data-type="page"]{flex:1 1 0;min-width:280px;padding:24px;max-width:1200px}
+div[data-type="page"] h1{margin:0 0 6px;font-size:26px;font-weight:600}
+div[data-type="page"] span.txt{display:block;color:var(--text-dim);margin:0 0 12px}
 ul.rows{list-style:none;margin:14px 0;padding:0;display:grid;gap:8px}
-ul.rows li{background:#fff;border:1px solid #e3e8f5;border-radius:8px;padding:10px 14px}
+ul.rows li{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px}
 div[data-type="page"]>div.kids{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:6px}
-div[data-type="stat"]{min-width:0}
-.statbody{background:#16213a;color:#fff;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
-.stat-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#9fb0d8}
+div[data-type="stat"]{min-width:0;animation:fadeUp var(--duration-normal) var(--ease) both}
+.statbody{background:var(--topbar);color:#fff;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.stat-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--topbar-dim)}
 .stat-value{font-size:24px;font-weight:700}
 div[data-type="section"]{grid-column:1/-1;min-width:0}
-.secbody{background:#fff;border:1px solid #e3e8f5;border-radius:10px;padding:14px 18px}
-.secbody h2{margin:0 0 6px;font-size:17px}
-.secbody p{margin:0;color:#475569}
-#fusion-banner{background:#b91c1c;color:#fff;padding:10px 16px}`
+.secbody{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px}
+.secbody h2{margin:0 0 6px;font-size:17px;font-weight:600}
+.secbody p{margin:0;color:var(--text-dim)}
+div[data-type="page"]>div.kids>a.btn{align-self:start}
+.btn{display:inline-block;background:var(--surface);border:1px solid var(--border-strong);color:var(--text);padding:9px 18px;border-radius:var(--radius-sm);text-decoration:none;font-size:14px;font-weight:600;margin:4px 8px 4px 0;transition:transform var(--duration-fast) var(--ease),background var(--duration-fast) ease}
+.btn:hover{transform:translateY(-1px);background:var(--surface-3)}
+.btn-primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.btn-primary:hover{background:var(--primary-hover)}
+table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;font-size:14px}
+div[data-type="page"]>div.kids>table{grid-column:1/-1}
+td{padding:10px 14px;border-bottom:1px solid var(--border)}
+tr:last-child td{border-bottom:none}
+td.th{font-weight:700;background:var(--surface-2)}
+footer{flex:1 1 100%;padding:16px 22px;color:var(--text-faint);font-size:13px;border-top:1px solid var(--border);background:var(--surface)}
+#fusion-banner{background:#dc2626;color:#fff;padding:10px 16px}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@media (max-width:768px){
+nav.sidenav{flex:1 1 100%;flex-direction:row;overflow-x:auto;border-right:none;border-bottom:1px solid var(--border);scrollbar-width:none;padding:8px 12px}
+nav.sidenav a{white-space:nowrap;font-size:14px}
+div[data-type="page"]{padding:16px}
+div[data-type="page"]>div.kids{grid-template-columns:1fr}
+header[data-type="header"]{padding:10px 16px}
+}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}`
 }
 
 // appExtraCSS inlines an app's own frontend/styles/*.css after the defaults
