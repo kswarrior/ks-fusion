@@ -1,0 +1,6 @@
+# ks-fusion build artifacts (local only, never commit).
+# `fusion build --bin` generates a temp module dir inside the repo root
+# (it must build within the module to import internal/); it is removed by
+# `defer os.RemoveAll` when the build finishes, but ignore the pattern so a
+# slow build is never snapshotted mid-flight.
+tmp-fusion-bin-*/

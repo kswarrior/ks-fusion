@@ -51,4 +51,25 @@ func TestBuildBinE2E(t *testing.T) {
 	if !strings.Contains(got, "e2e-backend-ok") || !strings.Contains(got, "e2e-frontend-ok") {
 		t.Fatalf("want backend+frontend output, got %q", got)
 	}
+	// `--strip` sibling: same app, smaller binary, same output.
+	stripOut := filepath.Join(dir, "e2e-bin-strip")
+	if err := BuildBinWithOptions(dir, stripOut, "", true); err != nil {
+		t.Fatalf("BuildBinWithOptions(strip): %v", err)
+	}
+	sfi, err := os.Stat(stripOut)
+	if err != nil || sfi.Size() == 0 {
+		t.Fatalf("want non-empty stripped binary at %s: %v", stripOut, err)
+	}
+	if sfi.Size() >= fi.Size() {
+		t.Fatalf("want stripped binary smaller: full=%d strip=%d", fi.Size(), sfi.Size())
+	}
+	scmd := exec.Command(stripOut)
+	sb, err := scmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run stripped bin: %v\n%s", err, sb)
+	}
+	sgot := string(sb)
+	if !strings.Contains(sgot, "e2e-backend-ok") || !strings.Contains(sgot, "e2e-frontend-ok") {
+		t.Fatalf("want backend+frontend output from stripped bin, got %q", sgot)
+	}
 }
