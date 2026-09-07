@@ -1,8 +1,8 @@
 {
   "name": "ks-fusion",
   "displayName": "ks-fusion",
-  "description": "Language support for ks-fusion (.ks): full LSP (hover/goto-def/rename/diagnostics/format-on-save) via `fusion lsp` + `fusion debug` breakpoints.",
-  "version": "0.2.0",
+  "description": "Language support for ks-fusion (.ks): full LSP (hover/goto-def/rename/diagnostics/format/completion via `fusion lsp`) + `fusion debug` breakpoints + `fusion profile` line counts.",
+  "version": "0.3.0",
   "engines": { "vscode": "^1.80.0" },
   "categories": ["Programming Languages", "Debuggers"],
   "activationEvents": ["onLanguage:ks"],

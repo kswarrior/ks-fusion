@@ -338,10 +338,10 @@ func main() {
 
 // toolVersion is the toolchain/language version printed by help/version.
 // Keep in sync with docs (README, docs/vs.md, docs/futures.md).
-const toolVersion = "v2.5"
+const toolVersion = "v2.6"
 
 func help() {
-	fmt.Println(`ks-fusion v2.5 (Go)
+	fmt.Println(`ks-fusion v2.6 (Go)
 Commands:
   fusion new [--lib] <dir>   create app (backend/ frontend/ fusion.toml)
                              or library with --lib (src/lib.ks, type="lib")

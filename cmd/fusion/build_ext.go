@@ -292,7 +292,7 @@ func cmdAudit(args []string) error {
 func cmdLSP(args []string) error {
 	for _, a := range args {
 		if a == "--help" || a == "-h" {
-			fmt.Println("usage: fusion lsp\n  minimal LSP over stdio (hover, goto-def, format). VS Code: set command to `fusion lsp`.")
+			fmt.Println("usage: fusion lsp\n  full LSP over stdio (hover, goto-def, rename, diagnostics, format, completion). VS Code: set command to `fusion lsp`.")
 			return nil
 		}
 	}
