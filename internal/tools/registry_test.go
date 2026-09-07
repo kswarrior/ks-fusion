@@ -209,3 +209,50 @@ func TestCacheVendorBusts(t *testing.T) {
 		t.Fatal("want miss after vendor swap (vendor-aware cache)")
 	}
 }
+
+func TestCacheProfileDistinguishes(t *testing.T) {
+	// v2.7: debug and release lib builds share sources but not outputs —
+	// a cached debug build must not satisfy a release check.
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "fusion.toml"), []byte("[package]\nname=\"x\"\nversion=\"0.1.0\"\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "a.ks"), []byte("print 1\n"), 0o644)
+	if err := WriteCacheProfile(dir, "debug"); err != nil {
+		t.Fatal(err)
+	}
+	if hit, _, _ := CheckCacheProfile(dir, "debug"); !hit {
+		t.Fatal("want debug hit after debug write")
+	}
+	if hit, _, _ := CheckCacheProfile(dir, "release"); hit {
+		t.Fatal("want release miss after debug write (profile-aware cache)")
+	}
+	if err := WriteCacheProfile(dir, "release"); err != nil {
+		t.Fatal(err)
+	}
+	if hit, _, _ := CheckCacheProfile(dir, "release"); !hit {
+		t.Fatal("want release hit after release write")
+	}
+	if hit, _, _ := CheckCacheProfile(dir, "debug"); hit {
+		t.Fatal("want debug miss after release write (profile-aware cache)")
+	}
+}
+
+func TestYankExplicitRegistryRoot(t *testing.T) {
+	// v2.7: `fusion yank --registry DIR` targets one registry root.
+	tmpReg := t.TempDir()
+	root := findRoot(t)
+	if _, err := Publish(filepath.Join(root, "tests/hello-lib"), tmpReg); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+	if err := Yank("hello-lib", "0.1.0", false, tmpReg); err != nil {
+		t.Fatalf("yank with explicit root failed: %v", err)
+	}
+	found := false
+	for _, e := range loadIndex(tmpReg) {
+		if e.Name == "hello-lib" && e.Version == "0.1.0" && e.Yanked {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("want hello-lib 0.1.0 yanked in explicit root")
+	}
+}
