@@ -424,7 +424,7 @@ TypeScript = JS + static types (`tsc`, `strict`, generics, unions, interfaces).
 validation, `is` narrowing, `?.`/`??` nil-safety, `ok`/`err` results + `vet`/`check` +
 enum-aware exhaustive-`switch` vet). No variadics/named params, no methods/interfaces,
 `==` is deep equality, VM skips nominal checks (interpreter validates;
-`vm.go:1110` `isKnownVMType`).
+`vm.go:1156` `isKnownVMType`).
 `is` folding only covers string-literal tests for `int/float/number/string/bool/nil/array/map`
 (`internal/frontend/fold.go` — `chan/func/ok/err/any` never fold);
 `x in [array]` folding via the generic path does not fire (outer `isLit` guard excludes `ExprArray`).
@@ -623,7 +623,7 @@ native DB / interactive DAP + time-profiling / incremental+remote cache.
   true/false, `default` rescues), helpers (`tools.go:727` `switchEnumTarget`,
   `tools.go:742` `switchIsBool`), cross-file (`tools.go:870` global enums/types).
 - VM: nominal annotations compile; `OpCheckType` skips unknown (nominal) names
-  (`vm.go:1110`); base `is` works (`vm.go:1134`).
+  (`vm.go:1156`); base `is` works (`vm.go:1180`).
 - Tests: `backend_test.go:316` (`TestRunStructEnumSyntax`), `tools_test.go:68`
   (`TestVetExhaustiveEnum`: all-covered ok / missing-Blue names default rescues),
   `tools_test.go:114` (`TestVetExhaustiveBool`).
@@ -962,7 +962,7 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
   far from native.
 * Gradual types only: struct/enum *syntax* + enum-aware vet done; variadics/named
   params and methods/interfaces missing; `==` uses deep equality. VM checks base
-  types and skips nominals (interpreter validates; `vm.go:1110`). `is`/`in`/unary
+  types and skips nominals (interpreter validates; `vm.go:1156`). `is`/`in`/unary
   folding limits in §“vs TypeScript”.
 * Flat lib namespace default (prefix funcs; no `import "x" as h` yet). `fusion.lock`+
   semver+`vendor/`+file-local registry (`publish/pull/yank`, sha256 sidecar+verify
@@ -977,7 +977,8 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
   `fusion debug --break/--trace` is breakpoints + trace + globals snapshot
   (non-interactive; no DAP/step-REPL). `fusion lsp` is hover/goto/completion/
   rename/diagnostics/format over stdio + VS Code ext v0.3.0 (hand-rolled
-  client, no vscode-test harness). No `go/chan/select/sleep` in compiled output yet;
+  client, no vscode-test harness). No `go/chan/select` in compiled output yet
+  (`sleep` + `try/catch`-without-`finally` compile since v0.3);
   `go defer` rejected.
 * `frontend/` is SSR + keyed DOM-diff without reload + background ISR + nested layouts
   + subset-JS (hashes/manifest/budgets) + SSG + `use_state` shim (`on_mount`
@@ -988,10 +989,10 @@ Rows 6/14 stay intentionally different (GC stays, `unsafe` stays opt-in).
   `ws_connect` + text frames only (binary rejected, no server); `db_*` KV-file;
   extended-dialect SQL is JSON-file (WHERE with AND/OR + LIKE/NOT LIKE, no parens —
   no transactions/indexes/prepared); `regex` no literals; `time` no ticker; `fs` no `watch`.
-* Version/hygiene: toolchain source reports `v2.6` (`fusion version`,
+* Version/hygiene: toolchain source reports `v2.7` (`fusion version`,
   `fusion help`, `toolVersion` in `cmd/fusion/main.go:341` — single constant,
-  keep in sync). `release/fusion` is **v2.6** (rebuilt). `go test ./...` green:
-  133 funcs + 5 benchmarks + 2 `.ks` test files; TLS-server/`--target`/
+  keep in sync). `release/fusion` is **v2.7** (rebuilt). `go test ./...` green:
+  136 funcs + 5 benchmarks + 2 `.ks` test files; TLS-server/`--target`/
   `build-js`-correctness/`repl`-CLI/`vendor`-E2E untested (`--bin` + `--strip`
   E2E covered since v2.6). CI gate is `ci.sh`
   (`go vet` + `go test` + repeat-safe + `fmt --check` + `vet`/`check`).
@@ -1011,7 +1012,7 @@ Tooling/Frontend/Maturity. Re-audit against the code holds three, reverts four:
   (≈0.7x), and tying Go (compiled native) is indefensible on a 2x partial win.
   Progress inside 7; 8 needs full coverage + consistent wins. (Also fixed: VM
   `let u: User` used to fail `wants User, got map` — nominals now skip via
-  `vm.go:1110` `isKnownVMType`, interpreter validates; compiler reject strings
+  `vm.go:1156` `isKnownVMType`, interpreter validates; compiler reject strings
   corrected from stale `v0.1`/misleading-nominal wording.)
 * Types 9 → **8**: struct/enum *syntax* pre-dates the vet work (the v2.4 doc wrongly
   said “no syntax” — corrected: `frontend.go:1040-1118`, `backend.go:1250,1278`
