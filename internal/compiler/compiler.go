@@ -447,6 +447,7 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 			return fmt.Errorf("line %d: break outside loop (compiler v0.1)", st.Line)
 		}
 		// pop block locals above loop depth before jumping
+		c.emitTryPops(st.Line)
 		c.popToLoopDepth(st.Line)
 		pos := c.emit(OpJump, -1, st.Line)
 		l := len(c.loops) - 1
@@ -456,6 +457,7 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 		if len(c.loops) == 0 {
 			return fmt.Errorf("line %d: continue outside loop (compiler v0.1)", st.Line)
 		}
+		c.emitTryPops(st.Line)
 		c.popToLoopDepth(st.Line)
 		lc := &c.loops[len(c.loops)-1]
 		if lc.continueAt >= 0 {
@@ -491,7 +493,7 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 	case frontend.StmtImport:
 		return fmt.Errorf("line %d: `import` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
 	case frontend.StmtTry:
-		return fmt.Errorf("line %d: `try/catch` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
+		return c.compileTry(st)
 	case frontend.StmtSwitch:
 		return c.compileSwitch(st)
 	case frontend.StmtSelect:
@@ -516,7 +518,7 @@ func (c *compiler) compileSwitch(st *frontend.Stmt) error {
 	tgtSlot := c.defineLocal(tgtTmp)
 	_ = tgtSlot
 	// switch break context (captures break, forwards continue)
-	c.loops = append(c.loops, loopCtx{continueAt: -2, savedDepth: c.cur().depth, savedNLocals: len(c.cur().locals)})
+	c.loops = append(c.loops, loopCtx{continueAt: -2, savedDepth: c.cur().depth, savedNLocals: len(c.cur().locals), tryDepth: c.tryDepth})
 	var endJumps []int
 	for _, cs := range st.Cases {
 		if cs.IsDefault {
@@ -582,6 +584,21 @@ func (c *compiler) popToLoopDepth(line int) {
 	n := len(c.cur().locals) - want
 	for i := 0; i < n; i++ {
 		c.emit(OpPop, 0, line)
+	}
+}
+
+// emitTryPops emits OpPopTry for try regions the current break/continue
+// exits: any try opened after the target loop/switch entry. tryDepth is
+// purely lexical, so this also covers try-in-switch-case (the switch ctx
+// carries its entry depth, and switch-level continues forward the same
+// already-popped path to the parent loop).
+func (c *compiler) emitTryPops(line int) {
+	if len(c.loops) == 0 {
+		return
+	}
+	n := c.tryDepth - c.loops[len(c.loops)-1].tryDepth
+	for i := 0; i < n; i++ {
+		c.emit(OpPopTry, 0, line)
 	}
 }
 
@@ -793,7 +810,7 @@ func (c *compiler) compileIf(st *frontend.Stmt) error {
 func (c *compiler) compileWhile(st *frontend.Stmt) error {
 	c.beginScope()
 	start := len(c.cur().fn.Chunk.Code)
-	c.loops = append(c.loops, loopCtx{continueAt: start, savedDepth: c.cur().depth, savedNLocals: len(c.cur().locals)})
+	c.loops = append(c.loops, loopCtx{continueAt: start, savedDepth: c.cur().depth, savedNLocals: len(c.cur().locals), tryDepth: c.tryDepth})
 	if err := c.compileExpr(st.Expr); err != nil {
 		return err
 	}
@@ -851,7 +868,7 @@ func (c *compiler) compileForIn(st *frontend.Stmt) error {
 		c.defineLocal(n)
 	}
 	loopStart := len(c.cur().fn.Chunk.Code)
-	c.loops = append(c.loops, loopCtx{continueAt: -1, savedDepth: c.cur().depth, savedNLocals: len(c.cur().locals)})
+	c.loops = append(c.loops, loopCtx{continueAt: -1, savedDepth: c.cur().depth, savedNLocals: len(c.cur().locals), tryDepth: c.tryDepth})
 	// cond: idx < __iter_len(iter)
 	c.emitGetLocal(idxSlot, idxTmp, st.Line)
 	c.emitGetGlobal("__iter_len", st.Line)
@@ -985,7 +1002,7 @@ func (c *compiler) compileForInRange(st *frontend.Stmt) error {
 		c.defineLocal(n)
 	}
 	loopStart := len(c.cur().fn.Chunk.Code)
-	c.loops = append(c.loops, loopCtx{continueAt: -1, savedDepth: c.cur().depth, savedNLocals: len(c.cur().locals)})
+	c.loops = append(c.loops, loopCtx{continueAt: -1, savedDepth: c.cur().depth, savedNLocals: len(c.cur().locals), tryDepth: c.tryDepth})
 	// cond: ctr < end
 	c.emitGetLocal(ctrSlot, ctrTmp, st.Line)
 	c.emitGetLocal(endSlot, endTmp, st.Line)
@@ -1079,7 +1096,7 @@ func (c *compiler) compileForC(st *frontend.Stmt) error {
 	jFalse := c.emit(OpJumpIfFalse, -1, st.Line)
 	c.emit(OpPop, 0, st.Line)
 	// continue target (post) unknown until after body: use placeholder list
-	c.loops = append(c.loops, loopCtx{continueAt: -1, savedDepth: c.cur().depth, savedNLocals: len(c.cur().locals)})
+	c.loops = append(c.loops, loopCtx{continueAt: -1, savedDepth: c.cur().depth, savedNLocals: len(c.cur().locals), tryDepth: c.tryDepth})
 	if err := c.compileStmt(st.Body); err != nil {
 		return err
 	}
