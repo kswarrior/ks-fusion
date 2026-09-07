@@ -453,6 +453,10 @@ func VendorApp(appDir string) error {
 // ---------------------------------------------------------------------------
 
 func BuildBin(appDir, out, target string) error {
+	return BuildBinWithOptions(appDir, out, target, false)
+}
+
+func BuildBinWithOptions(appDir, out, target string, strip bool) error {
 	cfg, err := config.Load(appDir)
 	if err != nil {
 		return err
@@ -543,7 +547,13 @@ func BuildBin(appDir, out, target string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command("go", "build", "-trimpath", "-o", absOut, "./"+tmpName)
+	args := []string{"build", "-trimpath"}
+	if strip {
+		// v2.6 --strip: drop Go symbol table + DWARF (smaller --bin, still no UPX).
+		args = append(args, "-ldflags", "-s -w")
+	}
+	args = append(args, "-o", absOut, "./"+tmpName)
+	cmd := exec.Command("go", args...)
 	cmd.Dir = modRoot
 	// reproducible (v2.4): -trimpath + CGO off + no VCS stamping
 	env := os.Environ()
@@ -565,6 +575,10 @@ func BuildBin(appDir, out, target string) error {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("go build failed: %w", err)
+	}
+	if strip {
+		fmt.Printf("built bin: %s (target %s, stripped)\n", absOut, targetOrHost(target))
+		return nil
 	}
 	fmt.Printf("built bin: %s (target %s)\n", absOut, targetOrHost(target))
 	return nil

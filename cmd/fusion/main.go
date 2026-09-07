@@ -140,6 +140,7 @@ func main() {
 		bin := false
 		binOut := ""
 		target := ""
+		strip := false
 		args := os.Args[2:]
 		for i := 0; i < len(args); i++ {
 			a := args[i]
@@ -150,8 +151,11 @@ func main() {
 				secure = true
 			case a == "--bin":
 				bin = true
+			case a == "--strip":
+				strip = true
+				bin = true
 			case a == "--help" || a == "-h":
-				fmt.Println("usage: fusion build [dir] [--release] [--secure [--password PWD] [--key-file FILE]] [--out DIR] [--bin [--target OS/ARCH] [-o FILE]]")
+				fmt.Println("usage: fusion build [dir] [--release] [--secure [--password PWD] [--key-file FILE]] [--out DIR] [--bin [--target OS/ARCH] [--strip] [-o FILE]]")
 				return
 			case a == "--password":
 				if i+1 >= len(args) {
@@ -216,7 +220,7 @@ func main() {
 			if out != "" {
 				binOut = out
 			}
-			if err := cmdBuildBin(dir, binOut, target); err != nil {
+			if err := cmdBuildBinStrip(dir, binOut, target, strip); err != nil {
 				fmt.Println("error:", err)
 				os.Exit(1)
 			}
@@ -349,11 +353,12 @@ Commands:
                              entry paths resolve relative to its folder).
                              No flag = both together; --backend = only backend;
                              --frontend = only frontend; both flags = both.
-  fusion build [dir] [--release] [--secure [--password PWD] [--key-file FILE]] [--out DIR] [--bin [--target OS/ARCH] [-o FILE]]
-                             app: parse-check + cache + verify [dependencies]
-                             (semver ^ ~ >= + fusion.lock + registry); --bin: single
-                             static executable (embeds .ks + .kslib); --target:
-                             linux/amd64,arm64,darwin,windows/amd64,wasm
+   fusion build [dir] [--release] [--secure [--password PWD] [--key-file FILE]] [--out DIR] [--bin [--target OS/ARCH] [--strip] [-o FILE]]
+                              app: parse-check + cache + verify [dependencies]
+                              (semver ^ ~ >= + fusion.lock + registry); --bin: single
+                              static executable (embeds .ks + .kslib); --target:
+                              linux/amd64,arm64,darwin,windows/amd64,wasm; --strip:
+                              -ldflags "-s -w" (smaller binary)
                              lib: pack .kslib bundle into test-releases/
                                   (--release) or target/ (debug), like cargo
                                   --secure: opaque .ksx bundle (AES-256-GCM, no

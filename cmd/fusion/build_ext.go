@@ -14,6 +14,13 @@ func cmdBuildBin(dir, out, target string) error {
 	return tools.BuildBin(dir, out, target)
 }
 
+func cmdBuildBinStrip(dir, out, target string, strip bool) error {
+	if dir == "" {
+		dir = "."
+	}
+	return tools.BuildBinWithOptions(dir, out, target, strip)
+}
+
 func cmdVendor(args []string) error {
 	target := "."
 	for _, a := range args {
