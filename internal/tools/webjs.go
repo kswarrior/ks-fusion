@@ -914,6 +914,37 @@ func renderChromeBlocks(b *strings.Builder, typ, key string, props map[string]an
 		}
 		renderNav("sidenav", ckey, items)
 	}
+	if rows, ok := props["rows"].([]any); ok && len(rows) > 0 {
+		ckey := key + ":rows"
+		b.WriteString(`<ul class="rows" data-key="` + html.EscapeString(ckey) + `">`)
+		for i, r := range rows {
+			b.WriteString(`<li data-key="` + html.EscapeString(fmt.Sprintf("%s-%d", ckey, i)) +
+				`">` + html.EscapeString(propAttrString(r)) + `</li>`)
+		}
+		b.WriteString(`</ul>`)
+	}
+	if h, hp := props["h"].(string); hp || props["p"] != nil {
+		p, _ := props["p"].(string)
+		if h != "" || p != "" {
+			ckey := key + ":secbody"
+			b.WriteString(`<div class="secbody" data-key="` + html.EscapeString(ckey) + `">`)
+			if h != "" {
+				b.WriteString(`<h2>` + html.EscapeString(h) + `</h2>`)
+			}
+			if p != "" {
+				b.WriteString(`<p>` + html.EscapeString(p) + `</p>`)
+			}
+			b.WriteString(`</div>`)
+		}
+	}
+	if label, lok := props["label"].(string); lok || props["value"] != nil {
+		ckey := key + ":statbody"
+		b.WriteString(`<div class="statbody" data-key="` + html.EscapeString(ckey) + `">`)
+		b.WriteString(`<span class="stat-label">` + html.EscapeString(label) + `</span>`)
+		b.WriteString(`<span class="stat-value">` + html.EscapeString(propAttrString(props["value"])) + `</span>`)
+		b.WriteString(`</div>`)
+	}
+}
 
 // vmToSSRHTML renders a VM JSON doc to SSR inner HTML for #app.
 func vmToSSRHTML(vmJSON string) string {
@@ -1243,14 +1274,24 @@ es.onmessage = function(e){
     if(!el || !node) return;
     var props = node.props||{};
     var key = node.key||'';
-    var typ = node.type||'';
-    var navArr = (typ==='header') ? props.links : ((typ==='sidebar') ? props.items : null);
-    if(navArr && navArr.length){
-      var cls = (typ==='header') ? 'nav' : 'sidenav';
-      var fresh = buildNav(document, key+':nav', cls, navArr, props);
+    // Same rules as server renderChromeBlocks: links -> nav, items ->
+    // sidenav (:nav-items when both present), then rows/stat/section.
+    var links = (props.links && props.links.length) ? props.links : null;
+    var items = (props.items && props.items.length) ? props.items : null;
+    if(links){
+      var fresh = buildNav(document, key+':nav', 'nav', links, props);
       var old = blockKid(el, key+':nav');
       if(old) el.replaceChild(fresh, old); else placeBlock(el, fresh);
     } else { dropBlock(el, key+':nav'); }
+    if(items){
+      var ickey = links ? key+':nav-items' : key+':nav';
+      var fresh2 = buildNav(document, ickey, 'sidenav', items, props);
+      var old2 = blockKid(el, ickey);
+      if(old2) el.replaceChild(fresh2, old2); else placeBlock(el, fresh2);
+    } else {
+      dropBlock(el, key+':nav-items');
+      if(!links) dropBlock(el, key+':nav');
+    }
     if(typ==='page' && props.rows && props.rows.length){
       var ul = blockKid(el, key+':rows');
       if(!ul){ ul = document.createElement('ul'); ul.setAttribute('data-key', key+':rows'); ul.setAttribute('class', 'rows'); placeBlock(el, ul); }
