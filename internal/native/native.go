@@ -690,6 +690,9 @@ func (g *gen) callType(e *frontend.Expr) (ntype, error) {
 	if !ok {
 		return ntVoid, fmt.Errorf("unknown func %q in native subset (no builtins besides len) — runs in interpreter", name.Name)
 	}
+	if g.pending[name.Name] && name.Name != g.inferring {
+		return ntVoid, fmt.Errorf("func %q used before its return type is known — annotate it with `: type`", name.Name)
+	}
 	if len(e.Args) != len(sig.params) {
 		return ntVoid, fmt.Errorf("func %q wants %d args, got %d", name.Name, len(sig.params), len(e.Args))
 	}
@@ -1424,9 +1427,6 @@ func (g *gen) emitCall(e *frontend.Expr) (string, error) {
 		if !found {
 			return "", fmt.Errorf("unknown func %q", name)
 		}
-	}
-	if g.pending[name] && name != g.inferring {
-		return ntVoid, fmt.Errorf("func %q used before its return type is known — annotate it with `: type`", name)
 	}
 	var args []string
 	for i, a := range e.Args {
