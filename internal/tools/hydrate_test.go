@@ -141,7 +141,7 @@ func TestHydrateClientSnippetActionMount(t *testing.T) {
 
 func TestHydrateCSRRefetch(t *testing.T) {
 	cfg := routingFixture(t, map[string]string{
-		"frontend/pages/home.ks":    "func home_page(props) {\n return {key: \"home\", type: \"page\", props: {title: \"hello\"}, children: []}\n}\n",
+		"frontend/pages/home.ks":      "func home_page(props) {\n return {key: \"home\", type: \"page\", props: {title: \"hello\"}, children: []}\n}\n",
 		"frontend/pages/user_[id].ks": "func user_page(props) {\n let id = props?.id ?? \"missing\"\n return {key: \"user\", type: \"page\", props: {id: id}, children: []}\n}\n",
 	})
 	mux, stop := buildWebMux(cfg, newWebWatcher(cfg.Dir), newISRCache(), false)
@@ -262,5 +262,82 @@ func TestHydrateFetchJSONGetOnly(t *testing.T) {
 	}
 	if !strings.Contains(html, "GET-only") {
 		t.Fatal("fetch_json shim must document GET-only")
+	}
+}
+
+func TestSSRChromeBlocksVisible(t *testing.T) {
+	// v2.7: header/sidebar nav links, page rows, stat values and section
+	// bodies must render as visible escaped HTML — not hide in data-prop-*.
+	vm := map[string]any{
+		"key": "app", "type": "layout", "props": map[string]any{},
+		"children": []any{
+			map[string]any{"key": "header", "type": "header", "props": map[string]any{
+				"title":  "Demo",
+				"active": "/dashboard",
+				"links":  []any{map[string]any{"path": "/", "label": "Home"}, map[string]any{"path": "/dashboard", "label": "Dash <b>x</b>"}},
+			}, "children": []any{}},
+			map[string]any{"key": "sidebar", "type": "sidebar", "props": map[string]any{
+				"active": "/",
+				"items":  []any{map[string]any{"path": "/", "label": "Home", "active": true}},
+			}, "children": []any{}},
+			map[string]any{"key": "dashboard", "type": "page", "props": map[string]any{
+				"title": "Dashboard", "rows": []any{"count = 6", "total < 108"},
+			}, "children": []any{
+				map[string]any{"key": "s1", "type": "stat", "props": map[string]any{"label": "total", "value": float64(108)}, "children": []any{}},
+				map[string]any{"key": "d1", "type": "section", "props": map[string]any{"h": "Routing", "p": "pages serve routes"}, "children": []any{}},
+			}},
+		},
+	}
+	raw, _ := json.Marshal(vm)
+	node := map[string]any{}
+	if err := json.Unmarshal(raw, &node); err != nil {
+		t.Fatal(err)
+	}
+	html := renderVMNodeToHTML(node)
+	for _, want := range []string{
+		`<nav class="nav" data-key="header:nav">`,
+		`<a href="/dashboard" data-key="header:nav-1" class="active">Dash &lt;b&gt;x&lt;/b&gt;</a>`,
+		`<nav class="sidenav" data-key="sidebar:nav">`,
+		`<a href="/" data-key="sidebar:nav-0" class="active">Home</a>`,
+		`<ul class="rows" data-key="dashboard:rows">`,
+		`<li data-key="dashboard:rows-1">total &lt; 108</li>`,
+		`<span class="stat-label">total</span>`,
+		`<span class="stat-value">108</span>`,
+		`<h2>Routing</h2>`,
+		`<p>pages serve routes</p>`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("SSR must render %q, got:\n%s", want, html)
+		}
+	}
+	if strings.Contains(html, "<script>") || strings.Contains(html, "<b>x</b>") {
+		t.Fatalf("SSR chrome blocks must escape markup, got:\n%s", html)
+	}
+}
+
+func TestSSRPageCSSAndAppStyles(t *testing.T) {
+	// Full page carries viewport + default CSS; app frontend/styles/*.css
+	// is inlined after defaults; </style-breaking files are skipped.
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "frontend", "styles"), 0o755)
+	os.WriteFile(filepath.Join(dir, "frontend", "styles", "demo.css"), []byte("header[data-type=\"header\"]{background:#000}\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "frontend", "styles", "evil.css"), []byte("x{}</style><script>alert(1)</script>"), 0o644)
+	vmJSON := `{"key":"home","type":"page","props":{"title":"H"},"children":[]}`
+	html := vmToHTMLWithWatchDir(vmJSON, "/", false, dir)
+	for _, want := range []string{
+		`<meta name="viewport"`,
+		`nav.sidenav`,
+		`/* demo.css */`,
+		`header[data-type="header"]{background:#000}`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("page must contain %q", want)
+		}
+	}
+	if strings.Contains(html, "evil.css") || strings.Contains(html, "alert(1)") {
+		t.Fatalf("style-breaking app CSS must be skipped:\n%s", html[:min(2000, len(html))])
+	}
+	if c := strings.Count(html, "/*FUSION_CSS*/"); c != 0 {
+		t.Fatalf("CSS marker must be replaced, found %d", c)
 	}
 }
