@@ -19,10 +19,11 @@ var diagnosticLineRe = regexp.MustCompile(`:(\d+):`)
 
 func backendBuiltinNames() []string { return backend.BuiltinNames() }
 
-// Full LSP (v2.5): stdio JSON-RPC with initialize, hover, definition, rename,
-// diagnostics (parse + vet), formatting. Enough for VS Code extension
-// (hover/goto-def/rename/diagnostics/format-on-save via `fusion lsp`)
-// + `fusion debug` breakpoints.
+// Full LSP (v2.6): stdio JSON-RPC with initialize, hover, definition, rename,
+// diagnostics (parse + vet), formatting, completion (builtins + keywords +
+// workspace funcs/structs/enums with prefix filtering). Enough for VS Code
+// extension (hover/goto-def/rename/diagnostics/format-on-save/completion
+// via `fusion lsp`) + `fusion debug` breakpoints.
 
 type lspRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -121,7 +122,8 @@ func RunLSP() error {
 			respond(req.ID, map[string]any{"capabilities": map[string]any{
 				"textDocumentSync": 1, "hoverProvider": true, "definitionProvider": true,
 				"documentFormattingProvider": true, "renameProvider": true,
-			}, "serverInfo": map[string]any{"name": "fusion-lsp", "version": "v2.5"}})
+				"completionProvider": map[string]any{"triggerCharacters": []string{".", "_"}},
+			}, "serverInfo": map[string]any{"name": "fusion-lsp", "version": "v2.6"}})
 		case "initialized":
 			// no-op
 		case "shutdown":
@@ -220,13 +222,141 @@ func RunLSP() error {
 				break
 			}
 			respond(req.ID, map[string]any{"changes": edits})
+		case "textDocument/completion":
+			var p struct {
+				TextDocument struct {
+					URI string `json:"uri"`
+				} `json:"textDocument"`
+				Position struct {
+					Line      int `json:"line"`
+					Character int `json:"character"`
+				} `json:"position"`
+			}
+			_ = json.Unmarshal(req.Params, &p)
+			respond(req.ID, map[string]any{"isIncomplete": false, "items": completionItems(p.TextDocument.URI, p.Position.Line, p.Position.Character)})
 		default:
 			if req.ID != nil {
 				respond(req.ID, nil)
+		}
+	}
+	return nil
+}
+
+// ksKeywords are language keywords offered by completion (kind 14).
+var ksKeywords = []string{
+	"let", "func", "return", "if", "else", "while", "for", "in",
+	"break", "continue", "print", "sleep", "go", "import",
+	"true", "false", "nil", "and", "or", "not", "is",
+	"try", "catch", "finally", "switch", "case", "default",
+	"defer", "select", "struct", "enum",
+}
+
+// completionItems returns LSP CompletionItems for the prefix under
+// (line, ch): builtins (kind 3) + keywords (kind 14) + workspace
+// funcs/structs/enums (kind 3 with file detail), prefix-filtered.
+// Empty prefix returns the full set (capped); non-matching prefix returns [].
+func completionItems(uri string, line, ch int) []any {
+	prefix := completionPrefix(uri, line, ch)
+	path := uriToPath(uri)
+	// workspace symbols: top-level funcs + structs + enums in app root
+	type sym struct {
+		label  string
+		detail string
+	}
+	seen := map[string]bool{}
+	var workspace []sym
+	dir := filepath.Dir(path)
+	root := dir
+	for {
+		if _, err := os.Stat(filepath.Join(root, "fusion.toml")); err == nil {
+			break
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			root = dir
+			break
+		}
+		root = parent
+	}
+	if files, err := collectKsFiles(root); err == nil {
+		for _, f := range files {
+			prog, err := frontend.ParseFile(f)
+			if err != nil {
+				continue
+			}
+			for _, st := range prog.Statements {
+				switch st.Kind {
+				case frontend.StmtFunc, frontend.StmtStruct, frontend.StmtEnum:
+					if st.Name == "" || seen["w:"+st.Name] {
+						continue
+					}
+					seen["w:"+st.Name] = true
+					kind := "func"
+					if st.Kind == frontend.StmtStruct {
+						kind = "struct"
+					} else if st.Kind == frontend.StmtEnum {
+						kind = "enum"
+					}
+					workspace = append(workspace, sym{label: st.Name, detail: kind + " " + f + ":" + strconv.Itoa(st.Line)})
+				}
 			}
 		}
-		_ = sc
 	}
+	match := func(s string) bool {
+		return prefix == "" || strings.HasPrefix(s, prefix)
+	}
+	var out []any
+	for _, n := range backendBuiltinNames() {
+		if !match(n) || seen["b:"+n] {
+			continue
+		}
+		seen["b:"+n] = true
+		out = append(out, map[string]any{"label": n, "kind": 3, "detail": "builtin"})
+	}
+	for _, k := range ksKeywords {
+		if !match(k) || seen["k:"+k] {
+			continue
+		}
+		seen["k:"+k] = true
+		out = append(out, map[string]any{"label": k, "kind": 14, "detail": "keyword"})
+	}
+	for _, w := range workspace {
+		if !match(w.label) {
+			continue
+		}
+		out = append(out, map[string]any{"label": w.label, "kind": 3, "detail": w.detail})
+	}
+	if out == nil {
+		out = []any{}
+	}
+	return out
+}
+
+// completionPrefix returns the identifier prefix immediately left of (line, ch),
+// from the open doc when present else the file on disk.
+func completionPrefix(uri string, line, ch int) string {
+	text, ok := getOpenDoc(uri)
+	if !ok {
+		data, err := os.ReadFile(uriToPath(uri))
+		if err != nil {
+			return ""
+		}
+		text = string(data)
+	}
+	lines := strings.Split(text, "\n")
+	if line < 0 || line >= len(lines) {
+		return ""
+	}
+	l := lines[line]
+	if ch < 0 || ch > len(l) {
+		return ""
+	}
+	s := ch
+	for s > 0 && isIdentChar(l[s-1]) {
+		s--
+	}
+	return l[s:ch]
+}
 }
 
 func uriToPath(uri string) string {
