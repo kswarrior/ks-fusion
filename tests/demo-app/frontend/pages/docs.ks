@@ -16,7 +16,7 @@ func docs_page(props) {
   return {
     key: "docs",
     type: "page",
-    props: {title: "Docs", path: "/docs", text: "How this app fits together.", sections: sections, rows: rows[0:0]},
+    props: {title: "Docs", path: "/docs", text: "How this app fits together.", sections: sections, rows: []},
     children: kids
   }
 }
