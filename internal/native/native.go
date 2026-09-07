@@ -548,7 +548,7 @@ func (g *gen) typeOf(e *frontend.Expr) (ntype, error) {
 		}
 		return ntInt, nil
 	case frontend.ExprNeg:
-		t, err := g.typeOf(e.Left)
+		t, err := g.typeOf(e.Right)
 		if err != nil {
 			return ntVoid, err
 		}
@@ -557,7 +557,7 @@ func (g *gen) typeOf(e *frontend.Expr) (ntype, error) {
 		}
 		return t, nil
 	case frontend.ExprNot:
-		t, err := g.typeOf(e.Left)
+		t, err := g.typeOf(e.Right)
 		if err != nil {
 			return ntVoid, err
 		}
@@ -1291,14 +1291,14 @@ func (g *gen) emitExprRaw(e *frontend.Expr) (string, error) {
 		// typeOf guarantees a non-negative int literal exponent here.
 		return "ksPowI(" + l + ", " + strconv.FormatInt(int64(e.Right.IntVal), 10) + ")", nil
 	case frontend.ExprNeg:
-		t, _ := g.typeOf(e.Left)
-		s, err := g.emitExpr(e.Left, t)
+		t, _ := g.typeOf(e.Right)
+		s, err := g.emitExpr(e.Right, t)
 		if err != nil {
 			return "", err
 		}
 		return "-(" + s + ")", nil
 	case frontend.ExprNot:
-		s, err := g.emitExpr(e.Left, ntBool)
+		s, err := g.emitExpr(e.Right, ntBool)
 		if err != nil {
 			return "", err
 		}
@@ -1495,9 +1495,9 @@ func (g *gen) emitForIn(st *frontend.Stmt) error {
 	}
 	// Evaluate bounds once, like the interpreter's range array.
 	sT, eT, pT := g.tmpName(), g.tmpName(), g.tmpName()
-	g.emit("%s := %s\n", sT, start)
-	g.emit("%s := %s\n", eT, end)
-	g.emit("%s := %s\n", pT, step)
+	g.emit("var %s int64 = %s\n", sT, start)
+	g.emit("var %s int64 = %s\n", eT, end)
+	g.emit("var %s int64 = %s\n", pT, step)
 	g.emit("if %s == 0 {\n", pT)
 	g.emit("panic(\"range step cannot be 0\")\n")
 	g.emit("}\n")
