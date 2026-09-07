@@ -236,10 +236,25 @@ func TranspileProgram(prog *frontend.Program) (string, error) {
 		delete(g.pending, st.Name)
 	}
 	// Phase 2: determine return types (annotations verified, else inferred).
+	// Unannotated funcs infer in reverse textual order so the common
+	// "caller first, helper after" style resolves without annotations.
+	var todo []*frontend.Stmt
 	for _, st := range prog.Statements {
 		if st.Kind != frontend.StmtFunc {
 			continue
 		}
+		if st.ReturnType != "" {
+			ret, err := g.inferFuncRet(st)
+			if err != nil {
+				return "", err
+			}
+			g.funcs[st.Name].ret = ret
+			continue
+		}
+		todo = append(todo, st)
+	}
+	for i := len(todo) - 1; i >= 0; i-- {
+		st := todo[i]
 		ret, err := g.inferFuncRet(st)
 		if err != nil {
 			return "", err
@@ -304,6 +319,8 @@ func TranspileProgram(prog *frontend.Program) (string, error) {
 // from the body. Unannotated recursion cannot be inferred and is rejected.
 func (g *gen) inferFuncRet(st *frontend.Stmt) (ntype, error) {
 	sig := g.funcs[st.Name]
+	g.inferring = st.Name
+	defer func() { g.inferring = "" }()
 	if st.ReturnType != "" {
 		want, err := parseAnn(st.ReturnType, st.Line)
 		if err != nil {
@@ -313,6 +330,7 @@ func (g *gen) inferFuncRet(st *frontend.Stmt) (ntype, error) {
 		if err := g.verifyReturns(st, st.Body, want); err != nil {
 			return ntVoid, err
 		}
+		delete(g.pending, st.Name)
 		return want, nil
 	}
 	if callsSelf(st.Body, st.Name) {
@@ -324,12 +342,13 @@ func (g *gen) inferFuncRet(st *frontend.Stmt) (ntype, error) {
 	for i, p := range st.Names {
 		g.vars[0][p] = sig.params[i]
 	}
-	types, err := g.collectReturns(st.Body)
+	types, err := g.collectReturnsNested(st.Body, st.Line)
 	g.vars = saved
 	if err != nil {
 		return ntVoid, err
 	}
 	if len(types) == 0 {
+		delete(g.pending, st.Name)
 		return ntVoid, nil
 	}
 	ret := types[0]
@@ -340,6 +359,7 @@ func (g *gen) inferFuncRet(st *frontend.Stmt) (ntype, error) {
 			return ntVoid, fmt.Errorf("line %d: func %q %v", st.Line, st.Name, err)
 		}
 	}
+	delete(g.pending, st.Name)
 	return ret, nil
 }
 
