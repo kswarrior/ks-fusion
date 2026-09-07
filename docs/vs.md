@@ -80,8 +80,8 @@ v2.4 added union/generic annotations, sqlite-subset, cancel, narrow audit, minim
 postgres-compat + WS-frames/pipes, real audit, full LSP + `fusion debug` + VS Code
 ext v0.2.0, DOM-diff without reload + background ISR, release v2.5 + `ci.sh`;
 v2.6 adds SQL OR/AND + LIKE/NOT LIKE, LSP completion + VS Code ext v0.3.0,
-`.ks`-line `fusion profile`, vendor-aware cache + `--strip`, `--bin` E2E,
-in-repo CI (`.github/workflows/ci.yml`) + hygiene.
+`.ks`-line `fusion profile`, vendor-aware cache + `--strip`, `--bin`/`--strip`
+E2E + hygiene (`.gitignore`, `retest.log` removal, vet fix).
 VM v0.2 is measured progress (≈2x fib) with a loop regression — it holds Perf 7,
 not 8 (see “Corrections”).
 
