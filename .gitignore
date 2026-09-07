@@ -4,3 +4,5 @@
 # `defer os.RemoveAll` when the build finishes, but ignore the pattern so a
 # slow build is never snapshotted mid-flight.
 tmp-fusion-bin-*/
+# stray local test logs (never commit)
+retest.log

@@ -42,7 +42,7 @@ func TestRegistryPublishPull(t *testing.T) {
 		t.Fatalf("pulled file missing: %v", err)
 	}
 	// yank
-	if err := Yank("hello-lib", "0.1.0", false); err != nil {
+	if err := Yank("hello-lib", "0.1.0", false, ""); err != nil {
 		t.Fatalf("yank failed: %v", err)
 	}
 	// pull yanked should fail

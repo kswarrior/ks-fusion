@@ -379,7 +379,7 @@ Commands:
    fusion vendor [appdir]     copy .kslib deps into vendor/ (offline)
    fusion publish [libdir] [--registry DIR]  publish .kslib + sha256 + index
    fusion pull <name[@spec]> [--out DIR]  fetch + verify sha256
-   fusion yank <name[@ver]> [--remove]  yank registry version
+   fusion yank <name[@ver]> [--remove] [--registry DIR]  yank registry version
    fusion registry            list registry packages
    fusion run-web [appdir] [--port N] [--watch]  SSR + /api/* + SSE HMR patch
     fusion build-js [appdir] [--out DIR] [--strict|--no-strict]  transpile pages to JS per-route + hashes (STRICT default)

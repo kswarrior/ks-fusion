@@ -223,18 +223,28 @@ func cmdPull(args []string) error {
 
 func cmdYank(args []string) error {
 	if len(args) == 0 {
-		fmt.Println("usage: fusion yank <name[@version]> [--remove]")
+		fmt.Println("usage: fusion yank <name[@version]> [--remove] [--registry DIR]")
 		return fmt.Errorf("missing package")
 	}
 	name := ""
 	remove := false
-	for _, a := range args {
+	reg := ""
+	for i := 0; i < len(args); i++ {
+		a := args[i]
 		switch {
 		case a == "--help" || a == "-h":
-			fmt.Println("usage: fusion yank <name[@version]> [--remove]\n  mark registry version yanked (or --remove to delete)")
+			fmt.Println("usage: fusion yank <name[@version]> [--remove] [--registry DIR]\n  mark registry version yanked (or --remove to delete)")
 			return nil
 		case a == "--remove":
 			remove = true
+		case a == "--registry":
+			if i+1 >= len(args) {
+				return fmt.Errorf("usage: fusion yank <name[@version]> [--remove] [--registry DIR]")
+			}
+			i++
+			reg = args[i]
+		case strings.HasPrefix(a, "--registry="):
+			reg = strings.TrimPrefix(a, "--registry=")
 		case strings.HasPrefix(a, "-"):
 			return fmt.Errorf("unknown flag %q", a)
 		default:
@@ -249,7 +259,7 @@ func cmdYank(args []string) error {
 		ver = name[j+1:]
 		name = name[:j]
 	}
-	return tools.Yank(name, ver, remove)
+	return tools.Yank(name, ver, remove, reg)
 }
 
 func cmdRegistry(args []string) error {
@@ -259,7 +269,8 @@ func cmdRegistry(args []string) error {
 			return nil
 		}
 	}
-	for _, e := range tools.RegistryList() {
+	entries := tools.RegistryList()
+	for _, e := range entries {
 		flag := ""
 		if e.Yanked {
 			flag = " [yanked]"
@@ -269,6 +280,9 @@ func cmdRegistry(args []string) error {
 			sha = sha[:12]
 		}
 		fmt.Printf("%s %s %s%s\n", e.Name, e.Version, sha, flag)
+	}
+	if len(entries) == 0 {
+		fmt.Println("registry: empty (no packages)")
 	}
 	return nil
 }
