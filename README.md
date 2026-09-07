@@ -343,6 +343,8 @@ internal/config/     fusion.toml (apps, libs, dependencies)
 internal/lib/        .kslib bundles: build/load/find
 tests/hello-app/     test app (backend/ frontend/ fusion.toml)
 tests/hello-lib/     test library (src/*.ks)
+tests/demo-app/      full-stack demo app (header/sidebar, dashboard/about/docs/user pages, backend/api/*, demo-lib dep)
+tests/demo-lib/      demo shared library (demo_* helpers)
 test-releases/       built lib bundles (like Rust's target/release)
 ```
 
