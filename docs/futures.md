@@ -70,8 +70,11 @@
 
 ### P1 — runtime + performance
 
-* [ ] Bytecode compiler + VM (drop tree-walk hot loop, 5–20x speedup target).
-  Keep `RunFile` / shebang behavior identical.
+* [x] Native machine code, step 1 (`internal/native`, `fusion native`): transpile the
+  strict subset (scalars, control flow, typed funcs) to Go, `go build` to a real
+  ELF binary (fib(30): ms, not s; `--target` cross-compile works). Interpreter
+  stays the full language; outside the subset the transpiler rejects with `line N:`.
+  Left: wider coverage (arrays/maps/strings ops, more builtins), LLVM/JIT evaluation.
 * [x] `fusion build --bin` → single static executable (embed `.ks`+`.kslib`,
   like `go build`). Done v2.4: `fusion build --bin [-o FILE] [--target OS/ARCH]`, verified 11M isolated run.
 * [x] Cross-compile: `--target linux/amd64,arm64,darwin,windows,wasm`. Done v2.4 (GOOS/GOARCH passthrough).
