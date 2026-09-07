@@ -1,23 +1,31 @@
-# backend/main.ks - logic with Go-like concurrency
-let app = "hello-app"
+# backend/main.ks - demo-app logic: shared lib + concurrency + JSON API helpers.
+import "demo-lib"
+
+let app = "demo-app"
 print "backend: starting " + app
+print demo_greet(app), "|", demo_title()
+print "clamped:", demo_clamp(99, 0, 10), "sum:", demo_sum([1, 2, 3])
 
-func fib(n) {
-  if n < 2 {
-    return n
-  }
-  return fib(n - 1) + fib(n - 2)
-}
-print "fib(10) =", fib(10)
+let numbers = [4, 8, 15, 16, 23, 42]
+let st = demo_stats(numbers)
+print "stats:", json_stringify(st)
 
-let ch = chan(2)
-go func() {
-  for i in range(3) {
-    send(ch, i * 10)
-  }
-  close(ch)
-}()
-for v in range(3) {
-  print "backend: job", recv(ch)
+# fan-out: compute partial sums concurrently, then combine
+let parts = [[1, 2, 3], [4, 5], [6, 7, 8, 9]]
+let ch = chan(3)
+for part in parts {
+  go func() {
+    send(ch, demo_sum(part))
+  }()
 }
+let grand = 0
+for i in range(len(parts)) {
+  grand = grand + recv(ch)
+}
+print "grand total =", grand
+
+# parallel map over the nav labels
+let labels = parallel(demo_nav(), func(item) { return item.label })
+print "nav:", join(labels, ", ")
+
 print "backend: ok"
