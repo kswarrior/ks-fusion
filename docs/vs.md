@@ -75,21 +75,25 @@ unchecked: git deps, central registry, variadics, hydrate-full, FFI).
 `fusion compile` (`internal/compiler`, `.ksb-1` + `fusion prog.ksb` + `--dis`/`--run`) is step one
 of the P1 runtime plan; v2.2 added `--bin`/`--target`, v2.3 added cache/host-profile/file-registry/watch/SSG/TCP-minimal,
 v2.4 added union/generic annotations, sqlite-subset, cancel, narrow audit, minimal LSP, ISR/layouts/HMR-patch,
-`range(n)`/sorted-check opts, `-trimpath` reproducibles; v2.5 adds VM v0.2
+`range(n)`/sorted-check opts, `-trimpath` reproducibles; v2.5 added VM v0.2
 (slices/`is`/`?.`/`??`/typed/`switch`), exhaustive-switch vet, extended SQL +
 postgres-compat + WS-frames/pipes, real audit, full LSP + `fusion debug` + VS Code
-ext v0.2.0, DOM-diff without reload + background ISR, release v2.5 + `ci.sh`.
+ext v0.2.0, DOM-diff without reload + background ISR, release v2.5 + `ci.sh`;
+v2.6 adds SQL OR/AND + LIKE/NOT LIKE, LSP completion + VS Code ext v0.3.0,
+`.ks`-line `fusion profile`, vendor-aware cache + `--strip`, `--bin` E2E,
+in-repo CI (`.github/workflows/ci.yml`) + hygiene.
 VM v0.2 is measured progress (≈2x fib) with a loop regression — it holds Perf 7,
 not 8 (see “Corrections”).
 
 ## How scoring works (out of 100)
 
 Each language / stack is scored `0-10` on 10 dimensions = `100` max.
-Snapshot for ks-fusion `v2.5` (177 builtins = 96+52+11+12+6, struct/enum syntax +
-exhaustive-switch vet, VM v0.2 + `docs/bench.md`, WS text frames + extended SQL +
-postgres-compat + pipes/signals, file-registry + real audit, full LSP + debug +
-VS Code ext, DOM-diff without reload + background ISR, release v2.5 + `ci.sh`,
-`--bin`/`--target`/`-trimpath`, lock/semver/vendor, cancel, literal folding).
+Snapshot for ks-fusion `v2.6` (177 builtins = 96+52+11+12+6, struct/enum syntax +
+exhaustive-switch vet, VM v0.2 + `docs/bench.md`, WS text frames + extended SQL
+(OR/AND + LIKE) + postgres-compat + pipes/signals, file-registry + real audit,
+full LSP (incl. completion) + debug + profile + VS Code ext v0.3.0, DOM-diff
+without reload + background ISR, vendor-aware cache + `--strip`, release v2.6 +
+`ci.sh` + in-repo CI + `--bin` E2E, lock/semver/vendor, cancel, literal folding).
 Higher = better, except simplicity where easier = higher. Scores are opinionated but rubric-based, not benchmarks.
 “Parity” below means **breadth for scripts/services**, not depth — every Go/Rust-parity claim has a
 thin-depth footnote in §“Why not Go/Rust-class”.
@@ -110,10 +114,10 @@ Simplicity + Build/Deploy + Frontend + Maturity = 100`.
 | Simplicity | 9 | 7 | 5 | 4 | 4 | 7 | 10 | 7 | 6 | 8 |
 | Build/Deploy | 8 | 10 | 9 | 8 | 8 | 6 | 5 | 5 | 7 | 6 |
 | Frontend | 8 | 5 | 6 | 2 | 4 | 8 | 5 | 4 | 10 | 7 |
-| Maturity | 8 | 9 | 8 | 9 | 9 | 9 | 10 | 7 | 8 | 8 |
-| **Total /100** | **83** | **82** | **81** | **62** | **73** | **77** | **74** | **69** | **79** | **67** |
+| Maturity | 9 | 9 | 8 | 9 | 9 | 9 | 10 | 7 | 8 | 8 |
+| **Total /100** | **84** | **82** | **81** | **62** | **73** | **77** | **74** | **69** | **79** | **67** |
 
-What the `.ks` 83 does and does not mean (read before citing 83; evidence for every scored claim in “v2.5 evidence”):
+What the `.ks` 84 does and does not mean (read before citing 84; evidence for every scored claim in “v2.5 evidence” + “v2.6 evidence”):
 
 - Perf 7 = “fast enough for scripts; VM v0.2 is measured but partial” (evidence §E1):
   `range(n)` no-alloc path + sorted-input check + folding + O(log n) `**` in both
@@ -129,9 +133,10 @@ What the `.ks` 83 does and does not mean (read before citing 83; evidence for ev
 - Concurrency 9 = “interpreter `select`/`for-in`/`with_timeout`/`parallel`/
   `with_cancel` at Go spelling parity”. VM has none; no deterministic scheduler;
   `--race` is vet + env (`main.go:793-809`), not instrumentation.
-- Stdlib 9 = “177 builtins breadth + extended-dialect depth” (evidence §E3):
-  WS text frames, sqlite UPDATE/JOIN/ORDER/GROUP/LIMIT + postgres-compat names on
-  a JSON-file engine (AND-only WHERE, no OR/transactions/indexes/prepared),
+- Stdlib 9 = “177 builtins breadth + extended-dialect depth” (evidence §E3 +
+  v2.6 §E8): WS text frames, sqlite UPDATE/JOIN/ORDER/GROUP/LIMIT + WHERE with
+  AND/OR + LIKE/NOT LIKE (`%`/`_`, OR looser than AND, no parens) +
+  postgres-compat names on a JSON-file engine (no transactions/indexes/prepared),
   pipes/signals, `tcp_shutdown`, cancel. `http_serve` minimal
   (`func(path)->string`, always `application/json`, no shutdown). 9 ties Go
   breadth; 10 (Python) would need native DB + data-stack depth.
@@ -139,27 +144,33 @@ What the `.ks` 83 does and does not mean (read before citing 83; evidence for ev
   (evidence §E4): hash recompute + transitive closure, tested. No central server,
   no git deps, no docs.rs, token env-hint only. 8 ties Go/Rust file-registry
   depth for scripts; central-registry depth still ahead.
-- Tooling 9 = “fmt/vet/test/doc/check/repl/bench + `fusion debug`
+- Tooling 9 = “fmt/vet/test/doc/check/repl/bench/profile + `fusion debug`
   (breakpoints/trace/globals, non-interactive) + full stdio LSP (hover/goto/
-  rename/diagnostics/format) + VS Code ext v0.2.0 (hand-rolled client) +
-  host `--cpuprofile` + hash-skip cache” (evidence §E5). No completion, no DAP/
-  step-REPL, no `.ks`-line profiler, ext has no vscode-test harness. 9 holds
-  Go/Rust parity for scripts; 10 would need interactive debugging + completion.
-- Build 8 = “`--bin` via `go build -trimpath` + deterministic embed order +
-  `--target` + hash-skip cache”. Requires Go toolchain; cache is whole-app
-  (any `.ks` change invalidates; `vendor/` swaps do *not* bust it); no remote
-  cache, no strip/symbol opts. 8 holds.
+  completion/rename/diagnostics/format) + VS Code ext v0.3.0 (hand-rolled client) +
+  host `--cpuprofile` + `.ks`-line `fusion profile` (exact per-line statement
+  counts, not wall time) + vendor-aware hash-skip cache” (evidence §E5 + v2.6
+  §E8). No DAP/step-REPL, no sampling time-profiler, ext has no vscode-test
+  harness. 9 holds Go/Rust parity for scripts; 10 would need interactive
+  debugging + time profiling.
+- Build 8 = “`--bin` via `go build -trimpath` + `--strip` (`-ldflags "-s -w"`,
+  ~31% smaller measured) + deterministic embed order + `--target` +
+  vendor-aware hash-skip cache (vendor swaps bust it)” (evidence v2.6 §E8).
+  Requires Go toolchain; cache is whole-app hash-skip (no TTL/size/remote),
+  no incremental per-file rebuild. 8 holds.
 - Frontend 8 = “SSR + DOM-diff without reload + background ISR + nested layouts
   + subset-JS (hashes/manifest/budgets) + SSG + virtualized lists + `use_state`
   shim” (evidence §E6). No hydrate-full (`on_mount` immediate), no CSS handling,
   `fetch_json` GET-only. 8 ties Node SSR-prototype depth; React/Vite/Next UI
   depth still ahead.
-- Maturity 8 = “`docs/stability.md` semver/LTS + `docs/rfcs/` (2 RFCs) +
-  125 `go test` funcs + 5 benchmarks + 2 `.ks` test files + release v2.5 +
-  `ci.sh` gate + per-file `test --timeout` + repeat-safe TCP” (evidence §E7).
-  Gaps: TLS-server/`--bin` E2E, `.github/workflows` is deployment-managed
-  (gate lives in `ci.sh`), `retest.log` leftover. 8 holds.
-- 83 is breadth-for-scripts/services on this rubric, not Go/Rust depth parity. See “Why not Go/Rust-class” + “Honest limits”.
+- Maturity 9 = “`docs/stability.md` semver/LTS + `docs/rfcs/` (2 RFCs) +
+  133 `go test` funcs (was 125: +8 for OR/LIKE, completion x2, profile x3,
+  vendor-cache, `--bin` E2E) + 5 benchmarks + 2 `.ks` test files + release v2.6
+  + `ci.sh` gate + in-repo `.github/workflows/ci.yml` (same gate) + per-file
+  `test --timeout` + repeat-safe TCP + `--bin` E2E (builds + runs a minimal app)
+  + hygiene (`retest.log` leftover removed, pre-existing `go vet` unreachable-code
+  fixed)” (evidence v2.6 §E8). Remaining gap: TLS-server E2E (needs a
+  `tls_serve` feature — explicitly left). 9 holds.
+- 84 is breadth-for-scripts/services on this rubric, not Go/Rust depth parity. See “Why not Go/Rust-class” + “Honest limits”.
 
 Extra stacks (same rubric): `TypeScript 79`, `Java/Kotlin/Spring 78`,
 `Vite 77`, `Deno/Bun 77`, `React 76`, `Lua 58`, `Ruby/Rails 68`, `Bash 45`.
@@ -176,14 +187,14 @@ Details in `More` below. Frontend breakdown:
 | Simplicity | 9 | 6 | 6 | 8 | 6 |
 | Build/Deploy | 8 | 7 | 7 | 10 | 7 |
 | Frontend | 8 | 10 | 10 | 10 | 10 |
-| Maturity | 8 | 9 | 9 | 8 | 8 |
-| **Total /100** | **83** | **79** | **76** | **77** | **79** |
+| Maturity | 9 | 9 | 9 | 8 | 8 |
+| **Total /100** | **84** | **79** | **76** | **77** | **79** |
 
 ## Language-by-language
 
 ### vs Go (implementation language)
 
-**Score: ks-fusion 83/100 vs Go 82/100 — ks-fusion wins by 1 on balance (loses on native depth).**
+**Score: ks-fusion 84/100 vs Go 82/100 — ks-fusion wins by 2 on balance (loses on native depth).**
 
 Same ideas: `go func(){...}()`, `chan(1)`, `send/recv/close`, `select`, `defer` LIFO.
 Difference: Go is compiled + statically typed; `.ks` runs on a tree-walk interpreter
@@ -241,7 +252,7 @@ where requiring a Go toolchain at build time is acceptable.
 
 ### vs Rust
 
-**Score: ks-fusion 83/100 vs Rust 81/100 — ks-fusion wins by 2 on balance (loses on systems depth).**
+**Score: ks-fusion 84/100 vs Rust 81/100 — ks-fusion wins by 3 on balance (loses on systems depth).**
 
 Rust gives ownership, `Result/Option`, `cargo` registry, zero-cost abstractions.
 `.ks` copies the `cargo` UX (`fusion new --lib`, `fusion build --release`,
@@ -257,7 +268,7 @@ Pick `.ks` for Day-1 productivity without borrow checker.
 
 ### vs C
 
-**Score: ks-fusion 83/100 vs C 62/100 — ks-fusion wins by 21.**
+**Score: ks-fusion 84/100 vs C 62/100 — ks-fusion wins by 21.**
 
 C gives pointers, manual `malloc/free`, direct syscalls, tiny runtimes.
 `.ks` gives `array/map/string` + Go GC + bounds-checked indexing + 177 builtins + `--bin`/cache/repro.
@@ -267,7 +278,7 @@ Pick `.ks` for everything where `segfault` is unacceptable.
 
 ### vs C++
 
-**Score: ks-fusion 83/100 vs C++ 73/100 — ks-fusion wins by 10.**
+**Score: ks-fusion 84/100 vs C++ 73/100 — ks-fusion wins by 10.**
 
 C++ gives RAII, templates, classes, deterministic destruction, huge game/engine libs.
 `.ks` gives `func` closures + `defer` + duck-typed maps + `struct` declarations
@@ -279,7 +290,7 @@ Pick `.ks` for config-driven logic on top of those engines.
 
 ### vs Node.js
 
-**Score: ks-fusion 83/100 vs Node.js 77/100 — ks-fusion wins by 6 (on balance, not on npm depth).**
+**Score: ks-fusion 84/100 vs Node.js 77/100 — ks-fusion wins by 6 (on balance, not on npm depth).**
 
 Node gives V8, `npm` (2M+ packages), `fetch/http`, event loop, TypeScript.
 `.ks` gives simpler blocking `recv`/`select` + 177 sync builtins in the
@@ -306,7 +317,7 @@ Pick `.ks` for small deterministic scripts/services without `node_modules`.
 
 ### vs Python
 
-**Score: ks-fusion 83/100 vs Python 74/100 — ks-fusion wins by 9 (on balance; loses on data/AI libs).**
+**Score: ks-fusion 84/100 vs Python 74/100 — ks-fusion wins by 9 (on balance; loses on data/AI libs).**
 
 Closest feel: `let x = 10`, `for i in range(5)`, `a[1:3]`, `and/or/not`,
 truthiness (`nil false 0 0.0 "" [] {}` falsy), `map/filter/reduce`.
@@ -322,7 +333,7 @@ Pick `.ks` for learning concurrency early or embedding a tiny Go-based runtime, 
 
 ### vs Julia (numerical computing language)
 
-**Score: ks-fusion 83/100 vs Julia 69/100 — ks-fusion wins by 14 on balance, loses on numerics.**
+**Score: ks-fusion 84/100 vs Julia 69/100 — ks-fusion wins by 14 on balance, loses on numerics.**
 
 Julia = JIT-compiled (LLVM) + multiple dispatch + parametric types.
 Feels like Python/MATLAB for math, runs like C for loops/matrices.
@@ -352,7 +363,7 @@ and embedding a Go-based runtime where Julia's heavy JIT + slow startup is overk
 
 ### vs Next.js (framework, not language)
 
-**Score: ks-fusion 83/100 vs Next.js 79/100 — ks-fusion wins by 4 on balance (different category; loses on UI depth).**
+**Score: ks-fusion 84/100 vs Next.js 79/100 — ks-fusion wins by 4 on balance (different category; loses on UI depth).**
 
 Category error if compared 1:1. Next.js = React + routing + SSR/ISR + Node runtime.
 ks-fusion app = `backend/main.ks` + `frontend/` (`main.ks` route table +
@@ -393,7 +404,7 @@ Pick `.ks` for the logic worker behind it.
 
 ### vs TypeScript (language, not runtime)
 
-**Score: ks-fusion 83/100 vs TypeScript 79/100 — ks-fusion wins by 4 on balance (loses on type depth at scale).**
+**Score: ks-fusion 84/100 vs TypeScript 79/100 — ks-fusion wins by 4 on balance (loses on type depth at scale).**
 
 TypeScript = JS + static types (`tsc`, `strict`, generics, unions, interfaces).
 `.ks` = gradual types (dynamic by default, optional `: type` runtime checks incl. union `int|string` and generic
@@ -438,7 +449,7 @@ Interop: `fusion build-js` subset → import `.ks` logic into TS (subset only, c
 
 ### vs React (UI library)
 
-**Score: ks-fusion 83/100 vs React 76/100 — ks-fusion wins by 7 (different category, on balance only).**
+**Score: ks-fusion 84/100 vs React 76/100 — ks-fusion wins by 7 (different category, on balance only).**
 
 React = components, hooks, virtual DOM, concurrent renderer.
 `.ks` = view-model funcs + console renderer + `run-web` SSR (keyed diff, no reload) + `build-js` JS,
@@ -468,7 +479,7 @@ Pick `.ks` for the worker behind the UI (JSON over stdout/file/`http_*`, `run-we
 
 ### vs Vite (frontend build tool)
 
-**Score: ks-fusion 83/100 vs Vite 77/100 — ks-fusion wins by 6 (different category, on balance only).**
+**Score: ks-fusion 84/100 vs Vite 77/100 — ks-fusion wins by 6 (different category, on balance only).**
 
 Vite = instant HMR dev server + `esbuild`/Rollup bundler + plugin ecosystem.
 `fusion` = `new/run/build/launch` (+ `compile --dis/--run` partial, `test` TAP runner, `fmt/vet/doc/check/bench/debug`,
@@ -487,7 +498,7 @@ Pick `.ks` for logic; `fusion build-js` emits a Vite-consumable subset module (a
 
 ### vs PHP Laravel
 
-**Score: ks-fusion 83/100 vs Laravel 67/100 — ks-fusion wins by 16 (on balance for sidecars; not a CRUD replacement).**
+**Score: ks-fusion 84/100 vs Laravel 67/100 — ks-fusion wins by 16 (on balance for sidecars; not a CRUD replacement).**
 
 Laravel gives routing, ORM/Eloquent, migrations, Blade, queues, auth scaffolding.
 `.ks` gives `http_get/post/serve` (minimal serve), JSON-file KV `db_put/get/delete/list` + JSON-file extended-dialect SQL
