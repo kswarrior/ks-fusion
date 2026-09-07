@@ -804,7 +804,8 @@ func (c *compiler) compileWhile(st *frontend.Stmt) error {
 func (c *compiler) compileForIn(st *frontend.Stmt) error {
 	if isRangeLoop(st) {
 		return c.compileForInRange(st)
-	}	c.beginScope()
+	}
+	c.beginScope()
 	iterTmp := c.hiddenName("iter")
 	idxTmp := c.hiddenName("idx")
 	needKeys := len(st.Names) == 2
@@ -931,33 +932,30 @@ func (c *compiler) compileForInRange(st *frontend.Stmt) error {
 	c.beginScope()
 	ctrTmp := c.hiddenName("rctr")
 	endTmp := c.hiddenName("rend")
-	// eval bounds once (same single-evaluation as the generic path)
+	// eval bounds once (same single-evaluation as the generic path).
+	// Slots are append-only, so captured indices stay valid below.
+	var ctrSlot, endSlot int
 	if len(st.Expr.Args) == 1 {
 		// start = 0
 		c.emit(OpConst, c.addConst(Const{Kind: CKInt, Int: 0}), st.Line)
-		ctrSlot := c.defineLocal(ctrTmp)
-		_ = ctrSlot
+		ctrSlot = c.defineLocal(ctrTmp)
 		if err := c.compileExpr(st.Expr.Args[0]); err != nil {
 			return err
 		}
 		c.emitNamed(OpCheckType, 0, "int", st.Line)
-		endSlot := c.defineLocal(endTmp)
-		_ = endSlot
+		endSlot = c.defineLocal(endTmp)
 	} else {
 		if err := c.compileExpr(st.Expr.Args[0]); err != nil {
 			return err
 		}
 		c.emitNamed(OpCheckType, 0, "int", st.Line)
-		ctrSlot := c.defineLocal(ctrTmp)
-		_ = ctrSlot
+		ctrSlot = c.defineLocal(ctrTmp)
 		if err := c.compileExpr(st.Expr.Args[1]); err != nil {
 			return err
 		}
 		c.emitNamed(OpCheckType, 0, "int", st.Line)
-		endSlot := c.defineLocal(endTmp)
-		_ = endSlot
+		endSlot = c.defineLocal(endTmp)
 	}
-	_ = endTmp
 	keyTmp := ""
 	keySlot := -1
 	if two {
@@ -971,10 +969,6 @@ func (c *compiler) compileForInRange(st *frontend.Stmt) error {
 		c.emit(OpConst, c.addConst(Const{Kind: CKNil}), st.Line)
 		c.defineLocal(n)
 	}
-	// re-resolve hidden slots (defineLocal above may have shifted nothing —
-	// slots are append-only, so captured indices stay valid; re-resolve the
-	// counter/end by name for clarity is unnecessary: keep captured slots).
-	ctrSlot, endSlot := c.slotOf(ctrTmp), c.slotOf(endTmp)
 	loopStart := len(c.cur().fn.Chunk.Code)
 	c.loops = append(c.loops, loopCtx{continueAt: -1, savedDepth: c.cur().depth, savedNLocals: len(c.cur().locals)})
 	// cond: ctr < end
