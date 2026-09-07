@@ -1504,7 +1504,10 @@ func BuildSSG(appDir, out string) error {
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return err
 	}
-	routes := []string{"/", "/hi"}
+	// v2.7: seed only "/" — every other route is discovered from
+	// frontend/pages/*.ks below (a hardcoded "/hi" here used to emit a
+	// phantom hi.html for apps with no hi.ks).
+	routes := []string{"/"}
 	// add each static page file as route (P1: skip dynamic foo_[bar].ks)
 	if ents, err := os.ReadDir(filepath.Join(cfg.Dir, "frontend", "pages")); err == nil {
 		for _, e := range ents {
