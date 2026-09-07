@@ -243,6 +243,7 @@ type loopCtx struct {
 	continueAt   int // >=0 when known before body; -1 defers to continues list
 	savedDepth   int
 	savedNLocals int
+	tryDepth     int // lexically enclosing trys at loop/switch entry
 }
 
 type funcCtx struct {
@@ -258,6 +259,7 @@ type compiler struct {
 	gindex  map[string]int
 	frames  []*funcCtx
 	loops   []loopCtx
+	tryDepth int // lexically enclosing try regions (for break/continue pops)
 	isMain  bool
 	src     string
 }
