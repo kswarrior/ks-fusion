@@ -849,18 +849,20 @@ func renderVMNodeToHTML(v any) string {
 	return b.String()
 }
 
-// renderChromeBlocks emits visible content for well-known component types
-// so run-web pages look like a real website instead of bare titles:
+// renderChromeBlocks emits visible content for well-known prop shapes so
+// run-web pages look like a real website instead of bare titles:
 //
-//	header with props.links [{path,label}]  -> nav with real <a> links
-//	sidebar with props.items [{path,label,active}] -> side nav links
-//	page with props.rows [strings]          -> visible <ul> list
-//	stat with props.label/value             -> label + value spans
-//	section with props.h/p                   -> <h2> + <p>
+//	props.links [{path,label}]  -> nav with real <a> links
+//	props.items [{path,label,active}] -> side nav links
+//	props.rows [strings]        -> visible <ul> list
+//	props.label/value           -> label + value spans
+//	props.h/p                   -> <h2> + <p>
 //
-// All text is escaped. Containers carry data-key "{key}:nav|:rows|:statbody
-// |:secbody" so the client renderer (build/paintProps/hydrate) can find and
-// reconcile the exact same structure — SSR and client must stay identical.
+// Blocks trigger on props presence (not node type), so .ks components may
+// use any semantic type. All text is escaped. Containers carry data-key
+// "{key}:nav|:rows|:statbody|:secbody" so the client renderer
+// (build/paintProps/hydrate) finds and reconciles the exact same structure
+// — SSR and client must stay identical.
 func renderChromeBlocks(b *strings.Builder, typ, key string, props map[string]any) {
 	activeOf := func(item map[string]any) bool {
 		if a, ok := item["active"].(bool); ok && a {
@@ -898,49 +900,24 @@ func renderChromeBlocks(b *strings.Builder, typ, key string, props map[string]an
 		}
 		b.WriteString(`</nav>`)
 	}
-	switch typ {
-	case "header":
-		if links, ok := props["links"].([]any); ok && len(links) > 0 {
-			renderNav("nav", key+":nav", links)
-		}
-	case "sidebar":
-		if items, ok := props["items"].([]any); ok && len(items) > 0 {
-			renderNav("sidenav", key+":nav", items)
-		}
-	case "page":
-		if rows, ok := props["rows"].([]any); ok && len(rows) > 0 {
-			ckey := key + ":rows"
-			b.WriteString(`<ul class="rows" data-key="` + html.EscapeString(ckey) + `">`)
-			for i, r := range rows {
-				b.WriteString(`<li data-key="` + html.EscapeString(fmt.Sprintf("%s-%d", ckey, i)) +
-					`">` + html.EscapeString(propAttrString(r)) + `</li>`)
-			}
-			b.WriteString(`</ul>`)
-		}
-	case "stat":
-		label, _ := props["label"].(string)
-		ckey := key + ":statbody"
-		b.WriteString(`<div class="statbody" data-key="` + html.EscapeString(ckey) + `">`)
-		b.WriteString(`<span class="stat-label">` + html.EscapeString(label) + `</span>`)
-		b.WriteString(`<span class="stat-value">` + html.EscapeString(propAttrString(props["value"])) + `</span>`)
-		b.WriteString(`</div>`)
-	case "section":
-		h, _ := props["h"].(string)
-		p, _ := props["p"].(string)
-		if h == "" && p == "" {
-			return
-		}
-		ckey := key + ":secbody"
-		b.WriteString(`<div class="secbody" data-key="` + html.EscapeString(ckey) + `">`)
-		if h != "" {
-			b.WriteString(`<h2>` + html.EscapeString(h) + `</h2>`)
-		}
-		if p != "" {
-			b.WriteString(`<p>` + html.EscapeString(p) + `</p>`)
-		}
-		b.WriteString(`</div>`)
+	// Each block triggers on props presence (any semantic type works).
+	// links and items render independently so a block may carry both.
+	if links, ok := props["links"].([]any); ok && len(links) > 0 {
+		renderNav("nav", key+":nav", links)
 	}
-}
+	if items, ok := props["items"].([]any); ok && len(items) > 0 {
+		cls := "sidenav"
+		if typ != "sidebar" && typ != "nav" && typ != "header" && typ != "div" && typ != "layout" && typ != "page" {
+			cls = "nav"
+		}
+		if _, hasLinks := props["links"]; !hasLinks && cls == "sidenav" {
+			renderNav(cls, key+":nav", items)
+		} else if hasLinks, _ := props["links"]; hasLinks == nil {
+			renderNav(cls, key+":nav", items)
+		} else {
+			renderNav(cls, key+":nav-items", items)
+		}
+	}
 
 // vmToSSRHTML renders a VM JSON doc to SSR inner HTML for #app.
 func vmToSSRHTML(vmJSON string) string {
