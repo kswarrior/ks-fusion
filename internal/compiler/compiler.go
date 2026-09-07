@@ -476,7 +476,7 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 		c.emit(OpPop, 0, st.Line)
 		return nil
 	case frontend.StmtGo:
-		return fmt.Errorf("line %d: `go` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
+		return fmt.Errorf("line %d: `go` not yet supported by compiler v0.3 (runs in interpreter)", st.Line)
 	case frontend.StmtSleep:
 		// `sleep ms` / `sleep(ms)`: call the sleep builtin, drop the nil.
 		// Mirrors backend StmtSleep (eval ms + toMillis); a nil Expr with
@@ -493,17 +493,17 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 		c.emit(OpPop, 0, st.Line)
 		return nil
 	case frontend.StmtImport:
-		return fmt.Errorf("line %d: `import` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
+		return fmt.Errorf("line %d: `import` not yet supported by compiler v0.3 (runs in interpreter)", st.Line)
 	case frontend.StmtTry:
 		return c.compileTry(st)
 	case frontend.StmtSwitch:
 		return c.compileSwitch(st)
 	case frontend.StmtSelect:
-		return fmt.Errorf("line %d: `select` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
+		return fmt.Errorf("line %d: `select` not yet supported by compiler v0.3 (runs in interpreter)", st.Line)
 	case frontend.StmtDefer:
-		return fmt.Errorf("line %d: `defer` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
+		return fmt.Errorf("line %d: `defer` not yet supported by compiler v0.3 (runs in interpreter)", st.Line)
 	case frontend.StmtStruct, frontend.StmtEnum:
-		return fmt.Errorf("line %d: `struct`/`enum` declarations not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
+		return fmt.Errorf("line %d: `struct`/`enum` declarations not yet supported by compiler v0.3 (runs in interpreter)", st.Line)
 	}
 	return fmt.Errorf("line %d: unknown statement (compiler v0.3)", st.Line)
 }
@@ -517,7 +517,7 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 // without catch/finally compiles to just the body (errors propagate).
 func (c *compiler) compileTry(st *frontend.Stmt) error {
 	if st.FinBody != nil {
-		return fmt.Errorf("line %d: `try/finally` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
+		return fmt.Errorf("line %d: `try/finally` not yet supported by compiler v0.3 (runs in interpreter)", st.Line)
 	}
 	if st.CaBody == nil {
 		// bare `try Body`: transparent, errors propagate naturally.
