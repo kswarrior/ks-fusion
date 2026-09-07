@@ -851,11 +851,13 @@ func renderVMNodeToHTML(v any) string {
 
 // renderChromeBlocks emits visible content for well-known component types
 // so run-web pages look like a real website instead of bare titles:
-//   header with props.links [{path,label}]  -> nav with real <a> links
-//   sidebar with props.items [{path,label,active}] -> side nav links
-//   page with props.rows [strings]          -> visible <ul> list
-//   stat with props.label/value             -> label + value spans
-//   section with props.h/p                   -> <h2> + <p>
+//
+//	header with props.links [{path,label}]  -> nav with real <a> links
+//	sidebar with props.items [{path,label,active}] -> side nav links
+//	page with props.rows [strings]          -> visible <ul> list
+//	stat with props.label/value             -> label + value spans
+//	section with props.h/p                   -> <h2> + <p>
+//
 // All text is escaped. Containers carry data-key "{key}:nav|:rows|:statbody
 // |:secbody" so the client renderer (build/paintProps/hydrate) can find and
 // reconcile the exact same structure — SSR and client must stay identical.
@@ -939,6 +941,7 @@ func renderChromeBlocks(b *strings.Builder, typ, key string, props map[string]an
 		b.WriteString(`</div>`)
 	}
 }
+
 // vmToSSRHTML renders a VM JSON doc to SSR inner HTML for #app.
 func vmToSSRHTML(vmJSON string) string {
 	var v any
