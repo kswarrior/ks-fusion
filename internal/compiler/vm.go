@@ -316,12 +316,23 @@ type frame struct {
 	base      int
 }
 
+// tryRecord is one active `try/catch` region: on a runtime error the VM
+// unwinds value stack + call frames to the recorded depths, pushes the raw
+// error string, and resumes at handler. Records are frame-scoped: OpReturn
+// drops records of the returning frame so stale handlers never fire.
+type tryRecord struct {
+	handler    int
+	stackDepth int
+	frameDepth int
+}
+
 type VM struct {
 	bundle   *Bundle
 	globals  []Val
 	defined  []bool
 	stack    []Val
 	frames   []frame
+	trys     []tryRecord
 	builtins map[string]func(args []Val) (Val, error)
 }
 
@@ -407,6 +418,27 @@ func Run(b *Bundle) error {
 		in := fn.Chunk.Code[fr.ip]
 		fr.ip++
 		if err := vm.exec(in); err != nil {
+			if len(vm.trys) > 0 {
+				// catch: unwind to the innermost active try (mirrors
+				// backend.execTry: catch binds the raw error string;
+				// control flow never arrives here as an error).
+				rec := vm.trys[len(vm.trys)-1]
+				vm.trys = vm.trys[:len(vm.trys)-1]
+				raw := err.Error()
+				if len(vm.frames) > rec.frameDepth {
+					vm.frames = vm.frames[:rec.frameDepth]
+				}
+				for len(vm.stack) < rec.stackDepth {
+					vm.stack = append(vm.stack, Nil())
+				}
+				if len(vm.stack) > rec.stackDepth {
+					vm.stack = vm.stack[:rec.stackDepth]
+				}
+				vm.push(StrV(raw))
+				top := &vm.frames[len(vm.frames)-1]
+				top.ip = rec.handler
+				continue
+			}
 			if in.Line > 0 {
 				return fmt.Errorf("line %d: %v", in.Line, err)
 			}
@@ -612,6 +644,11 @@ func (vm *VM) exec(in Instr) error {
 		base := fr.base
 		vm.stack = vm.stack[:base]
 		vm.frames = vm.frames[:len(vm.frames)-1]
+		// drop try records of the returning frame (a `return` inside try
+		// never triggers its catch — mirrors backend.execTry control flow).
+		for len(vm.trys) > 0 && vm.trys[len(vm.trys)-1].frameDepth > len(vm.frames) {
+			vm.trys = vm.trys[:len(vm.trys)-1]
+		}
 		if len(vm.frames) == 0 {
 			return nil
 		}
@@ -774,8 +811,15 @@ func (vm *VM) exec(in Instr) error {
 		if !vmIsType(v, in.Name) {
 			return fmt.Errorf("wants %s, got %s", in.Name, typeName(v))
 		}
-	case OpSetupTry, OpPopTry, OpDefer:
-		return fmt.Errorf("try/defer not yet supported by VM v0.2 (use the interpreter)")
+	case OpSetupTry:
+		vm.trys = append(vm.trys, tryRecord{handler: in.Arg, stackDepth: len(vm.stack), frameDepth: len(vm.frames)})
+	case OpPopTry:
+		if len(vm.trys) == 0 {
+			return fmt.Errorf("pop try without setup (compiler bug?)")
+		}
+		vm.trys = vm.trys[:len(vm.trys)-1]
+	case OpDefer:
+		return fmt.Errorf("defer not yet supported by VM v0.2 (use the interpreter)")
 	}
 	return nil
 }
