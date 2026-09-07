@@ -6,3 +6,7 @@
 tmp-fusion-bin-*/
 # stray local test logs (never commit)
 retest.log
+# locally built app binaries (never commit; rebuild with fusion build --bin)
+test-app
+myapp
+demo-bin
