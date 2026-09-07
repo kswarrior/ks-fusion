@@ -1,0 +1,12 @@
+#!/usr/bin/env fusion
+{
+  "format": "kslib-1",
+  "name": "demo-lib",
+  "version": "0.1.0",
+  "files": [
+    {
+      "path": "src/lib.ks",
+      "source": "# demo-lib entry: shared helpers for the demo-app full-stack showcase.\n# Build me with:  fusion build --release ./tests/demo-lib\n# Use me with:    import \"demo-lib\"  (after adding demo-lib = \"0.1.0\" to [dependencies])\n# NOTE: lib imports share one flat global namespace — every func here is\n# prefixed with demo_ to avoid collisions.\n\nfunc demo_title() {\n  return \"Demo Full-Stack\"\n}\n\nfunc demo_greet(name) {\n  return \"hello \" + name + \" from demo-lib\"\n}\n\nfunc demo_clamp(x, lo, hi) {\n  if x \u003c lo {\n    return lo\n  }\n  if x \u003e hi {\n    return hi\n  }\n  return x\n}\n\nfunc demo_sum(arr) {\n  let total = 0\n  for v in arr {\n    total = total + v\n  }\n  return total\n}\n\nfunc demo_stats(arr) {\n  let n = len(arr)\n  if n == 0 {\n    return {count: 0, total: 0, avg: 0, min: nil, max: nil}\n  }\n  let total = demo_sum(arr)\n  return {count: n, total: total, avg: total / n, min: min(arr), max: max(arr)}\n}\n\nfunc demo_nav() {\n  return [\n    {path: \"/\", label: \"Home\"},\n    {path: \"/dashboard\", label: \"Dashboard\"},\n    {path: \"/about\", label: \"About\"},\n    {path: \"/docs\", label: \"Docs\"}\n  ]\n}\n"
+    }
+  ]
+}
