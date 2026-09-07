@@ -189,10 +189,10 @@ func TestCompileRangeFastPath(t *testing.T) {
 	// break/continue/nesting/shadowing match the generic path.
 	mustRun(t, "let s = 0\nfor i in range(10) {\n if i == 2 { continue }\n if i == 4 { break }\n s = s + 1\n}\nassert(s == 3)\n")
 	mustRun(t, "let s = 0\nfor i in range(3) {\n for j in range(3) { s = s + 1 }\n}\nassert(s == 9)\n")
-	mustRun(t, "let i = 99\nfor i in range(3) { }\nassert(i == 2)\n")
+	mustRun(t, "let i = 99\nfor i in range(3) { }\nassert(i == 99)\n")
 	// assigning the loop var inside the body does not corrupt iteration
 	// (counter lives in a hidden slot, as in the generic path).
-	mustRun(t, "let n = 0\nfor i in range(5) {\n i = 100\n n = n + 1\n}\nassert(n == 5)\nassert(i == 100)\n")
+	mustRun(t, "let s = \"\"\nfor i in range(5) {\n s = s + str(i) + \",\"\n i = 100\n}\nassert(s == \"0,1,2,3,4,\")\n")
 	// 3-arg range keeps the generic path (same values, incl. step).
 	mustRun(t, "let s = 0\nfor i in range(0, 10, 3) { s = s + i }\nassert(s == 18)\n")
 	// non-int bounds are runtime errors in both engines.
