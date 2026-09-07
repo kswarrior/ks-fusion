@@ -1179,41 +1179,48 @@ func (g *gen) closureSig(name string, params []string, ptypes []string, retAnn s
 	}
 	sig := &funcSig{params: ps, ret: ntVoid}
 	g.defineClosure(name, sig)
+	g.pending[name] = true
+	g.inferring = name
+	var inferErr error
 	if retAnn != "" {
 		want, err := parseAnn(retAnn, line)
 		if err != nil {
-			return err
-		}
-		sig.ret = want // known upfront, so recursion checks during verify
-		fake := &frontend.Stmt{Kind: frontend.StmtFunc, Name: name, Names: params, ParamTypes: ptypes, Body: body, Line: line}
-		if err := g.verifyReturns(fake, body, want); err != nil {
-			return err
+			inferErr = err
+		} else {
+			sig.ret = want // known upfront, so recursion checks during verify
+			fake := &frontend.Stmt{Kind: frontend.StmtFunc, Name: name, Names: params, ParamTypes: ptypes, Body: body, Line: line}
+			inferErr = g.verifyReturns(fake, body, want)
 		}
 	} else {
 		if callsSelf(body, name) {
-			return fmt.Errorf("line %d: recursive func needs a `: type` return annotation in native subset", line)
-		}
-		saved := g.vars
-		g.vars = []map[string]ntype{{}}
-		for i, p := range params {
-			g.vars[0][p] = ps[i]
-		}
-		types, err := g.collectReturns(body)
-		g.vars = saved
-		if err != nil {
-			return err
-		}
-		if len(types) > 0 {
-			ret := types[0]
-			for _, t := range types[1:] {
-				var err error
-				ret, err = unify(ret, t, line)
-				if err != nil {
-					return err
-				}
+			inferErr = fmt.Errorf("line %d: recursive func needs a `: type` return annotation in native subset", line)
+		} else {
+			saved := g.vars
+			g.vars = []map[string]ntype{{}}
+			for i, p := range params {
+				g.vars[0][p] = ps[i]
 			}
-			sig.ret = ret
+			var types []ntype
+			types, inferErr = g.collectReturnsNested(body, line)
+			g.vars = saved
+			if inferErr == nil && len(types) > 0 {
+				ret := types[0]
+				for _, t := range types[1:] {
+					var err error
+					ret, err = unify(ret, t, line)
+					if err != nil {
+						inferErr = err
+						break
+					}
+				}
+				sig.ret = ret
+			}
 		}
+	}
+	g.inferring = ""
+	delete(g.pending, name)
+	if inferErr != nil {
+		return inferErr
 	}
 	return fn(sig)
 }
