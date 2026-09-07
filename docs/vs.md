@@ -306,7 +306,7 @@ const r = await fetch(url).then(r => r.json());
 ```
 
 ```python
-# .ks v2.5: files + json + http/tcp/tls/ws-text/sqlite-extended client
+# .ks v2.6: files + json + http/tcp/tls/ws-text/sqlite-extended client
 let raw = http_get("https://api.example.com/data")
 let data = json_parse(raw)
 # or: let data = fetch_json("https://api.example.com/data")  # GET-only: json_parse(http_get(url))
@@ -349,7 +349,7 @@ s = sum(i * i for i in 1:10_000)
 ```
 
 ```python
-# .ks v2.5: scalar loops only, no broadcasting (folding + range fast path help overhead, not loop speed)
+# .ks v2.6: scalar loops only, no broadcasting (folding + range fast path help overhead, not loop speed)
 let total = 0
 for i in range(10000) {
   total += i * i
@@ -424,7 +424,7 @@ type User = { name: string; age: number };
 ```
 
 ```python
-# .ks v2.5 — annotations + struct/enum syntax are runtime-checked (nil nullable) + vet/check
+# .ks v2.6 — annotations + struct/enum syntax are runtime-checked (nil nullable) + vet/check
 struct User { name: string, age: int }
 enum Color { Red, Green, Blue }
 func add(a: int, b: int): int { return a + b }
@@ -486,7 +486,7 @@ Vite = instant HMR dev server + `esbuild`/Rollup bundler + plugin ecosystem.
 `run-web` SSR + keyed-patch SSE, `build-js` per-route JS with hashes, `audit`, LSP) for `.ks` only,
 no CSS/DOM bundling parity.
 
-|  | Vite | `fusion` (v2.5: run-web keyed-diff/ISR-bg + build-js/hash + build-ssg) |
+|  | Vite | `fusion` (v2.6: run-web keyed-diff/ISR-bg + build-js/hash + build-ssg + profile) |
 |---|---|---|
 | Dev | HMR <100ms, partial DOM patch | `run`/`launch` rerun, `ROUTE` switch, `run-web` SSR + `--watch` SSE **keyed patches, no reload** (400ms mtime poll, 300ms SSE ticker, full re-render per tick, banner on error) |
 | Build | tree-shaken JS/CSS | source JSON `.kslib` / parse-check + partial `.ksb` bytecode + per-route subset `.js` + content-hash manifest + budgets (warn >100KB / fail >250KB) |
@@ -1047,25 +1047,27 @@ Factual fixes in this rewrite (stale v2.4-era claims corrected):
 ## How to verify (run these)
 
 ```bash
-go build -o /tmp/fusion ./cmd/fusion && /tmp/fusion version   # want: ks-fusion v2.5 (release/fusion also v2.5)
+go build -o /tmp/fusion ./cmd/fusion && /tmp/fusion version   # want: ks-fusion v2.6 (release/fusion also v2.6)
 grep -ohP '\{Name: "\K[^"]+' internal/backend/*.go | sort -u | wc -l        # want: 177 (96+52+11+12+6)
 grep -ohP '\{Name: "\K[^"]+' internal/backend/*.go | sort | uniq -d | head  # want: no dups (empty)
-grep -rh "^func Test" internal/ --include="*_test.go" | wc -l             # want: 125
+grep -rh "^func Test" internal/ --include="*_test.go" | wc -l             # want: 133
 grep -rh "^func Benchmark" internal/ --include="*_test.go" | wc -l        # want: 5
 go test ./... -count=1                                     # all green
 go test ./internal/backend/ -run TestV23TCP -count=3       # repeat-safe (port 0 + tcp_shutdown)
 go test ./internal/compiler/ -run TestCompileV02 -count=1 -v  # VM v0.2 slices/is/typed/switch (+nominal-skip)
 go test ./internal/tools/ -run 'TestVetExhaustive|TestAudit|TestLSP|TestDebug|TestISR|TestWeb|TestSSE' -count=1 -v
-go test ./internal/backend/ -run 'TestRunStructEnum|TestRunSqlite|TestRunPostgres' -count=1 -v
+go test ./internal/tools/ -run 'TestLSPCompletion|TestProfile|TestCacheVendorBusts|TestBuildBinE2E' -count=1 -v  # v2.6: completion/profile/vendor-cache/--bin E2E
+go test ./internal/backend/ -run 'TestRunStructEnum|TestRunSqlite|TestRunPostgres' -count=1 -v  # incl. TestRunSqliteOrLike
 go test ./internal/backend/ -bench BenchmarkInterp -benchtime 1x -run XXX  # interp fib/loop/map
 go test ./internal/compiler/ -bench BenchmarkVM -benchtime 1x -run XXX    # VM fib (~2x) / loop (~0.7x)
 node --check editors/vscode/extension.js && echo "VS Code ext JS OK"
+printf 'let s = 0\nfor i in range(3) {\n s = s + 1\n}\nprint s\n' > /tmp/p.ks && /tmp/fusion profile /tmp/p.ks --top 3  # .ks-line profiler
 /tmp/fusion debug /tmp/dbg.ks --break 2 --trace | head                    # breakpoints + trace + globals
 /tmp/fusion vet ./tests/hello-app && /tmp/fusion check ./tests/hello-app  # vet warns-only + check ok
 /tmp/fusion fmt . --check                                  # clean
 go vet ./...                                               # clean
 bash ci.sh 2>&1 | tail -n 2                                # CI OK
 grep -n "runs in interpreter" internal/compiler/compiler.go | head  # 7 remaining rejects
-grep -n "AND" internal/backend/stdlib_ext3.go | head -n 3  # AND-only WHERE (no OR)
-ls ci.sh docs/bench.md release/fusion && ./release/fusion version
+grep -n "func evalWhere" internal/backend/stdlib_ext3.go   # OR-split + AND-chain + LIKE conds
+ls .github/workflows/ci.yml ci.sh docs/bench.md release/fusion && ./release/fusion version  # in-repo CI + release v2.6
 ```
