@@ -235,6 +235,11 @@ func main() {
 			fmt.Println("error:", err)
 			os.Exit(1)
 		}
+	case "native":
+		if err := cmdNative(os.Args[2:]); err != nil {
+			fmt.Println("error:", err)
+			os.Exit(1)
+		}
 	case "fmt":
 		if err := cmdFmt(os.Args[2:]); err != nil {
 			fmt.Println("error:", err)
@@ -365,9 +370,13 @@ Commands:
                                   source in clear); no password = obfuscation,
                                   --password/--key-file/FUSION_KEY = real safety
    fusion compile <file.ks> [--out file.ksb] [--dis] [--run]
-                              compile the .ks subset to bytecode (.ksb-1);
-                              outside the subset, the compiler says so —
-                              run those files with the interpreter instead
+                               compile the .ks subset to bytecode (.ksb-1);
+                               outside the subset, the compiler says so —
+                               run those files with the interpreter instead
+   fusion native <file.ks> [-o FILE] [--target OS/ARCH] [--strip] [--emit]
+                               real machine code via Go codegen (native-0.1
+                               strict subset: scalars, control flow, typed
+                               funcs); --emit prints the Go source
    fusion test [target]        run *_test.ks files (assert, TAP output)
                               target is dir (default ".") or a single .ks file
    fusion fmt [target] [--check]  format .ks (idempotent; --check for CI)
