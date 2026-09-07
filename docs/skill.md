@@ -125,8 +125,8 @@ Rules:
 | Strict check | `fusion check [target]` (parse + arity + `: type` + `is` narrowing) |
 | Docs | `fusion doc [target] [--out FILE]` (from `#` comments + func sigs) |
 | REPL | `fusion repl` (multiline via braces) |
-| Bench | `fusion bench [target] [--n N] [--cpuprofile FILE]` |
-| Deps | `fusion vendor [appdir]`, `fusion publish [libdir] [--registry DIR]`, `fusion pull <name[@spec]> [--out DIR]`, `fusion yank <name[@ver]> [--remove]`, `fusion registry`, `fusion audit [appdir]` |
+| Bench | `fusion bench [target] [--n N] [--cpuprofile FILE]` — non-zero exit when any file fails (same contract as test) |
+| Deps | `fusion vendor [appdir]`, `fusion publish [libdir] [--registry DIR]`, `fusion pull <name[@spec]> [--out DIR]`, `fusion yank <name[@ver]> [--remove] [--registry DIR]`, `fusion registry`, `fusion audit [appdir]` |
 | Web | `fusion run-web [appdir] [--port N] [--watch]`, `fusion build-js [appdir] [--out DIR] [--strict\|--no-strict]`, `fusion build-ssg [appdir] [--out DIR]` |
 | Debug/profile | `fusion debug <file.ks> [--break LINE] [--trace]`, `fusion profile <file.ks> [--top N]`, `fusion lsp` |
 | Misc | `fusion version`, `fusion help` |
