@@ -1021,6 +1021,7 @@ div[data-type="page"]>div.kids>a.btn{align-self:start;justify-self:start}
 .btn:hover{transform:translateY(-1px);background:var(--surface-3)}
 .btn-primary{background:var(--primary);border-color:var(--primary);color:#fff}
 .btn-primary:hover{background:var(--primary-hover)}
+a.btn span.txt{margin:0;color:inherit}
 table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;font-size:14px}
 table>div.kids,tr>div.kids,td>div.kids{display:contents}
 div[data-type="page"]>div.kids>table{grid-column:1/-1}
