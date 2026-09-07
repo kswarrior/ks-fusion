@@ -154,6 +154,26 @@ function activate(context) {
     }
   }));
 
+  // completion (builtins + keywords + workspace funcs/structs/enums)
+  context.subscriptions.push(vscode.languages.registerCompletionItemProvider('ks', {
+    provideCompletionItems(doc, pos) {
+      const id = nextId++;
+      return new Promise((resolve) => {
+        pending.set(id, (result) => {
+          const items = ((result && result.items) || []).map((e) => {
+            const kind = e.kind === 14 ? vscode.CompletionItemKind.Keyword : vscode.CompletionItemKind.Function;
+            const item = new vscode.CompletionItem(e.label, kind);
+            item.detail = e.detail || '';
+            return item;
+          });
+          resolve(items);
+        });
+        send({ id, method: 'textDocument/completion', params: { textDocument: { uri: doc.uri.toString() }, position: { line: pos.line, character: pos.character } } });
+        setTimeout(() => { if (pending.has(id)) { pending.delete(id); resolve([]); } }, 2000);
+      });
+    }
+  }, '.', '_'));
+
   send({ id: 1, method: 'initialize', params: { capabilities: {} } });
   context.subscriptions.push({ dispose: () => { try { server.kill(); } catch (e) {} } });
 }
