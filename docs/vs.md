@@ -268,7 +268,7 @@ Pick `.ks` for Day-1 productivity without borrow checker.
 
 ### vs C
 
-**Score: ks-fusion 84/100 vs C 62/100 — ks-fusion wins by 21.**
+**Score: ks-fusion 84/100 vs C 62/100 — ks-fusion wins by 22.**
 
 C gives pointers, manual `malloc/free`, direct syscalls, tiny runtimes.
 `.ks` gives `array/map/string` + Go GC + bounds-checked indexing + 177 builtins + `--bin`/cache/repro.
@@ -278,7 +278,7 @@ Pick `.ks` for everything where `segfault` is unacceptable.
 
 ### vs C++
 
-**Score: ks-fusion 84/100 vs C++ 73/100 — ks-fusion wins by 10.**
+**Score: ks-fusion 84/100 vs C++ 73/100 — ks-fusion wins by 11.**
 
 C++ gives RAII, templates, classes, deterministic destruction, huge game/engine libs.
 `.ks` gives `func` closures + `defer` + duck-typed maps + `struct` declarations
@@ -290,7 +290,7 @@ Pick `.ks` for config-driven logic on top of those engines.
 
 ### vs Node.js
 
-**Score: ks-fusion 84/100 vs Node.js 77/100 — ks-fusion wins by 6 (on balance, not on npm depth).**
+**Score: ks-fusion 84/100 vs Node.js 77/100 — ks-fusion wins by 7 (on balance, not on npm depth).**
 
 Node gives V8, `npm` (2M+ packages), `fetch/http`, event loop, TypeScript.
 `.ks` gives simpler blocking `recv`/`select` + 177 sync builtins in the
@@ -317,7 +317,7 @@ Pick `.ks` for small deterministic scripts/services without `node_modules`.
 
 ### vs Python
 
-**Score: ks-fusion 84/100 vs Python 74/100 — ks-fusion wins by 9 (on balance; loses on data/AI libs).**
+**Score: ks-fusion 84/100 vs Python 74/100 — ks-fusion wins by 10 (on balance; loses on data/AI libs).**
 
 Closest feel: `let x = 10`, `for i in range(5)`, `a[1:3]`, `and/or/not`,
 truthiness (`nil false 0 0.0 "" [] {}` falsy), `map/filter/reduce`.
@@ -333,7 +333,7 @@ Pick `.ks` for learning concurrency early or embedding a tiny Go-based runtime, 
 
 ### vs Julia (numerical computing language)
 
-**Score: ks-fusion 84/100 vs Julia 69/100 — ks-fusion wins by 14 on balance, loses on numerics.**
+**Score: ks-fusion 84/100 vs Julia 69/100 — ks-fusion wins by 15 on balance, loses on numerics.**
 
 Julia = JIT-compiled (LLVM) + multiple dispatch + parametric types.
 Feels like Python/MATLAB for math, runs like C for loops/matrices.
@@ -363,7 +363,7 @@ and embedding a Go-based runtime where Julia's heavy JIT + slow startup is overk
 
 ### vs Next.js (framework, not language)
 
-**Score: ks-fusion 84/100 vs Next.js 79/100 — ks-fusion wins by 4 on balance (different category; loses on UI depth).**
+**Score: ks-fusion 84/100 vs Next.js 79/100 — ks-fusion wins by 5 on balance (different category; loses on UI depth).**
 
 Category error if compared 1:1. Next.js = React + routing + SSR/ISR + Node runtime.
 ks-fusion app = `backend/main.ks` + `frontend/` (`main.ks` route table +
@@ -404,7 +404,7 @@ Pick `.ks` for the logic worker behind it.
 
 ### vs TypeScript (language, not runtime)
 
-**Score: ks-fusion 84/100 vs TypeScript 79/100 — ks-fusion wins by 4 on balance (loses on type depth at scale).**
+**Score: ks-fusion 84/100 vs TypeScript 79/100 — ks-fusion wins by 5 on balance (loses on type depth at scale).**
 
 TypeScript = JS + static types (`tsc`, `strict`, generics, unions, interfaces).
 `.ks` = gradual types (dynamic by default, optional `: type` runtime checks incl. union `int|string` and generic
@@ -449,7 +449,7 @@ Interop: `fusion build-js` subset → import `.ks` logic into TS (subset only, c
 
 ### vs React (UI library)
 
-**Score: ks-fusion 84/100 vs React 76/100 — ks-fusion wins by 7 (different category, on balance only).**
+**Score: ks-fusion 84/100 vs React 76/100 — ks-fusion wins by 8 (different category, on balance only).**
 
 React = components, hooks, virtual DOM, concurrent renderer.
 `.ks` = view-model funcs + console renderer + `run-web` SSR (keyed diff, no reload) + `build-js` JS,
@@ -479,7 +479,7 @@ Pick `.ks` for the worker behind the UI (JSON over stdout/file/`http_*`, `run-we
 
 ### vs Vite (frontend build tool)
 
-**Score: ks-fusion 84/100 vs Vite 77/100 — ks-fusion wins by 6 (different category, on balance only).**
+**Score: ks-fusion 84/100 vs Vite 77/100 — ks-fusion wins by 7 (different category, on balance only).**
 
 Vite = instant HMR dev server + `esbuild`/Rollup bundler + plugin ecosystem.
 `fusion` = `new/run/build/launch` (+ `compile --dis/--run` partial, `test` TAP runner, `fmt/vet/doc/check/bench/debug`,
@@ -498,7 +498,7 @@ Pick `.ks` for logic; `fusion build-js` emits a Vite-consumable subset module (a
 
 ### vs PHP Laravel
 
-**Score: ks-fusion 84/100 vs Laravel 67/100 — ks-fusion wins by 16 (on balance for sidecars; not a CRUD replacement).**
+**Score: ks-fusion 84/100 vs Laravel 67/100 — ks-fusion wins by 17 (on balance for sidecars; not a CRUD replacement).**
 
 Laravel gives routing, ORM/Eloquent, migrations, Blade, queues, auth scaffolding.
 `.ks` gives `http_get/post/serve` (minimal serve), JSON-file KV `db_put/get/delete/list` + JSON-file extended-dialect SQL
@@ -510,11 +510,11 @@ Pick `.ks` for sidecar scripts/services (data munging, checks, bots, `--bin` wor
 
 ### More (short, all scored out of 100)
 
-* **Deno/Bun 77/100 vs .ks 83/100 (+6):** pick for secure TS sandbox / fast runtime; `.ks` is simpler but far smaller.
-* **Java/Kotlin/Spring 78/100 vs .ks 83/100 (+5):** pick for enterprise monoliths, JPA, strict OOP; `.ks` for glue/services.
-* **Lua 58/100 vs .ks 83/100 (+25):** Lua is smaller/faster to embed; `.ks` has Go-style `select` + `fusion` CLI + `--bin`/file-registry/real-audit + 177 builtins out of box.
-* **Ruby/Rails 68/100 vs .ks 83/100 (+15):** pick Rails for convention CRUD; `.ks` syntax will feel familiar, plus `--bin`/concurrency.
-* **Bash 45/100 vs .ks 83/100 (+38):** pick Bash for 5-line pipes; `.ks` wins past 50 lines (`try/catch`, maps, JSON, `is`/`?.`/`??`, `select`, `http/regex/crypto`, `--bin`, Windows portability via `--target`).
+* **Deno/Bun 77/100 vs .ks 84/100 (+7):** pick for secure TS sandbox / fast runtime; `.ks` is simpler but far smaller.
+* **Java/Kotlin/Spring 78/100 vs .ks 84/100 (+6):** pick for enterprise monoliths, JPA, strict OOP; `.ks` for glue/services.
+* **Lua 58/100 vs .ks 84/100 (+26):** Lua is smaller/faster to embed; `.ks` has Go-style `select` + `fusion` CLI + `--bin`/file-registry/real-audit + 177 builtins out of box.
+* **Ruby/Rails 68/100 vs .ks 84/100 (+16):** pick Rails for convention CRUD; `.ks` syntax will feel familiar, plus `--bin`/concurrency.
+* **Bash 45/100 vs .ks 84/100 (+39):** pick Bash for 5-line pipes; `.ks` wins past 50 lines (`try/catch`, maps, JSON, `is`/`?.`/`??`, `select`, `http/regex/crypto`, `--bin`, Windows portability via `--target`).
 
 ## Totals & ranking (out of 100)
 
