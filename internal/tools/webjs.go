@@ -64,7 +64,7 @@ func attachWebRoutes(mux *http.ServeMux, cfg *config.Config, watcher *webWatcher
 		if format == "json" {
 			return vmJSON, "application/json", vmJSON, true
 		}
-		return vmToHTMLWithWatch(vmJSON, route, watch), "text/html; charset=utf-8", vmJSON, true
+		return vmToHTMLWithWatchDir(vmJSON, route, watch, cfg.Dir), "text/html; charset=utf-8", vmJSON, true
 	}
 	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
 		route := r.URL.Query().Get("route")
@@ -197,7 +197,7 @@ func attachWebRoutes(mux *http.ServeMux, cfg *config.Config, watcher *webWatcher
 			_, _ = w.Write([]byte(vmJSON))
 			return
 		}
-		html := vmToHTMLWithWatch(vmJSON, r.URL.Path, watch)
+		html := vmToHTMLWithWatchDir(vmJSON, r.URL.Path, watch, cfg.Dir)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		isr.put(r.URL.Path, "html", html, vmJSON)
 		if status == http.StatusNotFound {
@@ -966,6 +966,80 @@ func initialStateJSON() string {
 	return string(b)
 }
 
+// fusionDefaultCSS is the built-in run-web stylesheet (no dependencies).
+// Layout is driven by data-type selectors so SSR and the client renderer
+// (which only reproduces props, never extra classes) always agree.
+func fusionDefaultCSS() string {
+	return `*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#eef1f7;color:#1b2333}
+div[data-type="layout"]>div.kids{display:flex;flex-wrap:wrap;min-height:100vh;align-content:flex-start}
+header[data-type="header"]{flex:1 1 100%;background:#16213a;color:#fff;padding:14px 22px}
+header[data-type="header"] h1{margin:0 0 10px;font-size:22px}
+nav.nav{display:flex;gap:6px;flex-wrap:wrap}
+nav.nav a{color:#cdd8f3;text-decoration:none;padding:7px 14px;border-radius:8px;font-size:14px}
+nav.nav a.active{background:#3b5bd6;color:#fff}
+nav.nav a:hover{background:#2a3f7d;color:#fff}
+nav.sidenav{flex:0 0 210px;background:#fff;border-right:1px solid #e3e8f5;padding:14px;display:flex;flex-direction:column;gap:6px}
+nav.sidenav a{color:#33415e;text-decoration:none;padding:9px 12px;border-radius:8px;font-size:14px}
+nav.sidenav a.active{background:#e7edff;color:#1f3fb8;font-weight:600}
+nav.sidenav a:hover{background:#f0f3fb}
+div[data-type="page"]{flex:1 1 0;min-width:280px;padding:22px}
+div[data-type="page"] h1{margin:0 0 6px;font-size:26px}
+ul.rows{list-style:none;margin:14px 0;padding:0;display:grid;gap:8px}
+ul.rows li{background:#fff;border:1px solid #e3e8f5;border-radius:8px;padding:10px 14px}
+div[data-type="page"]>div.kids{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:6px}
+div[data-type="stat"]{min-width:0}
+.statbody{background:#16213a;color:#fff;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.stat-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#9fb0d8}
+.stat-value{font-size:24px;font-weight:700}
+div[data-type="section"]{grid-column:1/-1;min-width:0}
+.secbody{background:#fff;border:1px solid #e3e8f5;border-radius:10px;padding:14px 18px}
+.secbody h2{margin:0 0 6px;font-size:17px}
+.secbody p{margin:0;color:#475569}
+#fusion-banner{background:#b91c1c;color:#fff;padding:10px 16px}`
+}
+
+// appExtraCSS inlines an app's own frontend/styles/*.css after the defaults
+// (no static file server needed). Files containing a literal </style are
+// skipped so markup can never break out of the style block.
+func appExtraCSS(appDir string) string {
+	if appDir == "" {
+		return ""
+	}
+	ents, err := os.ReadDir(filepath.Join(appDir, "frontend", "styles"))
+	if err != nil {
+		return ""
+	}
+	var names []string
+	for _, e := range ents {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".css") {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	for _, n := range names {
+		data, err := os.ReadFile(filepath.Join(appDir, "frontend", "styles", n))
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(data), "</style") {
+			continue
+		}
+		b.WriteString("\n/* " + n + " */\n")
+		b.WriteString(string(data))
+	}
+	return b.String()
+}
+
+// vmToHTMLWithWatchDir renders a full HTML page including app CSS.
+// vmToHTMLWithWatch keeps the old signature for tests and older callers.
+func vmToHTMLWithWatchDir(vmJSON, route string, watch bool, appDir string) string {
+	html := vmToHTMLWithWatch(vmJSON, route, watch)
+	css := fusionDefaultCSS() + appExtraCSS(appDir)
+	return strings.Replace(html, "/*FUSION_CSS*/", css, 1)
+}
+
 func vmToHTMLWithWatch(vmJSON, route string, watch bool) string {
 	var v any
 	_ = json.Unmarshal([]byte(vmJSON), &v)
@@ -999,7 +1073,7 @@ es.onmessage = function(e){
 </script>`
 	}
 	return fmt.Sprintf(`<!doctype html>
-<html><head><meta charset="utf-8"><title>%s</title></head>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>%s</title><style>/*FUSION_CSS*/</style></head>
 <body>
 <div id="app" data-route="%s">%s</div>
 <script id="vm" type="application/json">%s</script>
