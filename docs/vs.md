@@ -80,17 +80,18 @@ v2.4 added union/generic annotations, sqlite-subset, cancel, narrow audit, minim
 (slices/`is`/`?.`/`??`/typed/`switch`), exhaustive-switch vet, extended SQL +
 postgres-compat + WS-frames/pipes, real audit, full LSP + `fusion debug` + VS Code
 ext v0.2.0, DOM-diff without reload + background ISR, release v2.5 + `ci.sh`;
-v2.6 adds SQL OR/AND + LIKE/NOT LIKE, LSP completion + VS Code ext v0.3.0,
+v2.6 added SQL OR/AND + LIKE/NOT LIKE, LSP completion + VS Code ext v0.3.0,
 `.ks`-line `fusion profile`, vendor-aware cache + `--strip`, `--bin`/`--strip`
-E2E + hygiene (`.gitignore`, `retest.log` removal, vet fix).
-VM v0.2 is measured progress (≈2x fib) with a loop regression — it holds Perf 7,
-not 8 (see “Corrections”).
+E2E + hygiene (`.gitignore`, `retest.log` removal, vet fix);
+v2.7 adds VM v0.3 (range-int `for-in`, `sleep`, `try/catch`, assert parity,
+8 builtins) with the loop regression fixed — Perf holds 7, not 8
+(see “Corrections”).
 
 ## How scoring works (out of 100)
 
 Each language / stack is scored `0-10` on 10 dimensions = `100` max.
-Snapshot for ks-fusion `v2.6` (177 builtins = 96+52+11+12+6, struct/enum syntax +
-exhaustive-switch vet, VM v0.2 + `docs/bench.md`, WS text frames + extended SQL
+Snapshot for ks-fusion `v2.7` (177 builtins = 96+52+11+12+6, struct/enum syntax +
+exhaustive-switch vet, VM v0.3 + `docs/bench.md`, WS text frames + extended SQL
 (OR/AND + LIKE) + postgres-compat + pipes/signals, file-registry + real audit,
 full LSP (incl. completion) + debug + profile + VS Code ext v0.3.0, DOM-diff
 without reload + background ISR, vendor-aware cache + `--strip`, release v2.6 +
@@ -118,14 +119,20 @@ Simplicity + Build/Deploy + Frontend + Maturity = 100`.
 | Maturity | 9 | 9 | 8 | 9 | 9 | 9 | 10 | 7 | 8 | 8 |
 | **Total /100** | **84** | **82** | **81** | **62** | **73** | **77** | **74** | **69** | **79** | **67** |
 
-What the `.ks` 84 does and does not mean (read before citing 84; evidence for every scored claim in “v2.5 evidence” + “v2.6 evidence”):
+What the `.ks` 84 does and does not mean (read before citing 84; evidence for every scored claim in “v2.5 evidence” + “v2.6 evidence” + “v2.7 evidence”):
 
-- Perf 7 = “fast enough for scripts; VM v0.2 is measured but partial” (evidence §E1):
-  `range(n)` no-alloc path + sorted-input check + folding + O(log n) `**` in both
-  engines; VM covers slices/`is`/`?.`/`??`/typed/`switch` with ≈2x fib win but
-  ≈0.7x `for-in` and 7 remaining rejects (`go`/`chan`/`select`/`import`/`try`/
-  `defer`/`sleep`). Not JIT/LLVM-class; tying Go (8) would need full-VM coverage
-  with consistent wins. 7 holds (above Python for script ergonomics, below Go).
+- Perf 7 = “fast enough for scripts; VM v0.3 is measured on both benches but
+  partial” (evidence §E1 + v2.7 §E9): `range(n)` no-alloc path in *both*
+  engines + sorted-input check + folding + O(log n) `**` in both engines; VM
+  covers slices/`is`/`?.`/`??`/typed/`switch` + range-int `for-in` + `sleep` +
+  `try/catch`, beating the interpreter on fib (≈1.7–3.4x) *and* loops
+  (≈1.3–1.4x — the v0.2 loop regression is fixed), with 6 remaining rejects
+  (`go`/`chan`/`select`/`import`/`defer`/`struct`-decls/`try`-`finally`).
+  Not JIT/LLVM-class and not close: tying Go (8) would need full-VM coverage
+  (concurrency, `import`/`defer`, nominal checks) with consistent wins;
+  Rust/C/C++ (10) would need a native backend (LLVM/Cranelift/full AOT —
+  months of work, explicitly not started). 7 holds (above Python for script
+  ergonomics, below Go).
 - Types 8 = “union (`int|string`) + generic (`array<int>`) *annotations* +
   `struct`/`enum` *syntax* + `is`/`?.`/`??` + `ok`/`err` + enum-aware
   exhaustive-`switch` vet” (evidence §E2). No variadics/named params, no methods/
@@ -133,7 +140,7 @@ What the `.ks` 84 does and does not mean (read before citing 84; evidence for ev
   8 ties Go breadth-for-scripts; 9 would need methods/variadics/full-VM nominals.
 - Concurrency 9 = “interpreter `select`/`for-in`/`with_timeout`/`parallel`/
   `with_cancel` at Go spelling parity”. VM has none; no deterministic scheduler;
-  `--race` is vet + env (`main.go:793-809`), not instrumentation.
+  `--race` is vet + env (`main.go:804-816`), not instrumentation.
 - Stdlib 9 = “177 builtins breadth + extended-dialect depth” (evidence §E3 +
   v2.6 §E8): WS text frames, sqlite UPDATE/JOIN/ORDER/GROUP/LIMIT + WHERE with
   AND/OR + LIKE/NOT LIKE (`%`/`_`, OR looser than AND, no parens) +
