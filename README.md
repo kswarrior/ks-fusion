@@ -25,7 +25,7 @@ entry_backend = "backend/main.ks"
 entry_frontend = "frontend/main.ks"
 ```
 
-## Language v2.5 (.ks, 177 builtins)
+## Language v2.6 (.ks, 177 builtins)
 
 ```python
 # comments: # ...  // ...  /* multi-line */

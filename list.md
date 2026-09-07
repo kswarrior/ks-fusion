@@ -1,4 +1,4 @@
-# Missing List — v2.5 done (score 83/100 honest, see docs/vs.md v2.5 evidence + Corrections)
+# Missing List — v2.6 done (score 84/100 honest, see docs/vs.md v2.5 + v2.6 evidence + Corrections)
 
 > Source: `docs/vs.md` gaps + `docs/futures.md` roadmap + `plan/frontend.md` + `plan/tooling.md`.
 > Checked = exists today. Unchecked = missing. Score impact in brackets.
@@ -41,7 +41,7 @@
 
 - [x] 166 builtins (v2.1 97 + v2.4 52: http/regex/crypto/fs/process/time/db/log/concurrency/types)
 - [x] `http` (`http_get/post/serve`, headers, JSON codec) [+2 Stdlib done]
-- [x] `net/ws` TCP + WebSocket frames (RFC 6455) + extended SQL (UPDATE/JOIN/ORDER/GROUP) + postgres-compat + pipes/signals done v2.5 [holds Stdlib 9; +1 needs native DB]
+- [x] `net/ws` TCP + WebSocket frames (RFC 6455) + extended SQL (UPDATE/JOIN/ORDER/GROUP + OR/AND + LIKE/NOT LIKE) + postgres-compat + pipes/signals done v2.5–v2.6 [holds Stdlib 9; +1 needs native DB (transactions/indexes/prepared/server)]
 - [x] `fs` full (`stat/cp/mv/glob`, path joins) (done; `watch` left)
 - [x] `process` (`exec/shell/cwd/env_all`) (pipes/signals left)
 - [x] `time` (`format/parse/parts`) (ticker left)
@@ -67,8 +67,11 @@
 ## DX P2 (Tooling/Maturity)
 
 - [x] REPL (`fusion repl` history + multiline) (done v2.4)
-- [x] Full LSP (diagnostics/rename/format) + VS Code ext v0.2.0 done v2.5 [holds Tooling 9; +1 needs DAP/completion]
+- [x] Full LSP (diagnostics/rename/format/completion) + VS Code ext v0.3.0 done v2.5–v2.6 [holds Tooling 9; +1 needs DAP/time-profiler]
 - [x] Debugger (`fusion debug --break/--trace` + OnStmt hook, non-interactive) done v2.5 [holds Tooling 9]
+- [x] `.ks`-line profiler (`fusion profile [--top N]`, exact per-line counts) done v2.6 [holds Tooling 9; time-profiling left]
+- [x] Vendor-aware build cache (vendor swaps bust it) + `fusion build --bin --strip` (`-ldflags "-s -w"`) done v2.6 [holds Build 8]
+- [x] `--bin` E2E (`TestBuildBinE2E`) + in-repo CI (`.github/workflows/ci.yml`) + hygiene (`retest.log` removed) done v2.6 [+1 Maturity 8→9; TLS-server E2E left]
 - [x] Benchmarks (`fusion bench`) (done v2.4, criterion-style reports left)
 
 ## Interop P2

@@ -66,7 +66,7 @@
 | Binary | `fusion build --bin` single executable via `go build -trimpath` + `--target` GOOS/GOARCH passthrough + `--strip` + vendor-aware hash-skip cache + host `--cpuprofile`/`.ks`-line `fusion profile`/`fusion debug`; shebang still works | single static binary | single binary | binary | binary | needs node/runtime | needs python | needs julia runtime | needs node | needs php+server |
 | Best for | learning, automation, rules engines, small backends/services | APIs, DevOps, cloud | systems, WASM, games | OS, embedded | engines, trading, desktop | APIs, realtime, SSR | scripts, data, AI | numerics, science, matrices | fullstack React apps | monolith CRUD apps |
 
-See `docs/futures.md` for the roadmap (v2.5 header; §3 still lists P1/P2 boxes —
+See `docs/futures.md` for the roadmap (v2.6 header; §3 still lists P1/P2 boxes —
 `http/net-ws/fs/process/time/crypto/db/log` are implemented to the depth in §4,
 `publish/pull/yank` + `vendor/` + namespaces done file-local, `repl/bench/debug/`
 done with `debug` non-interactive, `run-web`/`build-js` done prototype-grade;
