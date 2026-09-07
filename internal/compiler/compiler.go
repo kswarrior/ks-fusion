@@ -472,7 +472,20 @@ func (c *compiler) compileStmt(st *frontend.Stmt) error {
 	case frontend.StmtGo:
 		return fmt.Errorf("line %d: `go` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
 	case frontend.StmtSleep:
-		return fmt.Errorf("line %d: `sleep` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
+		// `sleep ms` / `sleep(ms)`: call the sleep builtin, drop the nil.
+		// Mirrors backend StmtSleep (eval ms + toMillis); a nil Expr with
+		// SleepMs set is the parser's int-literal compat form.
+		c.emitGetGlobal("sleep", st.Line)
+		if st.Expr != nil {
+			if err := c.compileExpr(st.Expr); err != nil {
+				return err
+			}
+		} else {
+			c.emit(OpConst, c.addConst(Const{Kind: CKInt, Int: st.SleepMs}), st.Line)
+		}
+		c.emit(OpCall, 1, st.Line)
+		c.emit(OpPop, 0, st.Line)
+		return nil
 	case frontend.StmtImport:
 		return fmt.Errorf("line %d: `import` not yet supported by compiler v0.2 (runs in interpreter)", st.Line)
 	case frontend.StmtTry:

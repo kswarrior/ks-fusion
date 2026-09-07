@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -343,6 +344,7 @@ func (vm *VM) builtinsInit(_ *VM) {
 		"int":                bInt,
 		"float":              bFloat,
 		"type":               bType,
+		"sleep":              bSleep,
 		"__iter_len":         bIterLen,
 		"__iter_get":         bIterGet,
 		"__iter_key":         bIterKey,
@@ -1319,6 +1321,31 @@ func bType(args []Val) (Val, error) {
 		return Nil(), fmt.Errorf("type wants 1 arg, got %d", len(args))
 	}
 	return StrV(typeName(args[0])), nil
+}
+
+// bSleep mirrors backend.toMillis + bSleep: int/float ms >= 0 (nil and other
+// types are errors in both engines).
+func bSleep(args []Val) (Val, error) {
+	if len(args) != 1 {
+		return Nil(), fmt.Errorf("sleep wants 1 arg, got %d", len(args))
+	}
+	var ms int
+	switch a := args[0]; a.Kind {
+	case VInt:
+		if a.Int < 0 {
+			return Nil(), fmt.Errorf("bad sleep: want `sleep 500` (ms >= 0)")
+		}
+		ms = a.Int
+	case VFloat:
+		if a.Float < 0 {
+			return Nil(), fmt.Errorf("bad sleep: want `sleep 500` (ms >= 0)")
+		}
+		ms = int(a.Float)
+	default:
+		return Nil(), fmt.Errorf("bad sleep: want int ms, got %s", typeName(a))
+	}
+	time.Sleep(time.Duration(ms) * time.Millisecond)
+	return Nil(), nil
 }
 
 func sortedKeys(m map[string]Val) []string {
